@@ -1,0 +1,8 @@
+ultralytics
+opencv-python
+numpy
+fastapi
+uvicorn
+pillow
+python-multipart
+python-dotenv

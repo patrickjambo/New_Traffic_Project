@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database with PostGIS
+  database:
+    image: postgis/postgis:14-3.3
+    container_name: trafficguard_db
+    environment:
+      POSTGRES_DB: trafficguard
+      POSTGRES_USER: trafficguard_user
+      POSTGRES_PASSWORD: trafficguard_pass_123
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trafficguard_user -d trafficguard"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Node.js Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: trafficguard_backend
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - DB_HOST=database
+      - DB_PORT=5432
+      - DB_NAME=trafficguard
+      - DB_USER=trafficguard_user
+      - DB_PASSWORD=trafficguard_pass_123
+      - JWT_SECRET=trafficguard_secret_key_change_in_production
+      - AI_SERVICE_URL=http://ai_service:8000
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+      - backend_uploads:/app/uploads
+    depends_on:
+      database:
+        condition: service_healthy
+    command: npm run dev
+
+  # Python AI Service
+  ai_service:
+    build:
+      context: ./ai_service
+      dockerfile: Dockerfile
+    container_name: trafficguard_ai
+    environment:
+      - MODEL_PATH=./models/yolov8n.pt
+      - PORT=8000
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./ai_service:/app
+      - ai_models:/app/models
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+volumes:
+  postgres_data:
+  backend_uploads:
+  ai_models:
+
+networks:
+  default:
+    name: trafficguard_network

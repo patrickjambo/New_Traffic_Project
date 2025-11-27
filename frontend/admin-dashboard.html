@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard - TrafficGuard AI</title>
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="css/main.css">
+    <link rel="stylesheet" href="css/maps.css">
+
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <style>
+        .admin-header {
+            background: linear-gradient(135deg, #004d40 0%, #00695c 100%);
+            color: white;
+        }
+
+        .admin-header .logo-text {
+            color: white;
+            background: none;
+            -webkit-text-fill-color: white;
+        }
+
+        .admin-header .btn-outline {
+            border-color: white;
+            color: white;
+        }
+
+        .admin-header .btn-outline:hover {
+            background: white;
+            color: #004d40;
+        }
+
+        .admin-tabs {
+            display: flex;
+            border-bottom: 1px solid var(--gray-300);
+            padding: 0 var(--spacing-lg);
+            background: var(--light-color);
+        }
+
+        .tab {
+            padding: 12px 20px;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+            font-weight: 500;
+            color: var(--gray-700);
+            transition: all 0.2s;
+        }
+
+        .tab:hover {
+            color: var(--primary-color);
+        }
+
+        .tab.active {
+            border-bottom-color: var(--primary-color);
+            color: var(--primary-color);
+        }
+
+        .tab-content {
+            padding: var(--spacing-lg);
+        }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: var(--spacing-md);
+            margin-bottom: var(--spacing-xl);
+        }
+
+        .metric-card {
+            background: linear-gradient(135deg, #F8F9FA 0%, #FFFFFF 100%);
+            border: 1px solid var(--gray-300);
+            border-radius: var(--radius-lg);
+            padding: var(--spacing-lg);
+            transition: all 0.2s;
+        }
+
+        .metric-card:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-md);
+        }
+
+        .metric-value {
+            font-size: 32px;
+            font-weight: 700;
+            color: var(--primary-color);
+            margin-bottom: var(--spacing-xs);
+        }
+
+        .metric-label {
+            font-size: 14px;
+            color: var(--gray-700);
+        }
+
+        .activity-item {
+            padding: var(--spacing-md);
+            border-left: 3px solid var(--primary-color);
+            background: var(--gray-100);
+            border-radius: var(--radius-md);
+            margin-bottom: var(--spacing-md);
+        }
+
+        .activity-time {
+            font-size: 12px;
+            color: var(--gray-500);
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Header -->
+    <header class="header admin-header">
+        <div class="logo">
+            <span class="logo-icon">⚙️</span>
+            <span class="logo-text">TrafficGuard Admin</span>
+        </div>
+        <div class="header-info">
+            <div class="live-indicator">
+                <span class="pulse"></span>
+                <span>System Monitoring</span>
+            </div>
+        </div>
+        <div class="auth-buttons" id="user-info">
+            <span style="margin-right: 16px;">Administrator</span>
+            <button class="btn btn-outline" onclick="logout()">Logout</button>
+        </div>
+    </header>
+
+    <!-- Tabs -->
+    <div class="admin-tabs">
+        <div class="tab active" onclick="switchTab('dashboard')">Dashboard</div>
+        <div class="tab" onclick="switchTab('incidents')">Incidents</div>
+        <div class="tab" onclick="switchTab('users')">Users</div>
+        <div class="tab" onclick="switchTab('analytics')">Analytics</div>
+    </div>
+
+    <!-- Main Container -->
+    <div class="container" style="height: calc(100vh - 120px);">
+        <!-- Side Panel (Tabs Content) -->
+        <div class="side-panel" style="width: 500px;">
+            <!-- Dashboard Tab -->
+            <div id="dashboard-tab" class="tab-content">
+                <h3 style="margin-bottom: var(--spacing-lg);">System Overview</h3>
+
+                <div class="metrics-grid">
+                    <div class="metric-card">
+                        <div class="metric-value" id="total-incidents">0</div>
+                        <div class="metric-label">Total Incidents</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value" id="active-users">0</div>
+                        <div class="metric-label">Active Users</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value" id="resolved-today">0</div>
+                        <div class="metric-label">Resolved Today</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value" id="ai-accuracy">87%</div>
+                        <div class="metric-label">AI Accuracy</div>
+                    </div>
+                </div>
+
+                <h4 style="margin-bottom: var(--spacing-md);">Recent Activity</h4>
+                <div id="activity-list">
+                    <div class="activity-item">
+                        <div style="font-weight: 600; margin-bottom: 4px;">System Started</div>
+                        <div class="activity-time">Just now</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Incidents Tab -->
+            <div id="incidents-tab" class="tab-content" style="display: none;">
+                <h3 style="margin-bottom: var(--spacing-lg);">Incident Management</h3>
+
+                <div class="search-wrapper" style="margin-bottom: var(--spacing-lg);">
+                    <svg class="search-icon" width="20" height="20" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2">
+                        <circle cx="11" cy="11" r="8" />
+                        <path d="m21 21-4.35-4.35" />
+                    </svg>
+                    <input type="text" class="search-input" placeholder="Search incidents...">
+                </div>
+
+                <div class="incident-list" id="admin-incident-list">
+                    <div class="loading-state">
+                        <div class="spinner"></div>
+                        <p>Loading incidents...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Users Tab -->
+            <div id="users-tab" class="tab-content" style="display: none;">
+                <h3 style="margin-bottom: var(--spacing-lg);">User Management</h3>
+
+                <div class="traffic-summary">
+                    <div class="stat-card">
+                        <div class="stat-content">
+                            <div class="stat-label">Public Users</div>
+                            <div class="stat-value" id="public-users">0</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-content">
+                            <div class="stat-label">Police Officers</div>
+                            <div class="stat-value" id="police-users">0</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-content">
+                            <div class="stat-label">Administrators</div>
+                            <div class="stat-value" id="admin-users">0</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div style="margin-top: var(--spacing-lg);">
+                    <p style="color: var(--gray-700);">User management features coming soon...</p>
+                </div>
+            </div>
+
+            <!-- Analytics Tab -->
+            <div id="analytics-tab" class="tab-content" style="display: none;">
+                <h3 style="margin-bottom: var(--spacing-lg);">Analytics & Reports</h3>
+
+                <div class="metrics-grid">
+                    <div class="metric-card">
+                        <div class="metric-value">24hr</div>
+                        <div class="metric-label">Avg Response Time</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value">73%</div>
+                        <div class="metric-label">Resolution Rate</div>
+                    </div>
+                </div>
+
+                <div style="margin-top: var(--spacing-lg);">
+                    <button class="btn btn-primary" onclick="generateAnalyticsReport()">
+                        Generate Full Report
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Map Section -->
+        <div class="map-container">
+            <div id="traffic-map"></div>
+
+            <!-- Traffic Legend -->
+            <div class="traffic-legend">
+                <h4>System Status</h4>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #34A853;"></div>
+                    <span>All Systems Operational</span>
+                </div>
+                <div class="legend-separator"></div>
+                <h4>Incident Types</h4>
+                <div class="legend-item">
+                    <span class="incident-icon">🚗</span>
+                    <span>Congestion</span>
+                </div>
+                <div class="legend-item">
+                    <span class="incident-icon">🚨</span>
+                    <span>Accident</span>
+                </div>
+                <div class="legend-item">
+                    <span class="incident-icon">🚧</span>
+                    <span>Road Blockage</span>
+                </div>
+            </div>
+
+            <!-- Map Controls -->
+            <div class="map-controls">
+                <button class="control-btn" onclick="centerMap()" title="Center Map">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10" />
+                        <circle cx="12" cy="12" r="3" />
+                    </svg>
+                </button>
+                <button class="control-btn" onclick="refreshIncidents()" title="Refresh Data">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="23 4 23 10 17 10" />
+                        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification Toast -->
+    <div id="notification" class="notification"></div>
+
+    <!-- Scripts -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="js/app.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/map.js"></script>
+    <script src="js/incidents.js"></script>
+    <script src="js/websocket.js"></script>
+
+    <script>
+        // Admin-specific functionality
+
+        // Check if user is administrator
+        function checkAdminAuth() {
+            const userInfo = utils.getUserInfo();
+
+            if (!userInfo || userInfo.role !== 'admin') {
+                utils.showNotification('Access denied. Administrators only.', 'error');
+                setTimeout(() => {
+                    window.location.href = '/';
+                }, 2000);
+                return;
+            }
+
+            // Update header with user info
+            const userInfoElement = document.getElementById('user-info');
+            if (userInfoElement) {
+                userInfoElement.innerHTML = `
+                    <span style="margin-right: 16px;">Admin: ${userInfo.name}</span>
+                    <button class="btn btn-outline" onclick="logout()">Logout</button>
+                `;
+            }
+        }
+
+        // Switch tabs
+        function switchTab(tabName) {
+            // Hide all tabs
+            document.querySelectorAll('[id$="-tab"]').forEach(tab => {
+                tab.style.display = 'none';
+            });
+
+            // Show selected tab
+            const selectedTab = document.getElementById(tabName + '-tab');
+            if (selectedTab) {
+                selectedTab.style.display = 'block';
+            }
+
+            // Update active tab
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            event.target.classList.add('active');
+
+            // Load data for specific tabs
+            if (tabName === 'incidents') {
+                loadAdminIncidents();
+            } else if (tabName === 'users') {
+                loadUserStats();
+            }
+        }
+
+        // Load system metrics
+        async function loadSystemMetrics() {
+            try {
+                const response = await api.getSystemMetrics();
+
+                if (response.success) {
+                    const metrics = response.data;
+
+                    document.getElementById('total-incidents').textContent = metrics.totalIncidents || 0;
+                    document.getElementById('active-users').textContent = metrics.activeUsers || 0;
+                    document.getElementById('resolved-today').textContent = metrics.resolvedToday || 0;
+                    document.getElementById('ai-accuracy').textContent = (metrics.aiAccuracy || 87) + '%';
+                }
+            } catch (error) {
+                console.error('Error loading metrics:', error);
+
+                // Use mock data if API fails
+                document.getElementById('total-incidents').textContent = window.incidents?.length || 0;
+                document.getElementById('active-users').textContent = '24';
+                document.getElementById('resolved-today').textContent = '8';
+            }
+        }
+
+        // Load admin incidents view
+        function loadAdminIncidents() {
+            const container = document.getElementById('admin-incident-list');
+            if (!container) return;
+
+            if (!window.incidents || window.incidents.length === 0) {
+                container.innerHTML = '<div class="loading-state"><p>No incidents found</p></div>';
+                return;
+            }
+
+            container.innerHTML = '';
+            window.incidents.forEach(incident => {
+                const element = createIncidentElement(incident);
+                container.appendChild(element);
+            });
+        }
+
+        // Load user statistics
+        async function loadUserStats() {
+            try {
+                const response = await api.getUsers();
+
+                if (response.success) {
+                    const users = response.data;
+                    const publicCount = users.filter(u => u.role === 'public').length;
+                    const policeCount = users.filter(u => u.role === 'police').length;
+                    const adminCount = users.filter(u => u.role === 'admin').length;
+
+                    document.getElementById('public-users').textContent = publicCount;
+                    document.getElementById('police-users').textContent = policeCount;
+                    document.getElementById('admin-users').textContent = adminCount;
+                }
+            } catch (error) {
+                console.error('Error loading users:', error);
+                // Use mock data
+                document.getElementById('public-users').textContent = '18';
+                document.getElementById('police-users').textContent = '5';
+                document.getElementById('admin-users').textContent = '2';
+            }
+        }
+
+        // Generate analytics report
+        function generateAnalyticsReport() {
+            utils.showNotification('Generating comprehensive analytics report...', 'info');
+
+            setTimeout(() => {
+                utils.showNotification('Report generated successfully!', 'success');
+                // In production, this would download a PDF or open a new tab
+            }, 2000);
+        }
+
+        // Add activity log
+        function addActivityLog(message) {
+            const container = document.getElementById('activity-list');
+            if (!container) return;
+
+            const activityItem = document.createElement('div');
+            activityItem.className = 'activity-item';
+            activityItem.innerHTML = `
+                <div style="font-weight: 600; margin-bottom: 4px;">${message}</div>
+                <div class="activity-time">Just now</div>
+            `;
+
+            container.insertBefore(activityItem, container.firstChild);
+
+            // Keep only last 5 activities
+            while (container.children.length > 5) {
+                container.removeChild(container.lastChild);
+            }
+        }
+
+        // Override WebSocket listeners to add activity logs
+        if (window.socket) {
+            const originalSocket = window.socket;
+
+            originalSocket.on('new_incident', (incident) => {
+                addActivityLog(`New ${incident.type} reported at ${incident.location}`);
+            });
+
+            originalSocket.on('incident_updated', (update) => {
+                addActivityLog(`Incident #${update.incidentId} status changed to ${update.status}`);
+            });
+        }
+
+        // Initialize
+        checkAdminAuth();
+
+        // Load metrics after a delay
+        setTimeout(() => {
+            loadSystemMetrics();
+        }, 1500);
+
+        // Refresh metrics every minute
+        setInterval(loadSystemMetrics, 60000);
+    </script>
+</body>
+
+</html>

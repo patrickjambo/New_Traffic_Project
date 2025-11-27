@@ -147,7 +147,7 @@ async function refreshIncidents() {
     utils.showNotification('Incidents updated', 'success');
 }
 
-// Report incident (opens reporting interface)
+// Report incident (opens reporting modal)
 function reportIncident() {
     if (!utils.isAuthenticated()) {
         utils.showNotification('Please login to report an incident', 'warning');
@@ -155,42 +155,117 @@ function reportIncident() {
         return;
     }
 
-    // For now, show a simple prompt (you can create a proper modal later)
-    const type = prompt('Incident type (congestion/accident/blockage):');
-    const location = prompt('Location:');
-    const description = prompt('Description:');
+    // Show reporting modal
+    const modal = document.getElementById('reportModal') || createReportModal();
+    modal.style.display = 'block';
 
-    if (!type || !location) {
-        return;
+    // Reset form
+    const form = modal.querySelector('form');
+    if (form) form.reset();
+}
+
+// Create report incident modal
+function createReportModal() {
+    const modal = document.createElement('div');
+    modal.id = 'reportModal';
+    modal.className = 'modal';
+    modal.innerHTML = `
+        <div class="modal-overlay" onclick="closeReportModal()"></div>
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">
+                <h2>Report Traffic Incident</h2>
+                <button class="modal-close" onclick="closeReportModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="reportForm" onsubmit="handleReportSubmit(event)">
+                    <div class="form-group">
+                        <label>Incident Type *</label>
+                        <select name="type" required style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #ddd;">
+                            <option value="">Select type...</option>
+                            <option value="congestion">Traffic Congestion</option>
+                            <option value="accident">Accident</option>
+                            <option value="road_blockage">Road Blockage</option>
+                            <option value="hazard">Road Hazard</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Severity Level *</label>
+                        <select name="severity" required style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #ddd;">
+                            <option value="low">Low</option>
+                            <option value="medium">Medium</option>
+                            <option value="high">High</option>
+                            <option value="critical">Critical</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Location *</label>
+                        <input type="text" name="address" placeholder="Street or landmark" required style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #ddd; box-sizing: border-box;">
+                    </div>
+
+                    <div class="form-group">
+                        <label>Description</label>
+                        <textarea name="description" placeholder="Additional details..." rows="3" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #ddd; box-sizing: border-box; font-family: inherit;"></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label style="display: flex; align-items: center; gap: 8px;">
+                            <input type="checkbox" name="useCurrentLocation">
+                            Use my current location
+                        </label>
+                    </div>
+
+                    <div class="form-footer">
+                        <button type="button" class="btn btn-outline" onclick="closeReportModal()">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Submit Report</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+    return modal;
+}
+
+// Handle report form submission
+async function handleReportSubmit(event) {
+    event.preventDefault();
+
+    const form = event.target;
+    const formData = new FormData(form);
+
+    const incidentData = {
+        type: formData.get('type'),
+        severity: formData.get('severity'),
+        address: formData.get('address'),
+        description: formData.get('description') || null,
+        latitude: CONFIG.DEFAULT_CENTER[0],
+        longitude: CONFIG.DEFAULT_CENTER[1],
+    };
+
+    // Get current location if requested
+    if (formData.get('useCurrentLocation') && navigator.geolocation) {
+        try {
+            const position = await new Promise((resolve, reject) => {
+                navigator.geolocation.getCurrentPosition(resolve, reject);
+            });
+            incidentData.latitude = position.coords.latitude;
+            incidentData.longitude = position.coords.longitude;
+        } catch (error) {
+            console.log('Using default location');
+        }
     }
 
-    // Get current position or use default
-    if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-            async (position) => {
-                const incident = {
-                    type: type.toLowerCase(),
-                    location,
-                    description,
-                    latitude: position.coords.latitude,
-                    longitude: position.coords.longitude,
-                };
+    await submitIncident(incidentData);
+}
 
-                await submitIncident(incident);
-            },
-            async () => {
-                // Fallback to default coordinates
-                const incident = {
-                    type: type.toLowerCase(),
-                    location,
-                    description,
-                    latitude: CONFIG.DEFAULT_CENTER[0],
-                    longitude: CONFIG.DEFAULT_CENTER[1],
-                };
-
-                await submitIncident(incident);
-            }
-        );
+// Close report modal
+function closeReportModal() {
+    const modal = document.getElementById('reportModal');
+    if (modal) {
+        modal.style.display = 'none';
     }
 }
 

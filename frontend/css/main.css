@@ -909,3 +909,163 @@ form {
         width: 100%;
     }
 }
+
+/* Enhanced Modal Styles */
+.modal-body {
+    padding: var(--spacing-lg);
+    max-height: calc(90vh - 180px);
+    overflow-y: auto;
+}
+
+.modal-body form {
+    padding: 0;
+}
+
+.form-group textarea {
+    width: 100%;
+    padding: 12px 16px;
+    border: 2px solid var(--gray-300);
+    border-radius: var(--radius-md);
+    font-family: inherit;
+    font-size: 14px;
+    resize: vertical;
+    transition: all var(--transition-base);
+}
+
+.form-group textarea:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.modal-footer {
+    display: flex;
+    gap: var(--spacing-md);
+    justify-content: flex-end;
+    padding: var(--spacing-lg);
+    border-top: 1px solid var(--gray-300);
+}
+
+.modal-footer .btn {
+    margin: 0;
+}
+
+/* Button Group Styles */
+.btn-group {
+    display: flex;
+    gap: var(--spacing-sm);
+}
+
+.btn-group .btn {
+    flex: 1;
+}
+
+/* Loading Spinner */
+.spinner {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 3px solid rgba(255, 255, 255, 0.3);
+    border-top-color: white;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Form Input States */
+.form-group input:disabled,
+.form-group select:disabled,
+.form-group textarea:disabled {
+    background: var(--gray-100);
+    color: var(--gray-500);
+    cursor: not-allowed;
+}
+
+.form-group input.error,
+.form-group select.error,
+.form-group textarea.error {
+    border-color: var(--danger-color);
+}
+
+.form-error {
+    color: var(--danger-color);
+    font-size: 13px;
+    margin-top: 4px;
+}
+
+.form-success {
+    color: var(--success-color);
+    font-size: 13px;
+    margin-top: 4px;
+}
+
+/* Enhanced Button Styles */
+.btn-icon {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    padding: 10px 16px;
+}
+
+.btn-small {
+    padding: 8px 12px;
+    font-size: 13px;
+}
+
+.btn-large {
+    padding: 14px 24px;
+    font-size: 16px;
+}
+
+.btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Card Styles */
+.card {
+    background: white;
+    border-radius: var(--radius-lg);
+    padding: var(--spacing-lg);
+    box-shadow: var(--shadow-md);
+    transition: all var(--transition-base);
+}
+
+.card:hover {
+    box-shadow: var(--shadow-lg);
+    transform: translateY(-2px);
+}
+
+/* Badge Styles */
+.badge {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: var(--radius-full);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.badge-success {
+    background: rgba(17, 153, 142, 0.1);
+    color: var(--success-color);
+}
+
+.badge-danger {
+    background: rgba(235, 51, 73, 0.1);
+    color: var(--danger-color);
+}
+
+.badge-warning {
+    background: rgba(242, 153, 74, 0.1);
+    color: var(--warning-color);
+}
+
+.badge-info {
+    background: rgba(79, 172, 254, 0.1);
+    color: var(--info-color);
+}

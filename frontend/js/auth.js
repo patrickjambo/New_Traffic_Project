@@ -37,7 +37,6 @@ async function handleLogin(event) {
     const credentials = {
         email: formData.get('email'),
         password: formData.get('password'),
-        role: formData.get('role'),
     };
 
     // Show loading state
@@ -50,15 +49,21 @@ async function handleLogin(event) {
         const response = await api.login(credentials);
 
         if (response.success) {
+            const user = response.data.user;
+            const token = response.data.token;
+
             // Save token and user info
-            api.setToken(response.token);
-            utils.saveUserInfo(response.user);
+            api.setToken(token);
+            utils.saveUserInfo(user);
 
-            utils.showNotification('Login successful! Redirecting...', 'success');
+            utils.showNotification(`Login successful! Welcome, ${user.full_name}`, 'success');
 
-            // Redirect based on role
+            // Hide login modal
+            hideLogin();
+
+            // Route based on user role (returned from backend)
             setTimeout(() => {
-                switch (credentials.role) {
+                switch (user.role) {
                     case 'police':
                         window.location.href = '/police-dashboard.html';
                         break;
@@ -66,9 +71,10 @@ async function handleLogin(event) {
                         window.location.href = '/admin-dashboard.html';
                         break;
                     default:
-                        window.location.reload(); // Reload to show authenticated view
+                        // Public user stays on home page
+                        window.location.reload();
                 }
-            }, 1000);
+            }, 1500);
         }
     } catch (error) {
         console.error('Login error:', error);
@@ -87,11 +93,11 @@ async function handleRegistration(event) {
     const form = event.target;
     const formData = new FormData(form);
     const userData = {
-        name: formData.get('name'),
         email: formData.get('email'),
-        phone: formData.get('phone'),
         password: formData.get('password'),
-        role: 'public', // Default role for registration
+        fullName: formData.get('name'),
+        phone: formData.get('phone'),
+        role: formData.get('role') || 'public', // Allow role selection during registration
     };
 
     // Show loading state
@@ -106,13 +112,42 @@ async function handleRegistration(event) {
         if (response.success) {
             utils.showNotification('Registration successful! Please login.', 'success');
 
-            // Switch to login modal
-            setTimeout(() => {
-                hideRegistration();
-                showLogin();
+            // Auto-login after registration
+            const loginData = {
+                email: userData.email,
+                password: userData.password,
+            };
 
-                // Pre-fill email
-                document.getElementById('login-email').value = userData.email;
+            setTimeout(async () => {
+                try {
+                    const loginResponse = await api.login(loginData);
+                    if (loginResponse.success) {
+                        const user = loginResponse.data.user;
+                        api.setToken(loginResponse.data.token);
+                        utils.saveUserInfo(user);
+
+                        hideRegistration();
+                        utils.showNotification('Logged in successfully!', 'success');
+
+                        setTimeout(() => {
+                            switch (user.role) {
+                                case 'police':
+                                    window.location.href = '/police-dashboard.html';
+                                    break;
+                                case 'admin':
+                                    window.location.href = '/admin-dashboard.html';
+                                    break;
+                                default:
+                                    window.location.reload();
+                            }
+                        }, 1000);
+                    }
+                } catch (loginError) {
+                    console.log('Auto-login failed, user can login manually');
+                    hideRegistration();
+                    showLogin();
+                    document.getElementById('login-email').value = userData.email;
+                }
             }, 1500);
         }
     } catch (error) {
@@ -132,12 +167,21 @@ async function logout() {
     }
 
     try {
-        await api.logout();
+        // Attempt to notify backend
+        await api.logout().catch(() => {
+            // Logout might fail if session expired, continue anyway
+        });
     } catch (error) {
         console.error('Logout error:', error);
     } finally {
-        // Clear local data and redirect
-        utils.clearUserData();
+        // Clear local data
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+
+        // Clear API token
+        api.setToken(null);
+
+        // Redirect to home page
         window.location.href = '/';
     }
 }

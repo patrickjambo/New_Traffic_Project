@@ -11,6 +11,7 @@ require('dotenv').config();
 // Routes
 const authRoutes = require('./routes/auth');
 const incidentRoutes = require('./routes/incidents');
+const autoAnalysisRoutes = require('./routes/autoAnalysis');
 
 // Initialize app
 const app = express();
@@ -42,7 +43,14 @@ app.use(morgan('dev')); // Logging
 const limiter = rateLimit({
     windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
     max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
-    message: 'Too many requests from this IP, please try again later.',
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: (req, res) => {
+        res.status(429).json({
+            success: false,
+            message: 'Too many requests from this IP, please try again later.',
+        });
+    },
 });
 app.use('/api/', limiter);
 
@@ -56,8 +64,10 @@ app.use(express.static(path.join(__dirname, '../../frontend')));
 // API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/incidents', incidentRoutes);
+app.use('/api/auto-analysis', autoAnalysisRoutes);
 app.use('/api/police', require('./routes/police'));
 app.use('/api/admin', require('./routes/admin'));
+app.use('/api/dashboard', require('./routes/dashboard'));
 
 // Health check endpoint
 app.get('/health', (req, res) => {

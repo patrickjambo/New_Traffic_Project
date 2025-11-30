@@ -73,4 +73,5 @@ module.exports = {
     authenticate,
     authorize,
     optionalAuth,
+    protect: authenticate, // Alias for compatibility
 };

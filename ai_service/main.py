@@ -10,10 +10,49 @@ from traffic_analyzer import TrafficAnalyzer
 load_dotenv()
 
 # Initialize FastAPI app
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Lifespan context manager for startup and shutdown events
+    """
+    # Startup
+    print("""
+🤖 TrafficGuard AI Service
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ AI Service initialized
+🧠 Model: YOLOv8n (nano)
+📊 Ready for traffic analysis
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    """)
+    
+    # Download YOLOv8n model if not exists
+    models_dir = Path("./models")
+    models_dir.mkdir(exist_ok=True)
+    
+    model_path = models_dir / "yolov8n.pt"
+    if not model_path.exists():
+        print("📥 Downloading YOLOv8n model... (this may take a moment)")
+        # Model will auto-download on first use by Ultralytics
+        from ultralytics import YOLO
+        YOLO('yolov8n.pt')  # Auto-downloads
+        print("✅ Model downloaded successfully")
+        
+    yield
+    
+    # Shutdown
+    # Clean up temp directory
+    if TEMP_DIR.exists():
+        shutil.rmtree(TEMP_DIR)
+    print("👋 AI Service shutting down...")
+
+# Initialize FastAPI app
 app = FastAPI(
     title="TrafficGuard AI Service",
     description="AI-powered traffic analysis for incident detection",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # CORS middleware
@@ -110,37 +149,61 @@ async def analyze_traffic(video: UploadFile = File(...)):
         if temp_path.exists():
             temp_path.unlink()
 
-@app.on_event("startup")
-async def startup_event():
-    """Initialize on startup"""
-    print("""
-🤖 TrafficGuard AI Service
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-✅ AI Service initialized
-🧠 Model: YOLOv8n (nano)
-📊 Ready for traffic analysis
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    """)
+@app.post("/ai/quick-analyze")
+async def quick_analyze(video: UploadFile = File(...)):
+    """
+    Quick analysis for auto-captured short clips (5-second videos)
+    Optimized for faster processing and relevance detection
     
-    # Download YOLOv8n model if not exists
-    models_dir = Path("./models")
-    models_dir.mkdir(exist_ok=True)
+    Args:
+        video: Short video file (mp4, mov, avi, mkv)
+        
+    Returns:
+        dict with quick analysis results including has_relevant_data flag
+    """
     
-    model_path = models_dir / "yolov8n.pt"
-    if not model_path.exists():
-        print("📥 Downloading YOLOv8n model... (this may take a moment)")
-        # Model will auto-download on first use by Ultralytics
-        from ultralytics import YOLO
-        YOLO('yolov8n.pt')  # Auto-downloads
-        print("✅ Model downloaded successfully")
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Cleanup on shutdown"""
-    # Clean up temp directory
-    if TEMP_DIR.exists():
-        shutil.rmtree(TEMP_DIR)
-    print("👋 AI Service shutting down...")
+    # Validate file type
+    allowed_extensions = ['.mp4', '.mov', '.avi', '.mkv']
+    file_ext = Path(video.filename).suffix.lower()
+    
+    if file_ext not in allowed_extensions:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid file type. Allowed: {', '.join(allowed_extensions)}"
+        )
+    
+    # Save uploaded file temporarily
+    temp_path = TEMP_DIR / f"quick_{int(time.time())}_{video.filename}"
+    
+    try:
+        # Save file
+        with temp_path.open("wb") as buffer:
+            shutil.copyfileobj(video.file, buffer)
+        
+        # Quick analysis optimized for short clips
+        start_time = time.time()
+        result = analyzer.analyze_short_clip(str(temp_path))
+        analysis_time = time.time() - start_time
+        
+        # Add analysis metadata
+        result['analysis_time'] = round(analysis_time, 2)
+        result['video_size_mb'] = round(temp_path.stat().st_size / (1024 * 1024), 2)
+        
+        return {
+            "success": True,
+            "data": result
+        }
+    
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Quick analysis failed: {str(e)}"
+        )
+    
+    finally:
+        # Clean up temp file
+        if temp_path.exists():
+            temp_path.unlink()
 
 if __name__ == "__main__":
     import uvicorn

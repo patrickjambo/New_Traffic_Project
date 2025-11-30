@@ -1,10 +1,18 @@
+import 'package:flutter/foundation.dart';
+
 class AppConfig {
   // API Configuration
-  static const String baseUrl = 'http://10.0.2.2:3000'; // Android emulator
-  // For iOS simulator use: 'http://localhost:3000'
-  // For real device use your computer's IP: 'http://192.168.x.x:3000'
-  
-  static const String aiServiceUrl = 'http://10.0.2.2:8000';
+  static String get baseUrl {
+    if (kIsWeb) return 'http://localhost:3000';
+    if (defaultTargetPlatform == TargetPlatform.android) return 'http://10.0.2.2:3000';
+    return 'http://localhost:3000';
+  }
+
+  static String get aiServiceUrl {
+    if (kIsWeb) return 'http://localhost:8000';
+    if (defaultTargetPlatform == TargetPlatform.android) return 'http://10.0.2.2:8000';
+    return 'http://localhost:8000';
+  }
   
   // Google Maps API Key
   static const String googleMapsApiKey = 'YOUR_GOOGLE_MAPS_API_KEY_HERE';

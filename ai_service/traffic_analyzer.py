@@ -69,6 +69,85 @@ class TrafficAnalyzer:
         result = self._consolidate_results(frame_analyses, fps, total_frames)
         return result
     
+    def analyze_short_clip(self, video_path: str) -> Dict:
+        """
+        Quick analysis optimized for 5-second clips from auto-capture
+        
+        Args:
+            video_path: Path to short video file
+            
+        Returns:
+            dict with quick analysis results including has_relevant_data flag
+        """
+        cap = cv2.VideoCapture(video_path)
+        
+        if not cap.isOpened():
+            raise ValueError(f"Could not open video file: {video_path}")
+        
+        frame_count = 0
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        
+        frame_analyses = []
+        
+        # Process every 2nd frame for faster analysis
+        frame_skip = 2
+        
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                break
+            
+            if frame_count % frame_skip == 0:
+                analysis = self._analyze_frame(frame, frame_count)
+                if analysis:
+                    frame_analyses.append(analysis)
+            
+            frame_count += 1
+        
+        cap.release()
+        
+        # Quick relevance check
+        has_relevant_data = self._has_relevant_traffic_data(frame_analyses)
+        
+        if not has_relevant_data:
+            return {
+                'incident_detected': False,
+                'has_relevant_data': False,
+                'incident_type': 'none',
+                'confidence': 0.0,
+                'vehicle_count': 0,
+            }
+        
+        # Full analysis if relevant data found
+        result = self._consolidate_results(frame_analyses, fps, total_frames)
+        result['has_relevant_data'] = True
+        
+        return result
+    
+    def _has_relevant_traffic_data(self, frame_analyses: List[Dict]) -> bool:
+        """
+        Check if video contains relevant traffic data worth storing
+        
+        Args:
+            frame_analyses: List of frame analysis results
+            
+        Returns:
+            True if video has traffic activity, False otherwise
+        """
+        if not frame_analyses:
+            return False
+        
+        # Check average vehicle count
+        vehicle_counts = [f['vehicle_count'] for f in frame_analyses]
+        avg_vehicles = np.mean(vehicle_counts)
+        max_vehicles = np.max(vehicle_counts)
+        
+        # Consider relevant if:
+        # - Average vehicles >= 3 (some traffic activity)
+        # - OR max vehicles >= 5 (peak traffic moment)
+        return avg_vehicles >= 3 or max_vehicles >= 5
+    
     def _analyze_frame(self, frame: np.ndarray, frame_id: int) -> Dict:
         """Analyze a single frame"""
         # Run YOLOv8 detection

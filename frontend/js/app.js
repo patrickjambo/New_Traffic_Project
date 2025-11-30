@@ -220,6 +220,33 @@ const utils = {
 // Initialize API client
 const api = new APIClient(CONFIG.API_URL);
 
+// Check if user is already logged in and redirect if necessary
+document.addEventListener('DOMContentLoaded', function() {
+    const user = localStorage.getItem('user');
+    const token = localStorage.getItem('token');
+    
+    if (user && token) {
+        try {
+            const userData = JSON.parse(user);
+            console.log('User already logged in:', userData.full_name, 'Role:', userData.role);
+            
+            // Set the token in API client
+            api.setToken(token);
+            
+            // If they're police or admin, redirect to their dashboard
+            if (userData.role === 'police' && window.location.pathname !== '/police-dashboard.html') {
+                window.location.href = '/police-dashboard.html';
+            } else if (userData.role === 'admin' && window.location.pathname !== '/admin-dashboard.html') {
+                window.location.href = '/admin-dashboard.html';
+            }
+            // Public users can stay on home page
+        } catch (e) {
+            console.error('Error parsing user data:', e);
+            localStorage.removeItem('user');
+        }
+    }
+});
+
 // Export for use in other scripts
 window.CONFIG = CONFIG;
 window.api = api;

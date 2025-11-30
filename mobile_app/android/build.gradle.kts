@@ -1,7 +1,19 @@
+import org.gradle.api.tasks.compile.JavaCompile
+import org.gradle.jvm.toolchain.JavaLanguageVersion
+import org.gradle.jvm.toolchain.JavaToolchainService
+
 allprojects {
     repositories {
         google()
         mavenCentral()
+    }
+    
+    // Force all JavaCompile tasks to use JDK 17 toolchain
+    tasks.withType<JavaCompile>().configureEach {
+        val javaToolchains = project.extensions.getByType(JavaToolchainService::class.java)
+        javaCompiler.set(javaToolchains.compilerFor {
+            languageVersion.set(JavaLanguageVersion.of(17))
+        })
     }
 }
 

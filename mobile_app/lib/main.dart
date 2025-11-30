@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'screens/splash_screen.dart';
 import 'screens/login_screen.dart';
+import 'screens/register_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/map_screen.dart';
 import 'screens/report_screen.dart';
 import 'screens/profile_screen.dart';
+import 'screens/auto_capture_screen.dart';
 
 void main() {
   runApp(const TrafficGuardApp());
@@ -46,10 +48,12 @@ class TrafficGuardApp extends StatelessWidget {
       routes: {
         '/': (context) => const SplashScreen(),
         '/login': (context) => const LoginScreen(),
+        '/register': (context) => const RegisterScreen(),
         '/home': (context) => const HomeScreen(),
         '/map': (context) => const MapScreen(),
         '/report': (context) => const ReportScreen(),
         '/profile': (context) => const ProfileScreen(),
+        '/auto-capture': (context) => const AutoCaptureScreen(),
       },
     );
   }

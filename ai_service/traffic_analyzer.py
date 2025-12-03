@@ -42,31 +42,47 @@ class TrafficAnalyzer:
         if not cap.isOpened():
             raise ValueError(f"Could not open video file: {video_path}")
         
-        frame_count = 0
+        # Validate video has frames
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         fps = cap.get(cv2.CAP_PROP_FPS)
         
+        if total_frames <= 0 or fps <= 0:
+            cap.release()
+            raise ValueError(f"Invalid video file: {video_path} (frames={total_frames}, fps={fps})")
+        
+        print(f"🎥 Video info: {total_frames} frames @ {fps} FPS")
+        
+        frame_count = 0
         vehicle_detections = []
         frame_analyses = []
         
-        while cap.isOpened():
-            ret, frame = cap.read()
-            if not ret:
-                break
-            
-            # Process every nth frame for efficiency
-            if frame_count % self.frame_skip == 0:
-                analysis = self._analyze_frame(frame, frame_count)
-                if analysis:
-                    frame_analyses.append(analysis)
-                    vehicle_detections.append(analysis['vehicle_count'])
-            
-            frame_count += 1
+        try:
+            while cap.isOpened():
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                
+                # Validate frame
+                if frame is None or frame.size == 0:
+                    continue
+                
+                # Process every nth frame for efficiency
+                if frame_count % self.frame_skip == 0:
+                    analysis = self._analyze_frame(frame, frame_count)
+                    if analysis:
+                        frame_analyses.append(analysis)
+                        vehicle_detections.append(analysis['vehicle_count'])
+                
+                frame_count += 1
+        finally:
+            cap.release()
         
-        cap.release()
+        if frame_count == 0:
+            raise ValueError(f"No frames could be read from video: {video_path}")
         
         # Consolidate results
         result = self._consolidate_results(frame_analyses, fps, total_frames)
+        result['frames_processed'] = frame_count
         return result
     
     def analyze_short_clip(self, video_path: str) -> Dict:

@@ -221,29 +221,76 @@ const utils = {
 const api = new APIClient(CONFIG.API_URL);
 
 // Check if user is already logged in and redirect if necessary
-document.addEventListener('DOMContentLoaded', function() {
-    const user = localStorage.getItem('user');
+function checkAuthAndRedirect() {
     const token = localStorage.getItem('token');
+    const user = localStorage.getItem('user');
+    const currentPageRole = window.currentPageRole || 'public';
     
-    if (user && token) {
+    let userRole = 'public';
+    if (user) {
         try {
             const userData = JSON.parse(user);
-            console.log('User already logged in:', userData.full_name, 'Role:', userData.role);
-            
-            // Set the token in API client
-            api.setToken(token);
-            
-            // If they're police or admin, redirect to their dashboard
-            if (userData.role === 'police' && window.location.pathname !== '/police-dashboard.html') {
-                window.location.href = '/police-dashboard.html';
-            } else if (userData.role === 'admin' && window.location.pathname !== '/admin-dashboard.html') {
-                window.location.href = '/admin-dashboard.html';
-            }
-            // Public users can stay on home page
+            userRole = userData.role || 'public';
         } catch (e) {
             console.error('Error parsing user data:', e);
-            localStorage.removeItem('user');
         }
+    }
+    
+    console.log('🔐 Auth Check:');
+    console.log('- Token:', token ? 'Present' : 'Missing');
+    console.log('- User Role:', userRole);
+    console.log('- Current Page Role:', currentPageRole);
+    console.log('- URL:', window.location.href);
+    
+    // EMERGENCY STOP - Uncomment this line to prevent ALL redirects for debugging
+    // return;
+    
+    // If no token, stay on public page
+    if (!token) {
+        if (currentPageRole !== 'public') {
+            console.log('⚠️ No token, redirecting to home');
+            // Add 3 second delay so you can see the console
+            setTimeout(() => {
+                window.location.replace('http://localhost:8080/index.html');
+            }, 3000);
+        }
+        return;
+    }
+    
+    // Check if we're on the correct page
+    if (userRole === currentPageRole) {
+        console.log('✅ Correct page for role:', userRole);
+        console.log('✅ NO REDIRECT NEEDED - Staying on this page');
+        return; // Already on correct page
+    }
+    
+    // Redirect to correct page
+    console.log('🔄 Wrong page for role. Will redirect in 3 seconds...');
+    console.log('🔄 From:', currentPageRole, 'To:', userRole);
+    
+    // Add 3 second delay so you can see what's happening
+    setTimeout(() => {
+        if (userRole === 'admin' && currentPageRole !== 'admin') {
+            console.log('🔄 NOW REDIRECTING TO ADMIN DASHBOARD');
+            window.location.replace('http://localhost:8080/admin-dashboard.html');
+        } else if (userRole === 'police' && currentPageRole !== 'police') {
+            console.log('🔄 NOW REDIRECTING TO POLICE DASHBOARD');
+            window.location.replace('http://localhost:8080/police-dashboard.html');
+        } else if (userRole === 'public' && currentPageRole !== 'public') {
+            console.log('🔄 NOW REDIRECTING TO HOME PAGE');
+            window.location.replace('http://localhost:8080/index.html');
+        }
+    }, 3000);
+}
+
+// Run auth check on page load
+document.addEventListener('DOMContentLoaded', function() {
+    checkAuthAndRedirect();
+    
+    // Set API token if available
+    const token = localStorage.getItem('token');
+    if (token) {
+        api.setToken(token);
     }
 });
 

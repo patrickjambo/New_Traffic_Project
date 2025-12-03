@@ -24,13 +24,18 @@ const upload = multer({
         fileSize: 10 * 1024 * 1024, // 10MB for auto-captured clips
     },
     fileFilter: (req, file, cb) => {
-        const allowedTypes = /mp4|mov|avi|mkv/;
-        const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-        const mimetype = allowedTypes.test(file.mimetype);
-
-        if (mimetype && extname) {
+        // Accept ANY video MIME type or common video extensions
+        const isVideoMime = file.mimetype && file.mimetype.startsWith('video/');
+        const isVideoExt = /\.(mp4|mov|avi|mkv|3gp|webm|flv)$/i.test(file.originalname);
+        
+        if (isVideoMime || isVideoExt) {
+            console.log('✅ Video accepted:', file.originalname, file.mimetype);
             return cb(null, true);
         } else {
+            console.log('❌ File rejected:', {
+                originalname: file.originalname,
+                mimetype: file.mimetype
+            });
             cb(new Error('Only video files are allowed'));
         }
     }

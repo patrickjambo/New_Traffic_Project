@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
 import os
 import time
@@ -6,6 +6,7 @@ import shutil
 from pathlib import Path
 from dotenv import load_dotenv
 from traffic_analyzer import TrafficAnalyzer
+from enhanced_traffic_analyzer import EnhancedTrafficAnalyzer
 
 load_dotenv()
 
@@ -64,8 +65,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize traffic analyzer
+# Initialize traffic analyzers
 analyzer = TrafficAnalyzer()
+enhanced_analyzer = EnhancedTrafficAnalyzer()  # For screen video detection
 
 # Create temp directory for uploads
 TEMP_DIR = Path("./temp_videos")
@@ -94,19 +96,23 @@ async def health_check():
     }
 
 @app.post("/ai/analyze-traffic")
-async def analyze_traffic(video: UploadFile = File(...)):
+async def analyze_traffic(
+    video: UploadFile = File(...),
+    test_mode: bool = Form(False)
+):
     """
     Analyze traffic video for incident detection
     
     Args:
-        video: Video file (mp4, mov, avi, mkv)
+        video: Video file (mp4, mov, avi, mkv, webm)
+        test_mode: Enable screen video detection (for YouTube recordings)
         
     Returns:
         dict with analysis results
     """
     
     # Validate file type
-    allowed_extensions = ['.mp4', '.mov', '.avi', '.mkv']
+    allowed_extensions = ['.mp4', '.mov', '.avi', '.mkv', '.webm']
     file_ext = Path(video.filename).suffix.lower()
     
     if file_ext not in allowed_extensions:
@@ -123,10 +129,16 @@ async def analyze_traffic(video: UploadFile = File(...)):
         with temp_path.open("wb") as buffer:
             shutil.copyfileobj(video.file, buffer)
         
-        # Analyze video
-        start_time = time.time()
-        result = analyzer.analyze_video(str(temp_path))
-        analysis_time = time.time() - start_time
+        # Choose analyzer based on test_mode
+        if test_mode:
+            print(f"🧪 Test mode: Using enhanced analyzer for screen video")
+            start_time = time.time()
+            result = enhanced_analyzer.analyze_video(str(temp_path), test_mode=True)
+            analysis_time = time.time() - start_time
+        else:
+            start_time = time.time()
+            result = analyzer.analyze_video(str(temp_path))
+            analysis_time = time.time() - start_time
         
         # Add analysis metadata
         result['analysis_time'] = round(analysis_time, 2)
@@ -156,14 +168,14 @@ async def quick_analyze(video: UploadFile = File(...)):
     Optimized for faster processing and relevance detection
     
     Args:
-        video: Short video file (mp4, mov, avi, mkv)
+        video: Short video file (mp4, mov, avi, mkv, webm)
         
     Returns:
         dict with quick analysis results including has_relevant_data flag
     """
     
     # Validate file type
-    allowed_extensions = ['.mp4', '.mov', '.avi', '.mkv']
+    allowed_extensions = ['.mp4', '.mov', '.avi', '.mkv', '.webm']
     file_ext = Path(video.filename).suffix.lower()
     
     if file_ext not in allowed_extensions:

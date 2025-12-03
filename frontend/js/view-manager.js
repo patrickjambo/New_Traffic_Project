@@ -93,9 +93,12 @@ const ViewManager = {
                 if (typeof refreshIncidents === 'function') {
                     refreshIncidents();
                 }
-                if (typeof centerMap === 'function') {
-                    centerMap();
-                }
+                // Center map after a short delay to ensure it's initialized
+                setTimeout(() => {
+                    if (typeof centerMap === 'function') {
+                        centerMap();
+                    }
+                }, 100);
                 break;
         }
     },

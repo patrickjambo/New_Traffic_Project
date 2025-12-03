@@ -48,7 +48,7 @@ class _HomeScreenState extends State<HomeScreen> {
           IconButton(
             icon: const Icon(Icons.notifications),
             onPressed: () {
-              // TODO: Show notifications
+              Navigator.of(context).pushNamed('/notifications');
             },
           ),
         ],
@@ -126,6 +126,59 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
         const SizedBox(height: 16),
+        
+        // Emergency Report Card
+        Card(
+          color: Colors.red.shade50,
+          child: InkWell(
+            onTap: () {
+              Navigator.of(context).pushNamed('/emergency-report');
+            },
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.red,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(
+                      Icons.emergency_share,
+                      color: Colors.white,
+                      size: 28,
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Report Emergency',
+                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.red.shade900,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Immediate assistance for critical situations',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Colors.red.shade700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(Icons.arrow_forward_ios, size: 16, color: Colors.red.shade700),
+                ],
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
         
         // Auto Monitor Card
         Card(

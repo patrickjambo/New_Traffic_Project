@@ -154,4 +154,114 @@ class IncidentService {
       return {'success': false, 'message': 'Network error: $e'};
     }
   }
+
+  /// Get incidents reported by current user
+  Future<Map<String, dynamic>> getUserIncidents({
+    int limit = 20,
+    int offset = 0,
+  }) async {
+    try {
+      final token = await _authService.getToken();
+      if (token == null) {
+        return {'success': false, 'message': 'Not authenticated'};
+      }
+
+      final queryParams = {
+        'limit': limit.toString(),
+        'offset': offset.toString(),
+      };
+
+      final uri = Uri.parse('${AppConfig.baseUrl}${AppConfig.nearbyIncidentsEndpoint}/my-history')
+          .replace(queryParameters: queryParams);
+
+      final response = await http.get(
+        uri,
+        headers: {
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        return {'success': true, 'data': data['data']};
+      } else {
+        return {'success': false, 'message': 'Failed to fetch history'};
+      }
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  /// Upload video for AI analysis and automatic incident creation
+  /// This uses AI to detect incidents, determine severity, and create database entry automatically
+  Future<Map<String, dynamic>> analyzeVideoAndCreateIncident({
+    required File videoFile,
+    required double latitude,
+    required double longitude,
+    Function(double)? onUploadProgress,
+  }) async {
+    try {
+      final token = await _authService.getToken();
+      
+      var request = http.MultipartRequest(
+        'POST',
+        Uri.parse('${AppConfig.baseUrl}${AppConfig.nearbyIncidentsEndpoint}/analyze-video'),
+      );
+
+      // Add headers
+      if (token != null) {
+        request.headers['Authorization'] = 'Bearer $token';
+      }
+
+      // Add location data
+      request.fields['latitude'] = latitude.toString();
+      request.fields['longitude'] = longitude.toString();
+
+      // Add video file
+      request.files.add(
+        await http.MultipartFile.fromPath('video', videoFile.path),
+      );
+
+      // Send request
+      final streamedResponse = await request.send();
+      
+      // Track upload progress if callback provided
+      if (onUploadProgress != null) {
+        streamedResponse.stream.listen(
+          (value) {
+            // Calculate progress percentage
+            final progress = (value.length / videoFile.lengthSync()) * 100;
+            onUploadProgress(progress.clamp(0, 100));
+          },
+        );
+      }
+
+      final response = await http.Response.fromStream(streamedResponse);
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        return {
+          'success': true,
+          'data': data['data'],
+          'message': data['message'] ?? 'Video analyzed successfully',
+        };
+      } else if (response.statusCode == 503) {
+        return {
+          'success': false,
+          'message': 'AI service is currently unavailable. Please try again later.',
+        };
+      } else {
+        final error = json.decode(response.body);
+        return {
+          'success': false,
+          'message': error['message'] ?? 'Failed to analyze video',
+        };
+      }
+    } catch (e) {
+      return {
+        'success': false,
+        'message': 'Network error: $e',
+      };
+    }
+  }
 }

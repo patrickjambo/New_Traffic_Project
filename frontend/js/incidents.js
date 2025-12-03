@@ -28,6 +28,12 @@ function displayIncidents(incidentList) {
     // Clear existing incidents
     container.innerHTML = '';
 
+    // Ensure incidentList is an array
+    if (!Array.isArray(incidentList)) {
+        console.warn('incidentList is not an array:', incidentList);
+        incidentList = [];
+    }
+
     if (incidentList.length === 0) {
         container.innerHTML = `
             <div class="loading-state">

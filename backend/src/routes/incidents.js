@@ -7,9 +7,37 @@ const {
     getNearbyIncidents,
     getIncidentById,
     updateIncidentStatus,
+    getUserIncidents,
 } = require('../controllers/incidentController');
+const { analyzeVideoAndCreateIncident, testIncidentDetection } = require('../controllers/aiAnalysisController');
 
 const router = express.Router();
+
+/**
+ * @route   POST /api/incidents/test-detection
+ * @desc    Test endpoint to simulate incident detection (bypasses AI)
+ * @access  Public (for testing only)
+ */
+router.post('/test-detection', testIncidentDetection);
+
+/**
+ * @route   GET /api/incidents/my-history
+ * @desc    Get incidents reported by current user
+ * @access  Private
+ */
+router.get('/my-history', authenticate, getUserIncidents);
+
+/**
+ * @route   POST /api/incidents/analyze-video
+ * @desc    Upload video for AI analysis and automatic incident creation
+ * @access  Public (can be anonymous)
+ */
+router.post(
+    '/analyze-video',
+    optionalAuth,
+    upload.single('video'),
+    analyzeVideoAndCreateIncident
+);
 
 /**
  * @route   POST /api/incidents/report

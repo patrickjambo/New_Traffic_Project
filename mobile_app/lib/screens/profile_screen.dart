@@ -159,27 +159,37 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _buildMenuItem(
           icon: Icons.notifications,
           title: 'Notifications',
-          onTap: () {},
+          onTap: () {
+            Navigator.of(context).pushNamed('/notifications');
+          },
         ),
         _buildMenuItem(
           icon: Icons.history,
           title: 'Report History',
-          onTap: () {},
+          onTap: () {
+            Navigator.of(context).pushNamed('/history');
+          },
         ),
         _buildMenuItem(
           icon: Icons.settings,
           title: 'Settings',
-          onTap: () {},
+          onTap: () {
+            Navigator.of(context).pushNamed('/settings');
+          },
         ),
         _buildMenuItem(
           icon: Icons.help,
           title: 'Help & Support',
-          onTap: () {},
+          onTap: () {
+            Navigator.of(context).pushNamed('/help');
+          },
         ),
         _buildMenuItem(
           icon: Icons.info,
           title: 'About',
-          onTap: () {},
+          onTap: () {
+            Navigator.of(context).pushNamed('/about');
+          },
         ),
         const SizedBox(height: 16),
         

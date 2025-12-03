@@ -2,6 +2,7 @@ import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 import 'package:location/location.dart';
 import 'dart:io';
 import 'dart:async';
@@ -23,8 +24,12 @@ class AutoCaptureService {
   
   // Statistics
   int videosCaptured = 0;
+  int videosUploaded = 0;
   int incidentsDetected = 0;
   String? lastError;
+  
+  // Callback for UI updates
+  Function(int captured, int uploaded, int incidents)? onStatsUpdate;
 
   bool get isRunning => _isRunning;
   bool get isRecording => _isRecording;
@@ -158,10 +163,32 @@ class AutoCaptureService {
       final videoFile = await _cameraController!.stopVideoRecording();
       _isRecording = false;
       
-      videosCaptured++;
+      // ✅ Wait for file to be fully written to disk
+      await Future.delayed(const Duration(milliseconds: 500));
       
-      // Upload to backend
-      await _uploadVideo(File(videoFile.path));
+      final file = File(videoFile.path);
+      
+      // Verify file exists and has content
+      if (!await file.exists()) {
+        print('❌ Video file does not exist: ${videoFile.path}');
+        return;
+      }
+      
+      final fileSize = await file.length();
+      if (fileSize == 0) {
+        print('❌ Video file is empty: ${videoFile.path}');
+        await file.delete();
+        return;
+      }
+      
+      print('✅ Video file ready: ${fileSize} bytes');
+      
+      // ✅ INCREMENT COUNTER IMMEDIATELY (don't wait for upload)
+      videosCaptured++;
+      onStatsUpdate?.call(videosCaptured, videosUploaded, incidentsDetected);
+      
+      // 🚀 Upload in background (don't block next capture)
+      _uploadVideo(file);
       
     } catch (e) {
       _isRecording = false;
@@ -179,8 +206,8 @@ class AutoCaptureService {
       // Get auth token
       final token = await _authService.getToken();
       
-      // Prepare multipart request
-      final uri = Uri.parse('${AppConfig.baseUrl}/api/auto-analysis/analyze');
+      // Prepare multipart request - USE CORRECT ENDPOINT
+      final uri = Uri.parse('${AppConfig.baseUrl}/api/incidents/analyze-video');
       final request = http.MultipartRequest('POST', uri);
       
       // Add auth header if available
@@ -188,10 +215,11 @@ class AutoCaptureService {
         request.headers['Authorization'] = 'Bearer $token';
       }
       
-      // Add video file
+      // Add video file with explicit MIME type
       request.files.add(await http.MultipartFile.fromPath(
         'video',
         videoFile.path,
+        contentType: MediaType('video', 'mp4'),
       ));
       
       // Add location
@@ -206,10 +234,17 @@ class AutoCaptureService {
       await videoFile.delete();
       
       if (response.statusCode == 201 || response.statusCode == 200) {
+        // ✅ Update uploaded counter
+        videosUploaded++;
+        
         // Parse response to check if incident was detected
-        if (responseBody.contains('"incident_detected":true')) {
+        if (responseBody.contains('"incident_detected":true') || 
+            responseBody.contains('incident_detected":true')) {
           incidentsDetected++;
         }
+        
+        // ✅ Update UI immediately
+        onStatsUpdate?.call(videosCaptured, videosUploaded, incidentsDetected);
         lastError = null;
       } else {
         lastError = 'Upload failed: ${response.statusCode}';

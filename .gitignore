@@ -1,5 +1,8 @@
 # Node.js
 backend/node_modules/
+trafficguard-react/node_modules/
+frontend/node_modules/
+node_modules/
 backend/.env
 backend/uploads/
 backend/*.log

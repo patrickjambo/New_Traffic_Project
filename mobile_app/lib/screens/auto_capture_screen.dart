@@ -13,10 +13,31 @@ class _AutoCaptureScreenState extends State<AutoCaptureScreen> {
   final AutoCaptureService _autoCaptureService = AutoCaptureService();
   bool _isInitializing = false;
   String? _errorMessage;
+  
+  // Real-time stats
+  int _videosCaptured = 0;
+  int _videosUploaded = 0;
+  int _incidentsDetected = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    // Listen for real-time stat updates
+    _autoCaptureService.onStatsUpdate = (captured, uploaded, incidents) {
+      if (mounted) {
+        setState(() {
+          _videosCaptured = captured;
+          _videosUploaded = uploaded;
+          _incidentsDetected = incidents;
+        });
+      }
+    };
+  }
 
   @override
   void dispose() {
     // Don't dispose service here, let it run in background
+    _autoCaptureService.onStatsUpdate = null;
     super.dispose();
   }
 
@@ -159,7 +180,7 @@ class _AutoCaptureScreenState extends State<AutoCaptureScreen> {
 
                     // Statistics
                     Text(
-                      'Statistics',
+                      'Real-Time Statistics',
                       style: Theme.of(context).textTheme.titleLarge,
                     ),
                     const SizedBox(height: 12),
@@ -169,17 +190,26 @@ class _AutoCaptureScreenState extends State<AutoCaptureScreen> {
                         Expanded(
                           child: _StatCard(
                             icon: Icons.videocam,
-                            label: 'Videos Captured',
-                            value: _autoCaptureService.videosCaptured.toString(),
+                            label: 'Captured',
+                            value: _videosCaptured.toString(),
                             color: Colors.blue,
                           ),
                         ),
-                        const SizedBox(width: 12),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: _StatCard(
+                            icon: Icons.cloud_upload,
+                            label: 'Uploaded',
+                            value: _videosUploaded.toString(),
+                            color: Colors.green,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
                         Expanded(
                           child: _StatCard(
                             icon: Icons.warning,
-                            label: 'Incidents Detected',
-                            value: _autoCaptureService.incidentsDetected.toString(),
+                            label: 'Incidents',
+                            value: _incidentsDetected.toString(),
                             color: Colors.orange,
                           ),
                         ),

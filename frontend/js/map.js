@@ -136,6 +136,10 @@ function clearAllMarkers() {
 
 // Center map on coordinates
 function centerMap(lat = CONFIG.DEFAULT_CENTER[0], lon = CONFIG.DEFAULT_CENTER[1], zoom = CONFIG.DEFAULT_ZOOM) {
+    if (!map) {
+        console.warn('Map not initialized yet, cannot center map');
+        return;
+    }
     map.setView([lat, lon], zoom);
 }
 

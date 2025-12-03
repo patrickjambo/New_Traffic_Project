@@ -23,13 +23,18 @@ const upload = multer({
         fileSize: parseInt(process.env.MAX_FILE_SIZE) || 50 * 1024 * 1024, // 50MB
     },
     fileFilter: (req, file, cb) => {
-        const allowedTypes = /mp4|mov|avi|mkv/;
-        const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-        const mimetype = allowedTypes.test(file.mimetype);
-
-        if (mimetype && extname) {
+        // Accept ANY video MIME type or common video extensions
+        const isVideoMime = file.mimetype && file.mimetype.startsWith('video/');
+        const isVideoExt = /\.(mp4|mov|avi|mkv|3gp|webm|flv)$/i.test(file.originalname);
+        
+        if (isVideoMime || isVideoExt) {
+            console.log('✅ Video accepted:', file.originalname, file.mimetype);
             return cb(null, true);
         } else {
+            console.log('❌ File rejected:', {
+                originalname: file.originalname,
+                mimetype: file.mimetype
+            });
             cb(new Error('Only video files are allowed'));
         }
     }
@@ -295,10 +300,55 @@ const updateIncidentStatus = async (req, res) => {
     }
 };
 
+/**
+ * Get incidents reported by the current user
+ */
+const getUserIncidents = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const { limit, offset } = req.query;
+
+        const result = await query(
+            `SELECT 
+        i.id, 
+        i.type, 
+        i.severity, 
+        i.status,
+        ST_AsText(i.location::geometry) as location,
+        i.address,
+        i.description,
+        i.video_url,
+        i.created_at,
+        i.updated_at
+      FROM incidents i
+      WHERE i.reported_by = $1
+      ORDER BY i.created_at DESC
+      LIMIT $2 OFFSET $3`,
+            [userId, parseInt(limit || 20), parseInt(offset || 0)]
+        );
+
+        res.json({
+            success: true,
+            data: {
+                incidents: result.rows,
+                count: result.rowCount,
+            },
+        });
+    } catch (error) {
+        console.error('Get user incidents error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch user incidents',
+            error: error.message,
+        });
+    }
+};
+
 module.exports = {
     upload,
     reportIncident,
     getNearbyIncidents,
     getIncidentById,
     updateIncidentStatus,
+    getUserIncidents,
 };

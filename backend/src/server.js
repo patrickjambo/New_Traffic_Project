@@ -11,6 +11,7 @@ require('dotenv').config();
 // Routes
 const authRoutes = require('./routes/auth');
 const incidentRoutes = require('./routes/incidents');
+const emergencyRoutes = require('./routes/emergency');
 const autoAnalysisRoutes = require('./routes/autoAnalysis');
 
 // Initialize app
@@ -20,8 +21,9 @@ const server = http.createServer(app);
 // Initialize Socket.IO
 const io = new Server(server, {
     cors: {
-        origin: process.env.ALLOWED_ORIGINS?.split(',') || '*',
+        origin: '*', // Allow all origins for development
         methods: ['GET', 'POST'],
+        credentials: true,
     },
 });
 
@@ -29,12 +31,22 @@ const io = new Server(server, {
 app.set('io', io);
 
 // Middleware
-app.use(helmet()); // Security headers
+app.use(helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" }
+})); // Security headers
 app.use(compression()); // Response compression
+
+// CORS configuration - Allow all origins for development
 app.use(cors({
-    origin: process.env.ALLOWED_ORIGINS?.split(',') || '*',
+    origin: '*', // Allow all origins for development
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
 }));
+
+// Handle preflight requests
+app.options('*', cors());
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan('dev')); // Logging
@@ -43,14 +55,7 @@ app.use(morgan('dev')); // Logging
 const limiter = rateLimit({
     windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
     max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
-    standardHeaders: true,
-    legacyHeaders: false,
-    handler: (req, res) => {
-        res.status(429).json({
-            success: false,
-            message: 'Too many requests from this IP, please try again later.',
-        });
-    },
+    message: 'Too many requests from this IP, please try again later.',
 });
 app.use('/api/', limiter);
 
@@ -64,6 +69,7 @@ app.use(express.static(path.join(__dirname, '../../frontend')));
 // API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/incidents', incidentRoutes);
+app.use('/api/emergency', emergencyRoutes);
 app.use('/api/auto-analysis', autoAnalysisRoutes);
 app.use('/api/police', require('./routes/police'));
 app.use('/api/admin', require('./routes/admin'));

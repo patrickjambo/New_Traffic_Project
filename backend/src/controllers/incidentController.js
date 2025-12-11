@@ -20,13 +20,13 @@ const storage = multer.diskStorage({
 const upload = multer({
     storage,
     limits: {
-        fileSize: parseInt(process.env.MAX_FILE_SIZE) || 50 * 1024 * 1024, // 50MB
+        fileSize: parseInt(process.env.MAX_FILE_SIZE) || 200 * 1024 * 1024, // 200MB (increased for mobile uploads)
     },
     fileFilter: (req, file, cb) => {
         // Accept ANY video MIME type or common video extensions
         const isVideoMime = file.mimetype && file.mimetype.startsWith('video/');
         const isVideoExt = /\.(mp4|mov|avi|mkv|3gp|webm|flv)$/i.test(file.originalname);
-        
+
         if (isVideoMime || isVideoExt) {
             console.log('✅ Video accepted:', file.originalname, file.mimetype);
             return cb(null, true);
@@ -97,11 +97,9 @@ const reportIncident = async (req, res) => {
         }
 
         // Emit real-time update via WebSocket (if initialized)
+        // Emit real-time update via WebSocket (if initialized)
         if (req.app.get('io')) {
-            req.app.get('io').emit('incident_update', {
-                type: 'new_incident',
-                data: incident,
-            });
+            req.app.get('io').emit('incident:new', incident);
         }
 
         res.status(201).json({
@@ -278,11 +276,9 @@ const updateIncidentStatus = async (req, res) => {
         );
 
         // Emit real-time update
+        // Emit real-time update
         if (req.app.get('io')) {
-            req.app.get('io').emit('incident_update', {
-                type: 'status_change',
-                data: result.rows[0],
-            });
+            req.app.get('io').emit('incident:update', result.rows[0]);
         }
 
         res.json({

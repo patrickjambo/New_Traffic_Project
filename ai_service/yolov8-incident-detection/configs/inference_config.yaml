@@ -1,0 +1,16 @@
+model: yolov8
+confidence_threshold: 0.5
+input_size: 
+  width: 640
+  height: 480
+video_source: "data/raw/video.mp4"
+output_directory: "data/processed/"
+detection_classes:
+  - "incident"
+  - "non_incident"
+frame_rate: 30
+use_gpu: true
+gpu_id: 0
+logging:
+  level: "INFO"
+  log_file: "logs/inference.log"

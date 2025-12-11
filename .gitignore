@@ -50,3 +50,9 @@ logs/
 # Temporary files
 tmp/
 temp/
+
+# Large Directories
+training_workspace/
+.venv/
+venv/
+

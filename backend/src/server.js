@@ -13,6 +13,7 @@ const authRoutes = require('./routes/auth');
 const incidentRoutes = require('./routes/incidents');
 const emergencyRoutes = require('./routes/emergency');
 const autoAnalysisRoutes = require('./routes/autoAnalysis');
+const detectionRoutes = require('./routes/detection');
 
 // Initialize app
 const app = express();
@@ -47,8 +48,8 @@ app.use(cors({
 // Handle preflight requests
 app.options('*', cors());
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '100mb' })); // Increased limit for video uploads
+app.use(express.urlencoded({ extended: true, limit: '100mb' })); // Increased limit
 app.use(morgan('dev')); // Logging
 
 // Rate limiting
@@ -71,6 +72,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/incidents', incidentRoutes);
 app.use('/api/emergency', emergencyRoutes);
 app.use('/api/auto-analysis', autoAnalysisRoutes);
+app.use('/api', detectionRoutes);  // Detection endpoint: /api/detect
 app.use('/api/police', require('./routes/police'));
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api/dashboard', require('./routes/dashboard'));

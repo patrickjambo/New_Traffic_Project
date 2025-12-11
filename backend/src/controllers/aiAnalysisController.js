@@ -47,7 +47,7 @@ const analyzeVideoAndCreateIncident = async (req, res) => {
             path: req.file.path
         });
 
-        console.log('📹 Analyzing video with AI service...');
+        console.log('📹 Analyzing video with AI service (Enhanced Mode for Screen Videos)...');
 
         // Step 1: Send video to AI service using file stream
         const formData = new FormData();
@@ -55,13 +55,17 @@ const analyzeVideoAndCreateIncident = async (req, res) => {
             filename: req.file.originalname,
             contentType: req.file.mimetype,
         });
+        // Enable test_mode (enhanced analyzer) for better screen video detection
+        formData.append('test_mode', 'true');
 
         const aiResponse = await axios.post(
-            `${AI_SERVICE_URL}/ai/analyze-traffic`,
+            `${AI_SERVICE_URL}/analyze`,
             formData,
             {
                 headers: formData.getHeaders(),
-                timeout: 60000, // 60 seconds timeout
+                timeout: 120000, // 120 seconds timeout (2 minutes)
+                maxContentLength: Infinity,
+                maxBodyLength: Infinity
             }
         );
 

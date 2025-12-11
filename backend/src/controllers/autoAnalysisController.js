@@ -21,7 +21,7 @@ const storage = multer.diskStorage({
 const upload = multer({
     storage,
     limits: {
-        fileSize: 10 * 1024 * 1024, // 10MB for auto-captured clips
+        fileSize: 50 * 1024 * 1024, // 50MB for auto-captured clips (5-second videos)
     },
     fileFilter: (req, file, cb) => {
         // Accept ANY video MIME type or common video extensions
@@ -44,6 +44,7 @@ const upload = multer({
 /**
  * Auto-analyze video from continuous capture
  * This endpoint receives 5-second clips and analyzes them
+ * Returns immediately to mobile app, processes in background
  */
 const analyzeAutoCapture = async (req, res) => {
     try {
@@ -66,129 +67,18 @@ const analyzeAutoCapture = async (req, res) => {
             });
         }
 
-        // Send to AI service for quick analysis
-        const aiServiceUrl = process.env.AI_SERVICE_URL || 'http://localhost:8000';
-        const formData = new FormData();
-        const videoStream = require('fs').createReadStream(videoFile.path);
-        formData.append('video', videoStream, videoFile.filename);
+        // Return immediately to mobile app
+        res.status(202).json({
+            success: true,
+            message: 'Video received, processing in background',
+            clip_id: videoFile.filename,
+            status: 'processing'
+        });
 
-        try {
-            const aiResponse = await axios.post(
-                `${aiServiceUrl}/ai/quick-analyze`,
-                formData,
-                {
-                    headers: formData.getHeaders(),
-                    timeout: 15000, // 15 seconds timeout for quick analysis
-                }
-            );
-
-            const analysisData = aiResponse.data.data;
-
-            // Check if relevant data was found
-            if (!analysisData.has_relevant_data || !analysisData.incident_detected) {
-                // No incident detected - delete the video
-                await fs.unlink(videoFile.path);
-
-                return res.json({
-                    success: true,
-                    incident_detected: false,
-                    message: 'No incident detected, video deleted',
-                    analysis: {
-                        has_relevant_data: analysisData.has_relevant_data,
-                        vehicle_count: analysisData.vehicle_count || 0,
-                    }
-                });
-            }
-
-            // Incident detected - store in database
-            const userId = req.user ? req.user.id : null;
-
-            const result = await query(
-                `INSERT INTO incidents 
-                (type, severity, location, video_url, reported_by, auto_captured, ai_confidence, status) 
-                VALUES ($1, $2, ST_SetSRID(ST_MakePoint($3, $4), 4326)::geography, $5, $6, $7, $8, $9) 
-                RETURNING id, type, severity, ST_AsText(location::geometry) as location, created_at`,
-                [
-                    analysisData.incident_type,
-                    determineSeverity(analysisData.confidence),
-                    parseFloat(longitude),
-                    parseFloat(latitude),
-                    `/uploads/${videoFile.filename}`,
-                    userId,
-                    true, // auto_captured
-                    analysisData.confidence,
-                    'pending' // Auto-captured incidents start as pending
-                ]
-            );
-
-            const incident = result.rows[0];
-
-            // Store AI analytics
-            await query(
-                `INSERT INTO incident_analytics 
-                (incident_id, vehicle_count, avg_speed, confidence, detected_type) 
-                VALUES ($1, $2, $3, $4, $5)`,
-                [
-                    incident.id,
-                    analysisData.vehicle_count || 0,
-                    analysisData.avg_speed || 0,
-                    analysisData.confidence,
-                    analysisData.incident_type
-                ]
-            );
-
-            // Update user's auto-capture stats if authenticated
-            if (userId) {
-                await query(
-                    `INSERT INTO auto_capture_stats (user_id, videos_captured, incidents_detected, data_uploaded_mb, last_capture_at)
-                    VALUES ($1, 1, 1, $2, CURRENT_TIMESTAMP)
-                    ON CONFLICT (user_id) 
-                    DO UPDATE SET 
-                        videos_captured = auto_capture_stats.videos_captured + 1,
-                        incidents_detected = auto_capture_stats.incidents_detected + 1,
-                        data_uploaded_mb = auto_capture_stats.data_uploaded_mb + $2,
-                        last_capture_at = CURRENT_TIMESTAMP`,
-                    [userId, analysisData.video_size_mb || 0]
-                );
-            }
-
-            // Emit real-time update via WebSocket
-            if (req.app.get('io')) {
-                req.app.get('io').emit('incident_update', {
-                    type: 'auto_detected',
-                    data: {
-                        ...incident,
-                        ai_confidence: analysisData.confidence,
-                        vehicle_count: analysisData.vehicle_count,
-                    },
-                });
-            }
-
-            res.status(201).json({
-                success: true,
-                incident_detected: true,
-                message: 'Incident detected and stored',
-                data: {
-                    incident_id: incident.id,
-                    type: incident.type,
-                    severity: incident.severity,
-                    confidence: analysisData.confidence,
-                    vehicle_count: analysisData.vehicle_count,
-                },
-            });
-
-        } catch (aiError) {
-            console.error('AI analysis failed:', aiError.message);
-
-            // Delete video if AI analysis fails
-            await fs.unlink(videoFile.path);
-
-            return res.status(500).json({
-                success: false,
-                message: 'AI analysis failed',
-                error: aiError.message,
-            });
-        }
+        // Process asynchronously in background
+        processClipAsync(req, videoFile, latitude, longitude).catch(err => {
+            console.error('❌ Background processing failed:', err);
+        });
 
     } catch (error) {
         console.error('Auto-analysis error:', error);
@@ -209,6 +99,123 @@ const analyzeAutoCapture = async (req, res) => {
         });
     }
 };
+
+/**
+ * Process video clip asynchronously
+ */
+async function processClipAsync(req, videoFile, latitude, longitude) {
+    const aiServiceUrl = process.env.AI_SERVICE_URL || 'http://localhost:8000';
+    
+    try {
+        console.log(`🎬 Processing clip: ${videoFile.filename}`);
+        
+        // Send to AI service for quick analysis
+        const formData = new FormData();
+        const videoStream = require('fs').createReadStream(videoFile.path);
+        formData.append('video', videoStream, videoFile.filename);
+
+        const aiResponse = await axios.post(
+            `${aiServiceUrl}/analyze`,
+            formData,
+            {
+                headers: formData.getHeaders(),
+                timeout: 10000, // 10 seconds timeout for quick analysis
+                maxContentLength: Infinity,
+                maxBodyLength: Infinity
+            }
+        );
+
+        const analysisData = aiResponse.data;
+
+        // Check if incident detected
+        const incidents = analysisData.incidents || [];
+        const incidentDetected = analysisData.success && incidents.length > 0;
+        
+        if (!incidentDetected) {
+            // No incident detected - delete the video
+            console.log(`✅ No incident in clip: ${videoFile.filename}`);
+            await fs.unlink(videoFile.path);
+            return;
+        }
+
+        // Incident detected - store in database
+        console.log(`🚨 Incident detected in clip: ${videoFile.filename}`);
+        const userId = req.user ? req.user.id : null;
+
+        const incident = incidents[0]; // Take first incident
+        const result = await query(
+            `INSERT INTO incidents 
+            (type, severity, location, video_url, reported_by, auto_captured, ai_confidence, status) 
+            VALUES ($1, $2, ST_SetSRID(ST_MakePoint($3, $4), 4326)::geography, $5, $6, $7, $8, $9) 
+            RETURNING id, type, severity, ST_AsText(location::geometry) as location, created_at`,
+            [
+                incident.type || 'unknown',
+                determineSeverity(incident.confidence || 0.5),
+                parseFloat(longitude),
+                parseFloat(latitude),
+                `/uploads/${videoFile.filename}`,
+                userId,
+                true, // auto_captured
+                incident.confidence || 0.5,
+                'pending' // Auto-captured incidents start as pending
+            ]
+        );
+
+        const storedIncident = result.rows[0];
+
+        // Store AI analytics
+        await query(
+            `INSERT INTO incident_analytics 
+            (incident_id, vehicle_count, confidence, detected_type) 
+            VALUES ($1, $2, $3, $4)`,
+            [
+                storedIncident.id,
+                incident.vehicle_count || 0,
+                incident.confidence || 0.5,
+                incident.type || 'unknown'
+            ]
+        );
+
+        // Update user's auto-capture stats if authenticated
+        if (userId) {
+            await query(
+                `INSERT INTO auto_capture_stats (user_id, videos_captured, incidents_detected, data_uploaded_mb, last_capture_at)
+                VALUES ($1, 1, 1, $2, CURRENT_TIMESTAMP)
+                ON CONFLICT (user_id) 
+                DO UPDATE SET 
+                    videos_captured = auto_capture_stats.videos_captured + 1,
+                    incidents_detected = auto_capture_stats.incidents_detected + 1,
+                    data_uploaded_mb = auto_capture_stats.data_uploaded_mb + $2,
+                    last_capture_at = CURRENT_TIMESTAMP`,
+                [userId, (videoFile.size / 1024 / 1024) || 0]
+            );
+        }
+
+        // Emit real-time update via WebSocket
+        if (req.app && req.app.get('io')) {
+            req.app.get('io').emit('incident_update', {
+                type: 'auto_detected',
+                data: {
+                    ...storedIncident,
+                    ai_confidence: incident.confidence,
+                    vehicle_count: incident.vehicle_count,
+                },
+            });
+        }
+
+        console.log(`✅ Incident stored: ID ${storedIncident.id}`);
+
+    } catch (error) {
+        console.error('❌ Async processing error:', error);
+        
+        // Delete video on error
+        try {
+            await fs.unlink(videoFile.path);
+        } catch (unlinkError) {
+            console.error('Failed to delete video:', unlinkError);
+        }
+    }
+}
 
 /**
  * Get auto-capture statistics for user

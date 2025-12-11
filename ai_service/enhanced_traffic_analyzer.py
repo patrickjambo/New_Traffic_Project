@@ -4,8 +4,79 @@ from ultralytics import YOLO
 from typing import List, Dict, Tuple, Optional
 import os
 from dotenv import load_dotenv
+from screen_preprocessing import preprocess_screen_capture
 
 load_dotenv()
+
+
+class TemporalAnalyzer:
+    """
+    Analyze detection patterns across multiple frames
+    Reduces false positives by confirming incidents over time
+    """
+    def __init__(self, max_history=30):
+        self.frame_history = []
+        self.max_history = max_history
+    
+    def add_frame_analysis(self, frame_data: Dict):
+        """Add frame analysis to history"""
+        self.frame_history.append(frame_data)
+        if len(self.frame_history) > self.max_history:
+            self.frame_history.pop(0)
+    
+    def get_confidence_trend(self) -> Optional[Dict]:
+        """Get trend of detection confidence over time"""
+        if len(self.frame_history) < 5:
+            return None
+        
+        confidences = [f.get('confidence', 0) for f in self.frame_history]
+        recent = confidences[-10:]  # Last 10 frames
+        
+        if not recent:
+            return None
+        
+        return {
+            'average': float(np.mean(recent)),
+            'max': float(np.max(recent)),
+            'sustained': np.mean(recent) > 0.3,  # Sustained detection
+            'trend': 'increasing' if recent[-1] > recent[0] else 'decreasing'
+        }
+    
+    def confirm_incident(self) -> bool:
+        """
+        Confirm incident if detected consistently across frames
+        Returns True if incident appears in 30%+ of recent frames
+        """
+        if len(self.frame_history) < 10:
+            return False
+        
+        # Check last 10 frames
+        recent = self.frame_history[-10:]
+        incident_frames = sum(1 for f in recent if f.get('has_incident', False))
+        
+        # Incident confirmed if detected in 30%+ of recent frames
+        confirmation_ratio = incident_frames / len(recent)
+        return confirmation_ratio >= 0.3
+    
+    def get_vehicle_count_trend(self) -> Optional[Dict]:
+        """Analyze vehicle count over time"""
+        if len(self.frame_history) < 5:
+            return None
+        
+        vehicle_counts = [f.get('vehicle_count', 0) for f in self.frame_history]
+        recent = vehicle_counts[-10:]
+        
+        return {
+            'average': float(np.mean(recent)),
+            'max': int(np.max(recent)),
+            'min': int(np.min(recent)),
+            'stable': np.std(recent) < 2  # Low variance = stable traffic
+        }
+    
+    def clear_history(self):
+        """Clear frame history"""
+        self.frame_history = []
+
 
 class ScreenVideoPreprocessor:
     """Preprocessor for detecting and extracting video content from screen recordings"""
@@ -65,19 +136,12 @@ class ScreenVideoPreprocessor:
         return frame[margin_h:h-margin_h, margin_w:w-margin_w]
     
     def enhance_low_resolution(self, frame: np.ndarray) -> np.ndarray:
-        """Enhance low-resolution screen-captured frames"""
-        # Denoise
-        denoised = cv2.fastNlMeansDenoisingColored(frame, None, 10, 10, 7, 21)
-        
-        # Enhance contrast
-        lab = cv2.cvtColor(denoised, cv2.COLOR_BGR2LAB)
-        l, a, b = cv2.split(lab)
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
-        l = clahe.apply(l)
-        enhanced = cv2.merge([l, a, b])
-        enhanced = cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
-        
-        return enhanced
+        """
+        Enhanced preprocessing for screen-captured frames
+        Uses the new preprocess_screen_capture module for better results
+        """
+        # Use the enhanced preprocessing from screen_preprocessing module
+        return preprocess_screen_capture(frame)
 
 
 class EnhancedTrafficAnalyzer:
@@ -110,6 +174,9 @@ class EnhancedTrafficAnalyzer:
         
         # Preprocessor for screen videos
         self.preprocessor = ScreenVideoPreprocessor()
+        
+        # Temporal analyzer for multi-frame confirmation
+        self.temporal_analyzer = TemporalAnalyzer(max_history=30)
     
     def is_screen_recording(self, frame: np.ndarray) -> bool:
         """
@@ -331,7 +398,40 @@ class EnhancedTrafficAnalyzer:
             incident_type = 'accident'
             confidence = min(0.95, stationary_count / (accident_threshold * 2))
         
-        # Determine severity
+        # ═══════════════════════════════════════════════════════════
+        # TEMPORAL ANALYSIS: Confirm incident across multiple frames
+        # ═══════════════════════════════════════════════════════════
+        
+        # Add temporal confirmation (reduces false positives)
+        temporal_confirmed = False
+        confidence_boost = 0.0
+        
+        if incident_type != 'none' and len(frame_analyses) >= 10:
+            # Add frame analyses to temporal analyzer
+            self.temporal_analyzer.clear_history()  # Reset for this video
+            for frame_data in frame_analyses:
+                self.temporal_analyzer.add_frame_analysis({
+                    'confidence': confidence,
+                    'has_incident': incident_type != 'none',
+                    'vehicle_count': frame_data['vehicle_count']
+                })
+            
+            # Check if incident confirmed across frames
+            temporal_confirmed = self.temporal_analyzer.confirm_incident()
+            
+            if temporal_confirmed:
+                # Boost confidence for temporally confirmed incidents
+                confidence_trend = self.temporal_analyzer.get_confidence_trend()
+                if confidence_trend and confidence_trend['sustained']:
+                    confidence_boost = 0.1  # +10% confidence boost
+                    confidence = min(0.99, confidence + confidence_boost)
+                    print(f"✅ Temporal confirmation: Incident sustained across {len(frame_analyses)} frames")
+            else:
+                # Reduce confidence for non-confirmed detections
+                confidence = max(0.1, confidence * 0.7)  # -30% confidence
+                print(f"⚠️  Temporal check: Incident not consistent across frames, confidence reduced")
+        
+        # Determine severity (with temporal boost)
         severity = 'low'
         if confidence > 0.7:
             severity = 'critical' if incident_type == 'accident' else 'high'
@@ -339,6 +439,9 @@ class EnhancedTrafficAnalyzer:
             severity = 'high' if incident_type == 'accident' else 'medium'
         elif confidence > 0.3:
             severity = 'medium'
+        
+        # Get vehicle trend analysis
+        vehicle_trend = self.temporal_analyzer.get_vehicle_count_trend()
         
         return {
             'incident_detected': incident_type != 'none',
@@ -351,6 +454,9 @@ class EnhancedTrafficAnalyzer:
             'stationary_count': stationary_count,
             'frames_analyzed': len(frame_analyses),
             'total_frames': total_frames,
+            'temporal_confirmed': temporal_confirmed,
+            'confidence_boost': confidence_boost,
+            'vehicle_trend': vehicle_trend if vehicle_trend else {},
         }
     
     def _estimate_speed(self, frame_analyses: List[Dict]) -> float:

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { MapPin, Navigation, AlertTriangle, Clock, Search, Menu, X } from 'lucide-react';
+import { MapPin, Navigation, AlertTriangle, Clock, Search, Menu, X, Activity, Camera, Users } from 'lucide-react';
 import { useData } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
 import { searchKigaliLocation } from '../data/kigaliLocations';
@@ -363,9 +363,9 @@ const HomePage = () => {
 
         {/* Navigation */}
         <nav className="gov-header sticky top-0 z-40">
-          <div className="px-4 sm:px-6 lg:px-8">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex justify-between items-center h-16">
-              {/* Logo - Rwanda National Police - Left aligned */}
+              {/* Logo - Rwanda National Police */}
               <div className="flex items-center space-x-3">
                 <div className="w-14 h-14 bg-white rounded-full flex items-center justify-center overflow-hidden shadow-xl ring-2 ring-blue-200">
                   <img
@@ -382,9 +382,7 @@ const HomePage = () => {
                   <h1 className="text-xl font-bold">Rwanda National Police</h1>
                   <p className="text-xs text-blue-100">Traffic Management System</p>
                 </div>
-              </div>
-
-              {/* Desktop Menu - Right aligned */}
+              </div>            {/* Desktop Menu */}
               <div className="hidden md:flex items-center space-x-6">
                 <Link to="/" className="text-white hover:text-blue-100 transition-colors">
                   Home
@@ -479,14 +477,14 @@ const HomePage = () => {
         <div className="relative bg-gradient-to-br from-blue-900 via-blue-800 to-blue-900 text-white py-8 overflow-hidden">
           {/* Background Pattern */}
           <div className="absolute inset-0 opacity-5">
-            <div className="absolute top-10 right-10 w-48 h-48">
+            <div className="absolute top-10 right-10 w-64 h-64">
               <img
                 src="/assets/rnp-logo.png"
                 alt="RNP Background"
                 className="w-full h-full object-contain opacity-30"
               />
             </div>
-            <div className="absolute bottom-10 left-10 w-32 h-32">
+            <div className="absolute bottom-10 left-10 w-48 h-48">
               <img
                 src="/assets/rnp-logo.png"
                 alt="RNP Background"
@@ -497,8 +495,8 @@ const HomePage = () => {
 
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
             <div className="text-center">
-              <div className="mb-3 flex justify-center">
-                <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center overflow-hidden shadow-2xl ring-4 ring-blue-300">
+              <div className="mb-6 flex justify-center">
+                <div className="w-32 h-32 bg-white rounded-full flex items-center justify-center overflow-hidden shadow-2xl ring-4 ring-blue-300">
                   <img
                     src="/assets/rnp-logo.png"
                     alt="Rwanda National Police"
@@ -510,36 +508,50 @@ const HomePage = () => {
                   />
                 </div>
               </div>
-              <h2 className="text-2xl md:text-3xl font-bold mb-2">
+              <h2 className="text-4xl md:text-5xl font-bold mb-4">
                 Rwanda National Police
               </h2>
-              <h3 className="text-lg md:text-xl font-semibold mb-2 text-blue-200">
+              <h3 className="text-2xl md:text-3xl font-semibold mb-4 text-blue-200">
                 Real-Time Traffic Monitoring System
               </h3>
-              <p className="text-sm text-blue-100 mb-4 max-w-3xl mx-auto">
+              <p className="text-xl text-blue-100 mb-8 max-w-3xl mx-auto">
                 Stay informed about traffic conditions across Kigali.
                 Check your route, view live incidents, and plan your journey safely.
               </p>
 
               {/* Quick Stats */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 max-w-4xl mx-auto">
-                <div className="bg-white/10 backdrop-blur-sm rounded-lg p-3">
-                  <div className="text-2xl font-bold">{statistics?.total_incidents || 19}</div>
-                  <div className="text-xs text-blue-100">Total Incidents</div>
-                </div>
-                <div className="bg-white/10 backdrop-blur-sm rounded-lg p-3">
-                  <div className="text-2xl font-bold">{statistics?.active_reports || 5}</div>
-                  <div className="text-xs text-blue-100">Active Now</div>
-                </div>
-                <div className="bg-white/10 backdrop-blur-sm rounded-lg p-3">
-                  <div className="text-2xl font-bold">{statistics?.mobile_captures || 12}</div>
-                  <div className="text-xs text-blue-100">Mobile Reports</div>
-                </div>
-                <div className="bg-white/10 backdrop-blur-sm rounded-lg p-3">
-                  <div className="text-2xl font-bold">
-                    <span className="live-indicator">●</span> Live
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 max-w-4xl mx-auto">
+                <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4 hover:bg-white/20 transition-all">
+                  <div className="flex items-center justify-between mb-2">
+                    <AlertTriangle className="w-6 h-6 text-red-300" />
+                    <span className="text-sm font-semibold text-green-300">+12%</span>
                   </div>
-                  <div className="text-xs text-blue-100">Real-Time Updates</div>
+                  <div className="text-3xl font-bold">{statistics?.total_incidents || 19}</div>
+                  <div className="text-sm text-blue-100">Total Incidents</div>
+                </div>
+                <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4 hover:bg-white/20 transition-all">
+                  <div className="flex items-center justify-between mb-2">
+                    <Activity className="w-6 h-6 text-blue-300" />
+                    <span className="text-sm font-semibold text-green-300">+5%</span>
+                  </div>
+                  <div className="text-3xl font-bold">{statistics?.active_reports || 5}</div>
+                  <div className="text-sm text-blue-100">Active Reports</div>
+                </div>
+                <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4 hover:bg-white/20 transition-all">
+                  <div className="flex items-center justify-between mb-2">
+                    <Camera className="w-6 h-6 text-green-300" />
+                    <span className="text-sm font-semibold text-green-300">+28%</span>
+                  </div>
+                  <div className="text-3xl font-bold">{statistics?.mobile_captures || 12}</div>
+                  <div className="text-sm text-blue-100">Mobile Captures</div>
+                </div>
+                <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4 hover:bg-white/20 transition-all">
+                  <div className="flex items-center justify-between mb-2">
+                    <Clock className="w-6 h-6 text-yellow-300" />
+                    <span className="text-sm font-semibold text-red-300">-15%</span>
+                  </div>
+                  <div className="text-3xl font-bold">{statistics?.avg_response_time || 8}min</div>
+                  <div className="text-sm text-blue-100">Avg Response</div>
                 </div>
               </div>
             </div>
@@ -574,6 +586,48 @@ const HomePage = () => {
                 </div>
                 <SimpleIncidentMap incidents={incidents} />
               </div>
+
+              {/* Report Incident & Emergency Buttons */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <Link
+                  to="/incidents"
+                  className="bg-white p-6 rounded-lg shadow-md hover:shadow-lg transition-all border-l-4 border-gray-500 flex items-center group"
+                >
+                  <div className="bg-gray-100 p-3 rounded-full mr-4 group-hover:bg-gray-200 transition-colors">
+                    <AlertTriangle className="w-8 h-8 text-gray-600" />
+                  </div>
+                  <div className="text-left">
+                    <h3 className="text-lg font-bold text-gray-900">View Incidents</h3>
+                    <p className="text-sm text-gray-500">Monitor traffic incidents</p>
+                  </div>
+                </Link>
+
+                <button
+                  onClick={() => setShowIncidentPopup(true)}
+                  className="bg-white p-6 rounded-lg shadow-md hover:shadow-lg transition-all border-l-4 border-blue-500 flex items-center group"
+                >
+                  <div className="bg-blue-100 p-3 rounded-full mr-4 group-hover:bg-blue-200 transition-colors">
+                    <Activity className="w-8 h-8 text-blue-600" />
+                  </div>
+                  <div className="text-left">
+                    <h3 className="text-lg font-bold text-gray-900">Report Incident</h3>
+                    <p className="text-sm text-gray-500">Submit a new report</p>
+                  </div>
+                </button>
+
+                <button
+                  onClick={() => setShowEmergencyPopup(true)}
+                  className="bg-white p-6 rounded-lg shadow-md hover:shadow-lg transition-all border-l-4 border-red-500 flex items-center group"
+                >
+                  <div className="bg-red-100 p-3 rounded-full mr-4 group-hover:bg-red-200 transition-colors">
+                    <AlertTriangle className="w-8 h-8 text-red-600" />
+                  </div>
+                  <div className="text-left">
+                    <h3 className="text-lg font-bold text-gray-900">Emergency</h3>
+                    <p className="text-sm text-gray-500">Critical response</p>
+                  </div>
+                </button>
+              </div>
             </div>
 
             {/* Right Column: Live Incident Feed */}
@@ -582,6 +636,8 @@ const HomePage = () => {
             </div>
           </div>
         </div>
+
+        {/* Quick Actions Removed */}
 
         {/* Footer */}
         <footer className="bg-gray-900 text-white mt-16">
@@ -635,33 +691,20 @@ const HomePage = () => {
       </div>
       {/* End Main Content Wrapper */}
 
-      {/* Floating Action Buttons - Report Incident & Emergency */}
-      <div className="fixed bottom-8 right-8 z-40 flex flex-col gap-4">
-        {/* Report Emergency Button */}
+      {/* Floating 'Report Emergency' Button */}
+      <div className="fixed bottom-8 right-8 z-40">
         <button
-          className="bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-full shadow-lg flex items-center gap-2 text-lg animate-bounce hover:animate-none transition-all"
+          className="bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-full shadow-lg flex items-center gap-2 text-lg animate-bounce"
           onClick={() => setShowEmergencyPopup(true)}
         >
-          <AlertTriangle className="w-6 h-6" />
+          <AlertTriangle className="w-6 h-6 mr-2" />
           Report Emergency
         </button>
-
-        {/* Report Incident Button */}
-        <button
-          className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-full shadow-lg flex items-center gap-2 text-lg transition-all"
-          onClick={() => setShowIncidentPopup(true)}
-        >
-          <AlertTriangle className="w-6 h-6" />
-          Report Incident
-        </button>
       </div>
-
-      {/* Emergency Report Popup */}
       <EmergencyReportPopup open={showEmergencyPopup} onClose={() => setShowEmergencyPopup(false)}>
         <ReportIncidentForm isEmergency />
       </EmergencyReportPopup>
 
-      {/* Incident Report Popup */}
       <EmergencyReportPopup open={showIncidentPopup} onClose={() => setShowIncidentPopup(false)}>
         <ReportIncidentForm />
       </EmergencyReportPopup>

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { FaCarCrash, FaFireExtinguisher, FaAmbulance, FaPhone, FaUser, FaCar, FaShieldAlt, FaMedkit, FaExclamationTriangle, FaMapMarkerAlt, FaSyncAlt, FaUsers } from 'react-icons/fa';
 import { AlertTriangle, MapPin, FileText, Send, Zap } from 'lucide-react';
 
+
 const EMERGENCY_TYPE_OPTIONS = [
   { label: 'Accident', value: 'accident', icon: <FaCarCrash className="inline mr-1" /> },
   { label: 'Fire', value: 'fire', icon: <FaFireExtinguisher className="inline mr-1" /> },
@@ -13,75 +14,48 @@ const EMERGENCY_TYPE_OPTIONS = [
   { label: 'Other Emergency', value: 'other', icon: <FaExclamationTriangle className="inline mr-1" /> },
 ];
 
-const EMERGENCY_SERVICES = [
-  { label: 'Ambulance', value: 'ambulance', icon: <FaAmbulance /> },
-  { label: 'Fire Service', value: 'fire_service', icon: <FaFireExtinguisher /> },
-  { label: 'Police', value: 'police', icon: <FaShieldAlt /> },
-];
+function ReportIncidentForm(props) {
 
-const SEVERITIES = [
-  { label: 'Low', value: 'low' },
-  { label: 'Medium', value: 'medium' },
-  { label: 'High', value: 'high' },
-  { label: 'Critical', value: 'critical' },
-];
-
-function ReportIncidentForm({ isEmergency = false }) {
+  // Example state declarations (add your actual logic as needed):
   const [incidentType, setIncidentType] = useState('');
-  const [location, setLocation] = useState('');
-  const [description, setDescription] = useState('');
-  const [severity, setSeverity] = useState('medium');
+  const [isEmergency, setIsEmergency] = useState(props.isEmergency || false);
   const [emergencyHelp, setEmergencyHelp] = useState([]);
   const [casualties, setCasualties] = useState(0);
   const [vehicles, setVehicles] = useState(0);
   const [contactPhone, setContactPhone] = useState('');
-  const [submitting, setSubmitting] = useState(false);
+  const [location, setLocation] = useState('');
+  const [description, setDescription] = useState('');
+  const [severity, setSeverity] = useState('low');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = async (e) => {
+  // Example SEVERITIES array
+  const SEVERITIES = [
+    { value: 'low', label: 'Low' },
+    { value: 'medium', label: 'Medium' },
+    { value: 'high', label: 'High' },
+    { value: 'critical', label: 'Critical' },
+  ];
+
+  // Example EMERGENCY_SERVICES array
+  const EMERGENCY_SERVICES = [
+    { value: 'police', label: 'Police', icon: <FaShieldAlt /> },
+    { value: 'ambulance', label: 'Ambulance', icon: <FaAmbulance /> },
+    { value: 'fire', label: 'Fire Team', icon: <FaFireExtinguisher /> },
+  ];
+
+  function handleSubmit(e) {
     e.preventDefault();
     setSubmitting(true);
     setError('');
     setSuccess(false);
-
-    try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      console.log('Report submitted:', {
-        incidentType,
-        location,
-        description,
-        severity,
-        isEmergency,
-        emergencyHelp: isEmergency ? emergencyHelp : undefined,
-        casualties: isEmergency ? casualties : undefined,
-        vehicles: isEmergency ? vehicles : undefined,
-        contactPhone: isEmergency ? contactPhone : undefined,
-      });
-
-      setSuccess(true);
-      // Reset form
-      setTimeout(() => {
-        setIncidentType('');
-        setLocation('');
-        setDescription('');
-        setSeverity('medium');
-        setEmergencyHelp([]);
-        setCasualties(0);
-        setVehicles(0);
-        setContactPhone('');
-        setSuccess(false);
-      }, 2000);
-
-    } catch (err) {
-      setError('Failed to submit report. Please try again.');
-      console.error('Submit error:', err);
-    } finally {
+    // Simulate form submission
+    setTimeout(() => {
       setSubmitting(false);
-    }
-  };
+      setSuccess(true);
+    }, 1000);
+  }
 
   return (
     <form onSubmit={handleSubmit} className={`bg-white rounded-lg shadow-xl p-6 space-y-4 ${isEmergency ? 'border-2 border-red-500' : ''}`}>
@@ -101,7 +75,7 @@ function ReportIncidentForm({ isEmergency = false }) {
                 <FaExclamationTriangle className="text-red-600" />
                 <span className="font-bold text-red-600">EMERGENCY REPORT</span>
               </div>
-              <span className="text-xs text-gray-500">For life-threatening emergencies, call 112 immediately.</span>
+              <span className="text-xs text-gray-500">For life-threatening emergencies, call 999 immediately.</span>
             </div>
             <div className="mb-4">
               <label className="block text-sm font-medium text-gray-700 mb-1">Emergency Type *</label>
@@ -122,7 +96,7 @@ function ReportIncidentForm({ isEmergency = false }) {
               <label className="block text-sm font-medium text-gray-700 mb-1">Emergency Services Needed *</label>
               <div className="flex flex-col gap-2">
                 {EMERGENCY_SERVICES.map(service => (
-                  <label key={service.value} className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer text-sm font-semibold ${emergencyHelp.includes(service.value) ? 'bg-red-600 text-white border-red-600' : 'bg-gray-100 text-gray-700 border-gray-300'}`}>
+                  <label key={service.value} className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer text-sm font-semibold ${emergencyHelp.includes(service.value) ? 'bg-red-600 text-white border-red-600' : 'bg-gray-100 text-gray-700 border-gray-300'}`}> 
                     <input
                       type="checkbox"
                       value={service.value}
@@ -169,7 +143,7 @@ function ReportIncidentForm({ isEmergency = false }) {
               required
             >
               <option value="">Select type...</option>
-              {['Traffic Jam', 'Accident', 'Road Work', 'Police Checkpoint', 'Heavy Traffic', 'Fire', 'Medical Emergency', 'Other'].map(type => (
+              {['Traffic Jam','Accident','Road Work','Police Checkpoint','Heavy Traffic','Fire','Medical Emergency','Other'].map(type => (
                 <option key={type} value={type}>{type}</option>
               ))}
             </select>

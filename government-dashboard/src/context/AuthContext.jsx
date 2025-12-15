@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import axios from '../config/axios';
+import { authService } from '../services/api';
 
 const AuthContext = createContext();
 
@@ -17,44 +17,28 @@ export const AuthProvider = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
 
   useEffect(() => {
-    // Check if user is logged in (check localStorage)
-    const token = localStorage.getItem('token');
-    const userData = localStorage.getItem('user');
-
-    if (token && userData) {
-      try {
-        const parsedUser = JSON.parse(userData);
-        setUser(parsedUser);
+    const initAuth = () => {
+      const currentUser = authService.getCurrentUser();
+      if (currentUser && currentUser.token) {
+        setUser(currentUser.user);
         setIsAuthenticated(true);
-        axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-      } catch (error) {
-        console.error('Error parsing user data:', error);
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
       }
-    }
-
-    setLoading(false);
+      setLoading(false);
+    };
+    initAuth();
   }, []);
 
   const login = async (email, password) => {
     try {
-      const response = await axios.post('/api/auth/login', { email, password });
+      const response = await authService.login(email, password);
 
-      if (response.data.success) {
-        const { token, user: userData } = response.data.data;
-
-        localStorage.setItem('token', token);
-        localStorage.setItem('user', JSON.stringify(userData));
-        axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-
-        setUser(userData);
+      if (response.token) {
+        setUser(response.user);
         setIsAuthenticated(true);
-
         return { success: true };
       }
 
-      return { success: false, message: response.data.message || 'Login failed' };
+      return { success: false, message: response.message || 'Login failed' };
     } catch (error) {
       console.error('Login error:', error);
       return {
@@ -66,13 +50,13 @@ export const AuthProvider = ({ children }) => {
 
   const register = async (userData) => {
     try {
-      const response = await axios.post('/api/auth/register', userData);
+      const response = await authService.register(userData);
 
-      if (response.data.success) {
+      if (response.success || response.token) {
         return { success: true, message: 'Registration successful! Please login.' };
       }
 
-      return { success: false, message: response.data.message || 'Registration failed' };
+      return { success: false, message: response.message || 'Registration failed' };
     } catch (error) {
       console.error('Registration error:', error);
       return {
@@ -83,9 +67,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    delete axios.defaults.headers.common['Authorization'];
+    authService.logout();
     setUser(null);
     setIsAuthenticated(false);
   };
@@ -98,6 +80,17 @@ export const AuthProvider = ({ children }) => {
     register,
     logout,
   };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Loading...</p>
+        </div>
+      </div>
+    );
+  }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };

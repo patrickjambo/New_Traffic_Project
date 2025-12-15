@@ -26,7 +26,7 @@ const upload = multer({
         // Accept ANY video MIME type or common video extensions
         const isVideoMime = file.mimetype && file.mimetype.startsWith('video/');
         const isVideoExt = /\.(mp4|mov|avi|mkv|3gp|webm|flv)$/i.test(file.originalname);
-
+        
         if (isVideoMime || isVideoExt) {
             console.log('✅ Video accepted:', file.originalname, file.mimetype);
             return cb(null, true);
@@ -97,9 +97,11 @@ const reportIncident = async (req, res) => {
         }
 
         // Emit real-time update via WebSocket (if initialized)
-        // Emit real-time update via WebSocket (if initialized)
         if (req.app.get('io')) {
-            req.app.get('io').emit('incident:new', incident);
+            req.app.get('io').emit('incident_update', {
+                type: 'new_incident',
+                data: incident,
+            });
         }
 
         res.status(201).json({
@@ -276,9 +278,11 @@ const updateIncidentStatus = async (req, res) => {
         );
 
         // Emit real-time update
-        // Emit real-time update
         if (req.app.get('io')) {
-            req.app.get('io').emit('incident:update', result.rows[0]);
+            req.app.get('io').emit('incident_update', {
+                type: 'status_change',
+                data: result.rows[0],
+            });
         }
 
         res.json({
@@ -340,6 +344,39 @@ const getUserIncidents = async (req, res) => {
     }
 };
 
+/**
+ * Get incident statistics
+ */
+const getIncidentStatistics = async (req, res) => {
+    try {
+        const stats = await query(`
+            SELECT
+                COUNT(*) as total_incidents,
+                COUNT(*) FILTER (WHERE status != 'resolved') as active_reports,
+                COUNT(*) FILTER (WHERE status = 'resolved' AND DATE(updated_at) = CURRENT_DATE) as resolved_today,
+                AVG(EXTRACT(EPOCH FROM (updated_at - created_at))/3600) FILTER (WHERE status = 'resolved') as avg_response_time
+            FROM incidents
+        `);
+
+        res.json({
+            success: true,
+            data: {
+                total_incidents: parseInt(stats.rows[0].total_incidents) || 0,
+                active_reports: parseInt(stats.rows[0].active_reports) || 0,
+                mobile_captures: 0, // Placeholder until source column is added
+                avg_response_time: Math.round(parseFloat(stats.rows[0].avg_response_time) || 0)
+            }
+        });
+    } catch (error) {
+        console.error('Error fetching incident statistics:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch incident statistics',
+            error: error.message,
+        });
+    }
+};
+
 module.exports = {
     upload,
     reportIncident,
@@ -347,4 +384,5 @@ module.exports = {
     getIncidentById,
     updateIncidentStatus,
     getUserIncidents,
+    getIncidentStatistics,
 };

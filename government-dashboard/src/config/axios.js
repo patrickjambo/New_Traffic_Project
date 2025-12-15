@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 // Configure axios defaults
-axios.defaults.baseURL = 'http://localhost:3000';
+// Note: baseURL is not set because Vite proxy handles /api requests
 axios.defaults.timeout = 10000; // 10 seconds
 axios.defaults.headers.common['Content-Type'] = 'application/json';
 

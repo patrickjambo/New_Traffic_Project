@@ -8,6 +8,7 @@ const {
     getIncidentById,
     updateIncidentStatus,
     getUserIncidents,
+    getIncidentStatistics,
 } = require('../controllers/incidentController');
 const { analyzeVideoAndCreateIncident, testIncidentDetection } = require('../controllers/aiAnalysisController');
 
@@ -58,6 +59,13 @@ router.post(
  * @access  Public
  */
 router.get('/', getNearbyIncidents);
+
+/**
+ * @route   GET /api/incidents/statistics
+ * @desc    Get incident statistics
+ * @access  Public
+ */
+router.get('/statistics', getIncidentStatistics);
 
 /**
  * @route   GET /api/incidents/:id

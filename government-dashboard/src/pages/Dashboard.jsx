@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
-const DashboardPage = () => {
+const TrafficDashboard = () => {
   const navigate = useNavigate();
   const { logout, user } = useAuth();
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -438,4 +438,4 @@ const DashboardPage = () => {
   );
 };
 
-export default DashboardPage;
+export default TrafficDashboard;

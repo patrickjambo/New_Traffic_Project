@@ -5,8 +5,11 @@ import time
 import shutil
 from pathlib import Path
 from dotenv import load_dotenv
+
+# Import local modules
 from traffic_analyzer import TrafficAnalyzer
 from enhanced_traffic_analyzer import EnhancedTrafficAnalyzer
+from backend_notifier import notify_backend
 
 load_dotenv()
 
@@ -144,6 +147,17 @@ async def analyze_traffic(
         result['analysis_time'] = round(analysis_time, 2)
         result['video_filename'] = video.filename
         result['video_size_mb'] = round(temp_path.stat().st_size / (1024 * 1024), 2)
+        
+        # Notify backend for real-time dashboard updates
+        incident_id = getattr(video, 'incident_id', None) or int(time.time())  # Use timestamp as fallback ID
+        await notify_backend(
+            incident_id=incident_id,
+            result=result,
+            confidence=result.get('confidence', 0),
+            vehicle_count=result.get('vehicle_count', 0),
+            incident_detected=result.get('incident_detected', False),
+            detected_type=result.get('incident_type', None)
+        )
         
         return {
             "success": True,

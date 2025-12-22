@@ -33,10 +33,12 @@ const schemas = {
     register: Joi.object({
         email: Joi.string().email().required(),
         password: Joi.string().min(6).required(),
-        fullName: Joi.string().min(2).max(100).required(),
+        fullName: Joi.string().min(2).max(100).optional(),
+        full_name: Joi.string().min(2).max(100).optional(),
         phone: Joi.string().pattern(/^\+?[0-9]{10,15}$/).optional(),
-        role: Joi.string().valid('public', 'police', 'admin').default('public'),
-    }),
+        phone_number: Joi.string().pattern(/^\+?[0-9]{10,15}$/).optional(),
+        role: Joi.string().valid('public', 'police', 'admin', 'user').default('public'),
+    }).or('fullName', 'full_name'),
 
     login: Joi.object({
         email: Joi.string().email().required(),
@@ -44,7 +46,7 @@ const schemas = {
     }),
 
     reportIncident: Joi.object({
-        type: Joi.string().valid('congestion', 'accident', 'road_blockage', 'other').required(),
+        type: Joi.string().required(), // More flexible, mapping in controller
         severity: Joi.string().valid('low', 'medium', 'high', 'critical').required(),
         latitude: Joi.number().min(-90).max(90).required(),
         longitude: Joi.number().min(-180).max(180).required(),

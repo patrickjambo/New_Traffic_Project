@@ -18,9 +18,8 @@ const router = express.Router();
 const validateEmergency = [
     body('emergencyType')
         .notEmpty()
-        .withMessage('Emergency type is required')
-        .isIn(['accident', 'fire', 'medical', 'crime', 'natural_disaster', 'hazard', 'other'])
-        .withMessage('Invalid emergency type'),
+        .withMessage('Emergency type is required'),
+    // Mapping will happen in controller
     body('severity')
         .notEmpty()
         .withMessage('Severity is required')
@@ -48,9 +47,8 @@ const validateEmergency = [
         .withMessage('Description must be between 10 and 2000 characters'),
     body('contactPhone')
         .notEmpty()
-        .withMessage('Contact phone is required')
-        .matches(/^\+?[1-9]\d{1,14}$/)
-        .withMessage('Invalid phone number format'),
+        .withMessage('Contact phone is required'),
+    // Relaxed validation to allow leading zeros and various formats
     body('casualtiesCount')
         .optional()
         .isInt({ min: 0 })

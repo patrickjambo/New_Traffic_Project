@@ -6,7 +6,12 @@ const { hashPassword, comparePassword, generateToken } = require('../utils/auth'
  */
 const register = async (req, res) => {
     try {
-        const { email, password, fullName, phone, role } = req.validatedBody;
+        const { email, password, fullName, full_name, phone, phone_number, role } = req.validatedBody;
+
+        // Map fields
+        const finalFullName = fullName || full_name;
+        const finalPhone = phone || phone_number;
+        const finalRole = role === 'user' ? 'public' : (role || 'public');
 
         // Check if user already exists
         const existingUser = await query(
@@ -29,7 +34,7 @@ const register = async (req, res) => {
             `INSERT INTO users (email, password_hash, full_name, phone, role) 
        VALUES ($1, $2, $3, $4, $5) 
        RETURNING id, email, full_name, role, created_at`,
-            [email, passwordHash, fullName, phone || null, role || 'public']
+            [email, passwordHash, finalFullName, finalPhone || null, finalRole]
         );
 
         const user = result.rows[0];

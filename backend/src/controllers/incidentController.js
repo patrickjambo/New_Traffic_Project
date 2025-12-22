@@ -3,6 +3,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs').promises;
 const axios = require('axios');
+const socketManager = require('../services/socketManager');
 
 // Configure multer for video uploads
 const storage = multer.diskStorage({
@@ -26,7 +27,7 @@ const upload = multer({
         // Accept ANY video MIME type or common video extensions
         const isVideoMime = file.mimetype && file.mimetype.startsWith('video/');
         const isVideoExt = /\.(mp4|mov|avi|mkv|3gp|webm|flv)$/i.test(file.originalname);
-        
+
         if (isVideoMime || isVideoExt) {
             console.log('✅ Video accepted:', file.originalname, file.mimetype);
             return cb(null, true);
@@ -96,13 +97,8 @@ const reportIncident = async (req, res) => {
             }
         }
 
-        // Emit real-time update via WebSocket (if initialized)
-        if (req.app.get('io')) {
-            req.app.get('io').emit('incident_update', {
-                type: 'new_incident',
-                data: incident,
-            });
-        }
+        // Emit real-time update via Socket Manager
+        socketManager.emitIncidentNew(incident);
 
         res.status(201).json({
             success: true,
@@ -277,13 +273,8 @@ const updateIncidentStatus = async (req, res) => {
             [id, req.user.id, status, comment || null]
         );
 
-        // Emit real-time update
-        if (req.app.get('io')) {
-            req.app.get('io').emit('incident_update', {
-                type: 'status_change',
-                data: result.rows[0],
-            });
-        }
+        // Emit real-time update via Socket Manager
+        socketManager.emitIncidentUpdate(result.rows[0]);
 
         res.json({
             success: true,

@@ -1,6 +1,7 @@
 const db = require('../config/database');
 const { validationResult } = require('express-validator');
 const smsService = require('../services/sms_service');
+const socketManager = require('../services/socketManager');
 
 /**
  * @desc    Create new emergency request
@@ -35,6 +36,20 @@ const createEmergency = async (req, res) => {
             images,
         } = req.body;
 
+        // Map frontend types to backend types
+        const typeMapping = {
+            'accident': 'accident',
+            'fire': 'fire',
+            'medical': 'medical',
+            'crime': 'crime',
+            'disaster': 'natural_disaster',
+            'riot': 'other',
+            'hazmat': 'hazard',
+            'other': 'other'
+        };
+
+        const finalEmergencyType = typeMapping[emergencyType] || (['accident', 'fire', 'medical', 'crime', 'natural_disaster', 'hazard', 'other'].includes(emergencyType) ? emergencyType : 'other');
+
         const userId = req.user ? req.user.id : null;
 
         // Insert emergency into database
@@ -47,7 +62,7 @@ const createEmergency = async (req, res) => {
             RETURNING *`,
             [
                 userId,
-                emergencyType,
+                finalEmergencyType,
                 severity,
                 locationName,
                 locationDescription || '',
@@ -66,27 +81,8 @@ const createEmergency = async (req, res) => {
 
         const emergency = result.rows[0];
 
-        // Emit real-time notification via Socket.IO
-        const io = req.app.get('io');
-        if (io) {
-            io.emit('emergency:new', {
-                id: emergency.id,
-                type: emergency.emergency_type,
-                severity: emergency.severity,
-                location: {
-                    name: emergency.location_name,
-                    latitude: parseFloat(emergency.latitude),
-                    longitude: parseFloat(emergency.longitude),
-                },
-                description: emergency.description,
-                servicesNeeded: emergency.services_needed,
-                createdAt: emergency.created_at,
-            });
-
-            // Emit to location-based room
-            const room = `loc_${Math.round(latitude * 100)}_${Math.round(longitude * 100)}`;
-            io.to(room).emit('emergency:nearby', emergency);
-        }
+        // Emit real-time notification via Socket Manager
+        socketManager.emitEmergencyNew(emergency);
 
         // Create notifications for police/admin users
         await createEmergencyNotifications(emergency);
@@ -359,16 +355,8 @@ const updateEmergencyStatus = async (req, res) => {
             [id, currentEmergency.status, status, userId, notes || '']
         );
 
-        // Emit real-time update
-        const io = req.app.get('io');
-        if (io) {
-            io.emit('emergency:updated', {
-                id: updatedEmergency.id,
-                status: updatedEmergency.status,
-                assignedTo: updatedEmergency.assigned_to,
-                updatedAt: updatedEmergency.updated_at,
-            });
-        }
+        // Emit real-time update via Socket Manager
+        socketManager.emitEmergencyUpdate(updatedEmergency);
 
         // Notify the reporter
         if (currentEmergency.user_id) {
@@ -466,11 +454,11 @@ const createEmergencyNotifications = async (emergency) => {
             const query = `
                 INSERT INTO emergency_notifications 
                 (emergency_id, user_id, notification_type, title, message)
-                VALUES ${notifications.map((_, i) => 
-                    `($${i * 5 + 1}, $${i * 5 + 2}, $${i * 5 + 3}, $${i * 5 + 4}, $${i * 5 + 5})`
-                ).join(', ')}
+                VALUES ${notifications.map((_, i) =>
+                `($${i * 5 + 1}, $${i * 5 + 2}, $${i * 5 + 3}, $${i * 5 + 4}, $${i * 5 + 5})`
+            ).join(', ')}
             `;
-            
+
             await db.query(query, notifications.flat());
         }
     } catch (error) {
@@ -513,9 +501,9 @@ const getEmergencyStats = async (req, res) => {
                 resolved: parseInt(stats.resolved),
                 critical: parseInt(stats.critical),
                 high: parseInt(stats.high),
-                avgResponseTime: stats.avg_response_time_seconds ? 
+                avgResponseTime: stats.avg_response_time_seconds ?
                     Math.round(stats.avg_response_time_seconds / 60) : 0, // in minutes
-                avgResolutionTime: stats.avg_resolution_time_seconds ? 
+                avgResolutionTime: stats.avg_resolution_time_seconds ?
                     Math.round(stats.avg_resolution_time_seconds / 60) : 0, // in minutes
             },
         });

@@ -13,7 +13,7 @@ const SimpleIncidentMap = ({ incidents }) => {
   const [selectedIncident, setSelectedIncident] = useState(null);
 
   return (
-    <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg h-96 p-6">
+    <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg h-[600px] p-6">
       <div className="bg-white rounded-lg shadow-lg p-4 h-full overflow-auto">
         <h4 className="font-bold text-gray-800 mb-4 flex items-center justify-between">
           <span className="flex items-center">
@@ -85,11 +85,70 @@ const SimpleIncidentMap = ({ incidents }) => {
           </div>
         )}
       </div>
+
+      {/* Incident Details Modal */}
+      <Modal
+        isOpen={!!selectedIncident}
+        onClose={() => setSelectedIncident(null)}
+        title="Incident Details"
+      >
+        {selectedIncident && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <span className={`px-3 py-1 rounded-full text-sm font-bold ${selectedIncident.severity === 'critical' ? 'bg-red-100 text-red-800' :
+                selectedIncident.severity === 'high' ? 'bg-orange-100 text-orange-800' :
+                  'bg-blue-100 text-blue-800'
+                }`}>
+                {selectedIncident.severity?.toUpperCase()}
+              </span>
+              <span className="text-sm text-gray-500">
+                {new Date(selectedIncident.created_at).toLocaleString()}
+              </span>
+            </div>
+
+            <div>
+              <h4 className="text-lg font-bold text-gray-900">{selectedIncident.incident_type}</h4>
+              <p className="text-gray-600 flex items-center mt-1">
+                <MapPin className="w-4 h-4 mr-1" />
+                {selectedIncident.location}
+              </p>
+            </div>
+
+            <div className="bg-gray-50 p-4 rounded-lg border border-gray-100">
+              <h5 className="font-semibold text-gray-700 mb-2">Description</h5>
+              <p className="text-gray-600 text-sm leading-relaxed">
+                {selectedIncident.description || 'No description provided.'}
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="bg-blue-50 p-3 rounded-lg">
+                <span className="text-xs text-blue-600 font-semibold block">Source</span>
+                <span className="text-sm font-medium text-gray-800">
+                  {selectedIncident.source === 'mobile_app' ? '📱 Mobile App' : '🖥️ Web Dashboard'}
+                </span>
+              </div>
+              <div className="bg-green-50 p-3 rounded-lg">
+                <span className="text-xs text-green-600 font-semibold block">Status</span>
+                <span className="text-sm font-medium text-gray-800">
+                  {selectedIncident.status?.replace('_', ' ').toUpperCase()}
+                </span>
+              </div>
+            </div>
+
+            {selectedIncident.latitude && (
+              <div className="text-xs text-gray-400 text-center pt-2">
+                Coordinates: {selectedIncident.latitude}, {selectedIncident.longitude}
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };
 
-const SimpleRoutePlanner = () => {
+const SimpleRoutePlanner = ({ incidents }) => {
   const [start, setStart] = useState('');
   const [destination, setDestination] = useState('');
   const [startSuggestions, setStartSuggestions] = useState([]);
@@ -97,9 +156,11 @@ const SimpleRoutePlanner = () => {
   const [showStartSuggestions, setShowStartSuggestions] = useState(false);
   const [showDestSuggestions, setShowDestSuggestions] = useState(false);
   const [loadingLocation, setLoadingLocation] = useState(false);
+  const [routeStatus, setRouteStatus] = useState(null);
 
   const handleStartChange = (value) => {
     setStart(value);
+    setRouteStatus(null);
     if (value.length > 0) {
       const suggestions = searchKigaliLocation(value);
       setStartSuggestions(suggestions.slice(0, 5));
@@ -111,6 +172,7 @@ const SimpleRoutePlanner = () => {
 
   const handleDestChange = (value) => {
     setDestination(value);
+    setRouteStatus(null);
     if (value.length > 0) {
       const suggestions = searchKigaliLocation(value);
       setDestSuggestions(suggestions.slice(0, 5));
@@ -152,12 +214,58 @@ const SimpleRoutePlanner = () => {
     );
   };
 
+  const checkRoute = () => {
+    if (!start || !destination) {
+      toast.error('Please enter both starting point and destination');
+      return;
+    }
+
+    toast.loading('Checking route...', { duration: 1000 });
+
+    // Debug info
+    console.log('Checking route:', { start, destination, incidentsCount: incidents?.length });
+
+    setTimeout(() => {
+      // Simple simulation: Check if any incidents match the start or destination names
+      const relevantIncidents = incidents?.filter(inc =>
+      (inc.location && (
+        inc.location.toLowerCase().includes(start.toLowerCase()) ||
+        inc.location.toLowerCase().includes(destination.toLowerCase()) ||
+        start.toLowerCase().includes(inc.location.toLowerCase()) ||
+        destination.toLowerCase().includes(inc.location.toLowerCase())
+      ))
+      ) || [];
+
+      if (relevantIncidents.length > 0) {
+        setRouteStatus({
+          status: 'warning',
+          message: `⚠️ Caution: ${relevantIncidents.length} incident(s) reported on your route.`,
+          incidents: relevantIncidents
+        });
+        toast.error(`Found ${relevantIncidents.length} incidents!`);
+      } else {
+        setRouteStatus({
+          status: 'safe',
+          message: '✅ Route appears clear. No incidents reported near start or destination.',
+          incidents: []
+        });
+        toast.success('Route appears clear!');
+      }
+    }, 1000);
+  };
+
   return (
     <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-      <h3 className="text-xl font-bold mb-6 flex items-center text-gray-800">
-        <Navigation className="w-6 h-6 mr-2 text-blue-600" />
-        Plan Your Route
-      </h3>
+      <div className="flex justify-between items-center mb-6">
+        <h3 className="text-xl font-bold flex items-center text-gray-800">
+          <Navigation className="w-6 h-6 mr-2 text-blue-600" />
+          Plan Your Route
+        </h3>
+        <span className="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded-full border border-blue-100">
+          {incidents?.length || 0} Active Incidents
+        </span>
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="relative">
           <label className="block text-sm font-medium text-gray-700 mb-2">Starting Point</label>
@@ -228,17 +336,55 @@ const SimpleRoutePlanner = () => {
           </div>
         </div>
       </div>
+
+      {routeStatus && (
+        <div className={`mt-6 p-4 rounded-xl border-2 animate-in fade-in zoom-in duration-300 ${routeStatus.status === 'safe'
+            ? 'bg-green-50 border-green-200'
+            : 'bg-orange-50 border-orange-200'
+          }`}>
+          <div className="flex items-start gap-4">
+            <div className={`p-2 rounded-full ${routeStatus.status === 'safe' ? 'bg-green-100' : 'bg-orange-100'
+              }`}>
+              {routeStatus.status === 'safe'
+                ? <Navigation className="w-6 h-6 text-green-600" />
+                : <AlertTriangle className="w-6 h-6 text-orange-600" />
+              }
+            </div>
+            <div className="flex-1">
+              <h4 className={`text-lg font-bold mb-1 ${routeStatus.status === 'safe' ? 'text-green-800' : 'text-orange-800'
+                }`}>
+                {routeStatus.status === 'safe' ? 'Route Clear' : 'Incidents Detected'}
+              </h4>
+              <p className={`text-sm ${routeStatus.status === 'safe' ? 'text-green-700' : 'text-orange-700'
+                }`}>
+                {routeStatus.message}
+              </p>
+
+              {routeStatus.incidents.length > 0 && (
+                <div className="mt-3 bg-white/50 rounded-lg p-3">
+                  <p className="text-xs font-semibold text-orange-800 mb-2 uppercase tracking-wider">Reported Incidents:</p>
+                  <ul className="space-y-2">
+                    {routeStatus.incidents.map((inc, i) => (
+                      <li key={i} className="text-sm flex items-center text-gray-800">
+                        <span className="w-1.5 h-1.5 bg-orange-500 rounded-full mr-2"></span>
+                        <span className="font-medium">{inc.incident_type}</span>
+                        <span className="mx-1 text-gray-400">•</span>
+                        <span className="text-gray-600">{inc.location}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       <button
-        onClick={() => {
-          if (start && destination) {
-            toast.success(`Checking route...`);
-            // Here you would integrate with a routing API
-          } else {
-            toast.error('Please enter both starting point and destination');
-          }
-        }}
-        className="mt-6 w-full bg-gradient-to-r from-blue-600 to-blue-700 text-white py-3.5 rounded-xl font-bold shadow-lg hover:shadow-xl transition-all transform hover:scale-[1.01]"
+        onClick={checkRoute}
+        className="mt-6 w-full bg-gradient-to-r from-blue-600 to-blue-700 text-white py-4 rounded-xl font-bold shadow-lg hover:shadow-xl transition-all transform hover:scale-[1.01] flex items-center justify-center"
       >
+        <Search className="w-5 h-5 mr-2" />
         Check Route for Incidents
       </button>
     </div>
@@ -603,7 +749,7 @@ const HomePage = () => {
         {showRoutePlanner && (
           <div className="bg-white border-b border-gray-200 shadow-lg animate-in slide-in-from-top duration-300">
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-              <SimpleRoutePlanner />
+              <SimpleRoutePlanner incidents={incidents} />
             </div>
           </div>
         )}

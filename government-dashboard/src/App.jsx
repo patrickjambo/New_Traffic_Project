@@ -23,24 +23,39 @@ function AppContent() {
   // If user is admin/police, show the admin dashboard layout with sidebar
   if (isAuthenticated && (user?.role === 'admin' || user?.role === 'police')) {
     return (
-      <div className="flex h-screen bg-slate-900">
-        <Sidebar isOpen={sidebarOpen} />
+      <div className="flex h-screen bg-slate-900 relative overflow-hidden">
+        {/* Background Watermark */}
+        <div className="absolute inset-0 pointer-events-none z-0">
+          <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-slate-900 to-blue-950 opacity-90"></div>
+          <img
+            src="/assets/rnp-logo.png"
+            alt=""
+            className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] object-contain opacity-5"
+            style={{
+              filter: 'grayscale(100%) brightness(2)'
+            }}
+          />
+        </div>
 
-        <div className="flex-1 flex flex-col overflow-hidden">
-          <Header onMenuClick={() => setSidebarOpen(!sidebarOpen)} />
+        <div className="relative z-10 flex h-full w-full">
+          <Sidebar isOpen={sidebarOpen} />
 
-          <main className="flex-1 overflow-x-hidden overflow-y-auto">
-            <Routes>
-              <Route path="/" element={<Navigate to="/dashboard" replace />} />
-              <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/incidents" element={<Incidents />} />
-              <Route path="/reports" element={<Reports />} />
-              <Route path="/emergency" element={<Emergency />} />
-              <Route path="/analytics" element={<Analytics />} />
-              <Route path="/settings" element={<Settings />} />
-              <Route path="*" element={<Navigate to="/dashboard" replace />} />
-            </Routes>
-          </main>
+          <div className="flex-1 flex flex-col overflow-hidden">
+            <Header onMenuClick={() => setSidebarOpen(!sidebarOpen)} />
+
+            <main className="flex-1 overflow-x-hidden overflow-y-auto">
+              <Routes>
+                <Route path="/" element={<Navigate to="/dashboard" replace />} />
+                <Route path="/dashboard" element={<DashboardPage />} />
+                <Route path="/incidents" element={<Incidents />} />
+                <Route path="/reports" element={<Reports />} />
+                <Route path="/emergency" element={<Emergency />} />
+                <Route path="/analytics" element={<Analytics />} />
+                <Route path="/settings" element={<Settings />} />
+                <Route path="*" element={<Navigate to="/dashboard" replace />} />
+              </Routes>
+            </main>
+          </div>
         </div>
       </div>
     );

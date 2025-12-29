@@ -7,6 +7,7 @@ import { searchKigaliLocation } from '../data/kigaliLocations';
 import ReportIncidentForm from '../components/ReportIncidentForm';
 import Modal from '../components/Modal';
 import DailyIncidentsModal from '../components/DailyIncidentsModal';
+import RoutePlannerMap from '../components/RoutePlannerMap';
 import toast from 'react-hot-toast';
 
 // Simple components without heavy dependencies
@@ -757,7 +758,7 @@ const HomePage = () => {
         {showRoutePlanner && (
           <div className="bg-white border-b border-gray-200 shadow-lg animate-in slide-in-from-top duration-300">
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-              <SimpleRoutePlanner incidents={incidents} />
+              <RoutePlannerMap incidents={incidents} />
             </div>
           </div>
         )}

@@ -96,9 +96,15 @@ const ROUTE_COLORS = {
 
 // Get route base color by index
 const getRouteBaseColor = (index) => {
-    if (index === 0) return '#22c55e'; // Green - recommended
-    if (index === 1) return '#3b82f6'; // Blue - alternative 1
-    return '#f97316'; // Orange - alternative 2+
+    const colors = [
+        '#22c55e', // Green - recommended
+        '#3b82f6', // Blue - alternative 1
+        '#f97316', // Orange - alternative 2
+        '#ec4899', // Pink - alternative 3
+        '#14b8a6', // Teal - alternative 4
+        '#8b5cf6', // Violet - alternative 5
+    ];
+    return colors[index % colors.length];
 };
 
 // Create a floating label icon for routes (like Google Maps)
@@ -410,28 +416,29 @@ const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
 
             let allRoutes = [...data.routes];
 
-            // If OSRM only returned 1 route, try to get alternatives via waypoints
-            if (allRoutes.length < 2) {
-                console.log('Only 1 route returned, attempting to find alternatives via waypoints...');
+            // Always attempt to find more alternatives via waypoints if we have fewer than 4 routes
+            if (allRoutes.length < 4) {
+                console.log(`Found ${allRoutes.length} routes, attempting to find more alternatives via waypoints...`);
 
-                // Calculate a perpendicular offset point to create alternative routes
+                // Calculate midpoint and direction
                 const midLat = (startPoint.lat + endPoint.lat) / 2;
                 const midLng = (startPoint.lng + endPoint.lng) / 2;
-
-                // Calculate direction vector and perpendicular
                 const dLat = endPoint.lat - startPoint.lat;
                 const dLng = endPoint.lng - startPoint.lng;
 
-                // Offset perpendicular to the route (positive and negative)
-                const offsetScale = 0.015; // Approximately 1.5km offset
+                // Multiple offsets for diversity (1km and 2.5km approximately)
+                const offsets = [0.01, 0.025];
 
-                const waypoints = [
-                    { lat: midLat + dLng * offsetScale, lng: midLng - dLat * offsetScale }, // North-ish
-                    { lat: midLat - dLng * offsetScale, lng: midLng + dLat * offsetScale }, // South-ish
-                ];
+                const waypoints = [];
+                offsets.forEach(scale => {
+                    waypoints.push({ lat: midLat + dLng * scale, lng: midLng - dLat * scale }); // Perpendicular side A
+                    waypoints.push({ lat: midLat - dLng * scale, lng: midLng + dLat * scale }); // Perpendicular side B
+                });
 
                 // Fetch routes via each waypoint
                 for (let i = 0; i < waypoints.length; i++) {
+                    if (allRoutes.length >= 5) break; // Limit to 5 total routes to avoid clutter
+
                     try {
                         const wp = waypoints[i];
                         const altUrl = `https://router.project-osrm.org/route/v1/driving/${startPoint.lng},${startPoint.lat};${wp.lng},${wp.lat};${endPoint.lng},${endPoint.lat}?overview=full&steps=true&geometries=polyline`;
@@ -441,15 +448,19 @@ const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
 
                         if (altData.code === 'Ok' && altData.routes && altData.routes.length > 0) {
                             const altRoute = altData.routes[0];
-                            // Check if this route is significantly different (at least 5% different distance)
-                            const existingDistances = allRoutes.map(r => r.distance);
-                            const isDifferent = existingDistances.every(d =>
-                                Math.abs(d - altRoute.distance) / d > 0.05
-                            );
+
+                            // Check if this route is significantly different
+                            // 1. Distance difference > 5%
+                            // 2. Duration difference > 5%
+                            const isDifferent = allRoutes.every(r => {
+                                const distDiff = Math.abs(r.distance - altRoute.distance) / r.distance;
+                                const durDiff = Math.abs(r.duration - altRoute.duration) / r.duration;
+                                return distDiff > 0.05 || durDiff > 0.05;
+                            });
 
                             if (isDifferent) {
                                 allRoutes.push(altRoute);
-                                console.log(`Added alternative route ${i + 1} via waypoint`);
+                                console.log(`Added diverse alternative route via waypoint ${i + 1}`);
                             }
                         }
                     } catch (err) {
@@ -458,7 +469,7 @@ const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
                 }
             }
 
-            console.log(`Total routes found: ${allRoutes.length}`);
+            console.log(`Total diverse routes found: ${allRoutes.length}`);
 
             // Process routes
             const processedRoutes = allRoutes.map((route, index) => {
@@ -498,16 +509,18 @@ const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
             }
 
             // Show toast with results
-            const bestRoute = processedRoutes[0];
             if (processedRoutes.length > 1) {
-                toast.success(`Found ${processedRoutes.length} routes! Compare and choose the best one.`);
-            } else if (bestRoute.hasIncidents) {
-                toast(`⚠️ Found 1 route with ${bestRoute.incidents.length} incident(s).`, {
-                    icon: '🚧',
-                    duration: 4000
-                });
+                toast.success(`Found ${processedRoutes.length} diverse routes! Compare and choose the best one.`);
             } else {
-                toast.success(`Found 1 route. Route is clear!`);
+                const bestRoute = processedRoutes[0];
+                if (bestRoute?.hasIncidents) {
+                    toast(`⚠️ Found 1 route with ${bestRoute.incidents.length} incident(s).`, {
+                        icon: '🚧',
+                        duration: 4000
+                    });
+                } else {
+                    toast.success(`Found 1 route. Route is clear!`);
+                }
             }
 
         } catch (error) {
@@ -749,47 +762,7 @@ const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
                             })}
                         </div>
                     )}
-
-                    {/* Legend */}
-                    <div className="mt-6 p-3 bg-gray-100 rounded-lg">
-                        <h4 className="text-xs font-semibold text-gray-600 mb-2">ROUTE COLORS</h4>
-                        <div className="space-y-1 text-xs mb-4">
-                            <div className="flex items-center">
-                                <div className="w-6 h-1.5 bg-green-500 rounded mr-2" />
-                                <span>🥇 Recommended (Safest)</span>
-                            </div>
-                            <div className="flex items-center">
-                                <div className="w-6 h-1.5 bg-blue-500 rounded mr-2" />
-                                <span>🥈 Alternative Route 1</span>
-                            </div>
-                            <div className="flex items-center">
-                                <div className="w-6 h-1.5 bg-orange-500 rounded mr-2" />
-                                <span>🥉 Alternative Route 2</span>
-                            </div>
-                            <div className="flex items-center">
-                                <div className="w-6 h-1.5 bg-purple-500 rounded mr-2" />
-                                <span>✓ Selected Route</span>
-                            </div>
-                        </div>
-
-                        <h4 className="text-xs font-semibold text-gray-600 mb-2 pt-2 border-t border-gray-200">INCIDENT SYMBOLS</h4>
-                        <div className="grid grid-cols-1 gap-1 text-xs">
-                            {Object.entries(INCIDENT_TYPES).map(([key, config]) => (
-                                <div key={key} className="flex items-center py-1">
-                                    <div
-                                        className="w-6 h-6 rounded-full flex items-center justify-center text-xs mr-2"
-                                        style={{ backgroundColor: config.color }}
-                                    >
-                                        <span className="text-white">{config.emoji.split(' ')[0]}</span>
-                                    </div>
-                                    <div>
-                                        <span className="font-medium">{config.label}</span>
-                                        <span className="text-gray-400 ml-1">- {config.description}</span>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
+                    {/* Legend removed from here */}
                 </div>
 
                 {/* Right Panel - Map */}
@@ -1013,6 +986,55 @@ const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
                             );
                         })}
                     </MapContainer>
+                </div>
+            </div>
+
+            {/* Horizontal Legend Section below Map */}
+            <div className="bg-white border-t border-gray-200 p-4">
+                <div className="flex flex-wrap items-center justify-center gap-x-8 gap-y-4">
+                    {/* Route Colors Legend */}
+                    <div className="flex items-center gap-4">
+                        <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Routes:</span>
+                        <div className="flex items-center gap-4">
+                            <div className="flex items-center text-xs">
+                                <div className="w-4 h-1.5 bg-green-500 rounded mr-1.5" />
+                                <span className="text-gray-700">Recommended</span>
+                            </div>
+                            <div className="flex items-center text-xs">
+                                <div className="w-4 h-1.5 bg-blue-500 rounded mr-1.5" />
+                                <span className="text-gray-700">Alt 1</span>
+                            </div>
+                            <div className="flex items-center text-xs">
+                                <div className="w-4 h-1.5 bg-orange-500 rounded mr-1.5" />
+                                <span className="text-gray-700">Alt 2</span>
+                            </div>
+                            <div className="flex items-center text-xs">
+                                <div className="w-4 h-1.5 bg-purple-500 rounded mr-1.5" />
+                                <span className="text-gray-700 font-semibold">Selected</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Divider */}
+                    <div className="hidden md:block w-px h-6 bg-gray-200" />
+
+                    {/* Incident Symbols Legend */}
+                    <div className="flex items-center gap-3">
+                        <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Incidents:</span>
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                            {Object.entries(INCIDENT_TYPES).map(([key, config]) => (
+                                <div key={key} className="flex items-center text-xs">
+                                    <div
+                                        className="w-5 h-5 rounded-full flex items-center justify-center mr-1.5 shadow-sm"
+                                        style={{ backgroundColor: config.color }}
+                                    >
+                                        <span className="text-[10px] text-white">{config.emoji.split(' ')[0]}</span>
+                                    </div>
+                                    <span className="text-gray-700">{config.label}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
                 </div>
             </div>
 

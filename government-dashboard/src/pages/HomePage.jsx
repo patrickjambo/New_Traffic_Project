@@ -6,6 +6,7 @@ import { useAuth } from '../context/AuthContext';
 import { searchKigaliLocation } from '../data/kigaliLocations';
 import ReportIncidentForm from '../components/ReportIncidentForm';
 import Modal from '../components/Modal';
+import DailyIncidentsModal from '../components/DailyIncidentsModal';
 import toast from 'react-hot-toast';
 
 // Simple components without heavy dependencies
@@ -24,56 +25,59 @@ const SimpleIncidentMap = ({ incidents }) => {
             {incidents?.length || 0} Active
           </span>
         </h4>
-        {incidents && incidents.length > 0 ? (
+        {Array.isArray(incidents) && incidents.length > 0 ? (
           <div className="space-y-2">
-            {incidents.map((incident, idx) => (
-              <div
-                key={incident.id || idx}
-                onClick={() => setSelectedIncident(incident)}
-                className={`p-3 rounded border-l-4 cursor-pointer transition-all hover:shadow-md ${selectedIncident?.id === incident.id ? 'bg-blue-100 border-blue-600' :
-                  incident.severity === 'critical' ? 'bg-red-50 border-red-500' :
-                    incident.severity === 'high' ? 'bg-orange-50 border-orange-500' :
-                      'bg-blue-50 border-blue-500'
-                  }`}
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <p className="font-semibold text-sm text-gray-800 flex items-center">
-                      {incident.incident_type}
-                      {incident.source === 'mobile_app' && (
-                        <span className="ml-2 text-xs bg-purple-100 text-purple-800 px-2 py-0.5 rounded">📱 Auto</span>
+            {incidents.map((incident, idx) => {
+              if (!incident) return null;
+              return (
+                <div
+                  key={incident.id || idx}
+                  onClick={() => setSelectedIncident(incident)}
+                  className={`p-3 rounded border-l-4 cursor-pointer transition-all hover:shadow-md ${selectedIncident?.id === incident.id ? 'bg-blue-100 border-blue-600' :
+                    incident.severity === 'critical' ? 'bg-red-50 border-red-500' :
+                      incident.severity === 'high' ? 'bg-orange-50 border-orange-500' :
+                        'bg-blue-50 border-blue-500'
+                    }`}
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <p className="font-semibold text-sm text-gray-800 flex items-center">
+                        {incident.incident_type}
+                        {incident.source === 'mobile_app' && (
+                          <span className="ml-2 text-xs bg-purple-100 text-purple-800 px-2 py-0.5 rounded">📱 Auto</span>
+                        )}
+                      </p>
+                      <p className="text-xs text-gray-600 mt-1 flex items-center">
+                        📍 {incident.location || 'Kigali'}
+                      </p>
+                      {incident.description && (
+                        <p className="text-xs text-gray-500 mt-1 line-clamp-2">{incident.description}</p>
                       )}
-                    </p>
-                    <p className="text-xs text-gray-600 mt-1 flex items-center">
-                      📍 {incident.location || 'Kigali'}
-                    </p>
-                    {incident.description && (
-                      <p className="text-xs text-gray-500 mt-1 line-clamp-2">{incident.description}</p>
-                    )}
-                    <div className="flex items-center gap-2 mt-2">
-                      <span className="text-xs text-gray-400">
-                        {incident.latitude?.toFixed(4)}, {incident.longitude?.toFixed(4)}
+                      <div className="flex items-center gap-2 mt-2">
+                        <span className="text-xs text-gray-400">
+                          {incident.latitude?.toFixed(4)}, {incident.longitude?.toFixed(4)}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex flex-col gap-1 items-end ml-2">
+                      <span className={`text-xs px-2 py-1 rounded font-medium ${incident.severity === 'critical' ? 'bg-red-100 text-red-800' :
+                        incident.severity === 'high' ? 'bg-orange-100 text-orange-800' :
+                          incident.severity === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+                            'bg-blue-100 text-blue-800'
+                        }`}>
+                        {incident.severity || 'Low'}
+                      </span>
+                      <span className={`text-xs px-2 py-1 rounded ${incident.status === 'resolved' ? 'bg-green-100 text-green-800' :
+                        incident.status === 'in_progress' ? 'bg-blue-100 text-blue-800' :
+                          'bg-gray-100 text-gray-800'
+                        }`}>
+                        {incident.status?.replace('_', ' ') || 'Pending'}
                       </span>
                     </div>
                   </div>
-                  <div className="flex flex-col gap-1 items-end ml-2">
-                    <span className={`text-xs px-2 py-1 rounded font-medium ${incident.severity === 'critical' ? 'bg-red-100 text-red-800' :
-                      incident.severity === 'high' ? 'bg-orange-100 text-orange-800' :
-                        incident.severity === 'medium' ? 'bg-yellow-100 text-yellow-800' :
-                          'bg-blue-100 text-blue-800'
-                      }`}>
-                      {incident.severity || 'Low'}
-                    </span>
-                    <span className={`text-xs px-2 py-1 rounded ${incident.status === 'resolved' ? 'bg-green-100 text-green-800' :
-                      incident.status === 'in_progress' ? 'bg-blue-100 text-blue-800' :
-                        'bg-gray-100 text-gray-800'
-                      }`}>
-                      {incident.status?.replace('_', ' ') || 'Pending'}
-                    </span>
-                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <div className="flex items-center justify-center h-full">
@@ -227,14 +231,14 @@ const SimpleRoutePlanner = ({ incidents }) => {
 
     setTimeout(() => {
       // Simple simulation: Check if any incidents match the start or destination names
-      const relevantIncidents = incidents?.filter(inc =>
-      (inc.location && (
+      const relevantIncidents = (Array.isArray(incidents) ? incidents : []).filter(inc =>
+      (inc && inc.location && (
         inc.location.toLowerCase().includes(start.toLowerCase()) ||
         inc.location.toLowerCase().includes(destination.toLowerCase()) ||
         start.toLowerCase().includes(inc.location.toLowerCase()) ||
         destination.toLowerCase().includes(inc.location.toLowerCase())
       ))
-      ) || [];
+      );
 
       if (relevantIncidents.length > 0) {
         setRouteStatus({
@@ -339,8 +343,8 @@ const SimpleRoutePlanner = ({ incidents }) => {
 
       {routeStatus && (
         <div className={`mt-6 p-4 rounded-xl border-2 animate-in fade-in zoom-in duration-300 ${routeStatus.status === 'safe'
-            ? 'bg-green-50 border-green-200'
-            : 'bg-orange-50 border-orange-200'
+          ? 'bg-green-50 border-green-200'
+          : 'bg-orange-50 border-orange-200'
           }`}>
           <div className="flex items-start gap-4">
             <div className={`p-2 rounded-full ${routeStatus.status === 'safe' ? 'bg-green-100' : 'bg-orange-100'
@@ -431,58 +435,61 @@ const SimpleLiveIncidentFeed = ({ incidents, loading }) => {
           <div className="spinner mx-auto mb-2"></div>
           <p className="text-sm text-gray-500">Loading incidents...</p>
         </div>
-      ) : incidents && incidents.length > 0 ? (
+      ) : Array.isArray(incidents) && incidents.length > 0 ? (
         <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2">
-          {incidents.map((incident, idx) => (
-            <div key={incident.id || idx} className="p-3 bg-gradient-to-r from-gray-50 to-white rounded-lg border border-gray-200 hover:border-blue-300 hover:shadow-md transition-all">
-              <div className="flex items-start justify-between mb-2">
-                <h4 className="font-semibold text-sm text-gray-800 flex items-center gap-2">
-                  <span className={`w-2 h-2 rounded-full ${incident.severity === 'critical' ? 'bg-red-500 animate-pulse' :
-                    incident.severity === 'high' ? 'bg-orange-500' :
-                      incident.severity === 'medium' ? 'bg-yellow-500' :
-                        'bg-blue-500'
-                    }`}></span>
-                  {incident.incident_type || 'Traffic Incident'}
-                </h4>
-                <span className={`text-xs px-2 py-1 rounded font-medium ${incident.severity === 'critical' ? 'bg-red-100 text-red-800' :
-                  incident.severity === 'high' ? 'bg-orange-100 text-orange-800' :
-                    incident.severity === 'medium' ? 'bg-yellow-100 text-yellow-800' :
-                      'bg-blue-100 text-blue-800'
-                  }`}>
-                  {incident.severity || 'Low'}
-                </span>
-              </div>
-
-              <p className="text-xs text-gray-600 flex items-center mb-2">
-                <MapPin className="w-3 h-3 mr-1 flex-shrink-0" />
-                <span className="line-clamp-1">{incident.location || 'Kigali'}</span>
-              </p>
-
-              {incident.description && (
-                <p className="text-xs text-gray-500 mb-2 line-clamp-2">{incident.description}</p>
-              )}
-
-              <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-100">
-                <div className="flex items-center gap-2">
-                  <span className={`text-xs px-2 py-1 rounded ${incident.status === 'resolved' ? 'bg-green-100 text-green-800' :
-                    incident.status === 'in_progress' ? 'bg-blue-100 text-blue-800' :
-                      'bg-gray-100 text-gray-800'
+          {incidents.map((incident, idx) => {
+            if (!incident) return null;
+            return (
+              <div key={incident.id || idx} className="p-3 bg-gradient-to-r from-gray-50 to-white rounded-lg border border-gray-200 hover:border-blue-300 hover:shadow-md transition-all">
+                <div className="flex items-start justify-between mb-2">
+                  <h4 className="font-semibold text-sm text-gray-800 flex items-center gap-2">
+                    <span className={`w-2 h-2 rounded-full ${incident.severity === 'critical' ? 'bg-red-500 animate-pulse' :
+                      incident.severity === 'high' ? 'bg-orange-500' :
+                        incident.severity === 'medium' ? 'bg-yellow-500' :
+                          'bg-blue-500'
+                      }`}></span>
+                    {incident.incident_type || 'Traffic Incident'}
+                  </h4>
+                  <span className={`text-xs px-2 py-1 rounded font-medium ${incident.severity === 'critical' ? 'bg-red-100 text-red-800' :
+                    incident.severity === 'high' ? 'bg-orange-100 text-orange-800' :
+                      incident.severity === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+                        'bg-blue-100 text-blue-800'
                     }`}>
-                    {incident.status?.replace('_', ' ') || 'Pending'}
+                    {incident.severity || 'Low'}
                   </span>
-                  {incident.source === 'mobile_app' && (
-                    <span className="text-xs bg-purple-100 text-purple-800 px-2 py-1 rounded flex items-center gap-1">
-                      <span>📱</span> Auto
-                    </span>
-                  )}
                 </div>
-                <span className="text-xs text-gray-400 flex items-center">
-                  <Clock className="w-3 h-3 mr-1" />
-                  {formatTime(incident.created_at)}
-                </span>
+
+                <p className="text-xs text-gray-600 flex items-center mb-2">
+                  <MapPin className="w-3 h-3 mr-1 flex-shrink-0" />
+                  <span className="line-clamp-1">{incident.location || 'Kigali'}</span>
+                </p>
+
+                {incident.description && (
+                  <p className="text-xs text-gray-500 mb-2 line-clamp-2">{incident.description}</p>
+                )}
+
+                <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-100">
+                  <div className="flex items-center gap-2">
+                    <span className={`text-xs px-2 py-1 rounded ${incident.status === 'resolved' ? 'bg-green-100 text-green-800' :
+                      incident.status === 'in_progress' ? 'bg-blue-100 text-blue-800' :
+                        'bg-gray-100 text-gray-800'
+                      }`}>
+                      {incident.status?.replace('_', ' ') || 'Pending'}
+                    </span>
+                    {incident.source === 'mobile_app' && (
+                      <span className="text-xs bg-purple-100 text-purple-800 px-2 py-1 rounded flex items-center gap-1">
+                        <span>📱</span> Auto
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-xs text-gray-400 flex items-center">
+                    <Clock className="w-3 h-3 mr-1" />
+                    {formatTime(incident.created_at)}
+                  </span>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       ) : (
         <div className="text-center py-12 text-gray-500">
@@ -513,6 +520,7 @@ const HomePage = () => {
   // Modal States
   const [showIncidentModal, setShowIncidentModal] = useState(false);
   const [showEmergencyModal, setShowEmergencyModal] = useState(false);
+  const [showDailyIncidentsModal, setShowDailyIncidentsModal] = useState(false);
 
   // Debug logging
   useEffect(() => {
@@ -776,16 +784,16 @@ const HomePage = () => {
 
               {/* Quick Actions (Moved here for better flow) */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <Link
-                  to="/incidents"
-                  className="bg-white border border-gray-200 rounded-xl shadow-sm p-6 hover:shadow-md transition-all hover:-translate-y-1 group"
+                <button
+                  onClick={() => setShowDailyIncidentsModal(true)}
+                  className="bg-white border border-gray-200 rounded-xl shadow-sm p-6 hover:shadow-md transition-all hover:-translate-y-1 group text-left w-full"
                 >
                   <div className="w-12 h-12 bg-red-50 rounded-full flex items-center justify-center mb-4 group-hover:bg-red-100 transition-colors">
                     <AlertTriangle className="w-6 h-6 text-red-600" />
                   </div>
                   <h3 className="text-lg font-bold mb-2 text-gray-900">View Incidents</h3>
                   <p className="text-sm text-gray-500">Monitor real-time traffic incidents across Kigali</p>
-                </Link>
+                </button>
 
                 <button
                   onClick={() => setShowIncidentModal(true)}
@@ -897,6 +905,11 @@ const HomePage = () => {
       >
         <ReportIncidentForm isEmergency onSuccess={() => setShowEmergencyModal(false)} />
       </Modal>
+      {/* Daily Incidents Modal */}
+      <DailyIncidentsModal
+        isOpen={showDailyIncidentsModal}
+        onClose={() => setShowDailyIncidentsModal(false)}
+      />
     </div>
   );
 };

@@ -5,6 +5,7 @@ import { WebSocketProvider } from './context/WebSocketContext';
 import { DataProvider } from './context/DataContext';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
+import ErrorBoundary from './components/ErrorBoundary';
 import HomePage from './pages/HomePage';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
@@ -65,7 +66,11 @@ function AppContent() {
   return (
     <div className="min-h-screen bg-gray-50">
       <Routes>
-        <Route path="/" element={<HomePage />} />
+        <Route path="/" element={
+          <ErrorBoundary>
+            <HomePage />
+          </ErrorBoundary>
+        } />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/dashboard" element={<DashboardPage />} />

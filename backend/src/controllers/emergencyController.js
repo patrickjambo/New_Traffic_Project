@@ -517,6 +517,84 @@ const getEmergencyStats = async (req, res) => {
     }
 };
 
+const generateEmergencyReport = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const result = await db.query(
+            `SELECT 
+                e.*,
+                u.username as reporter_name,
+                u.email as reporter_email,
+                u.phone as reporter_phone,
+                assigned.username as assigned_to_name
+            FROM emergencies e
+            LEFT JOIN users u ON e.user_id = u.id
+            LEFT JOIN users assigned ON e.assigned_to = assigned.id
+            WHERE e.id = $1`,
+            [id]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Emergency not found',
+            });
+        }
+
+        const emergency = result.rows[0];
+
+        // Generate a formatted text report
+        const report = `
+==================================================
+RNP TRAFFIC MANAGEMENT - EMERGENCY REPORT
+==================================================
+Report ID: ${emergency.id}
+Generated: ${new Date().toLocaleString()}
+--------------------------------------------------
+TYPE: ${emergency.emergency_type.toUpperCase()}
+SEVERITY: ${emergency.severity.toUpperCase()}
+STATUS: ${emergency.status.toUpperCase()}
+--------------------------------------------------
+LOCATION: ${emergency.location_name}
+COORDINATES: ${emergency.latitude}, ${emergency.longitude}
+--------------------------------------------------
+DESCRIPTION:
+${emergency.description}
+--------------------------------------------------
+REPORTER DETAILS:
+Name: ${emergency.contact_name || emergency.reporter_name || 'Anonymous'}
+Phone: ${emergency.contact_phone}
+Email: ${emergency.reporter_email || 'N/A'}
+--------------------------------------------------
+INCIDENT DATA:
+Casualties: ${emergency.casualties_count}
+Vehicles Involved: ${emergency.vehicles_involved}
+Services Needed: ${Array.isArray(emergency.services_needed) ? emergency.services_needed.join(', ') : emergency.services_needed}
+--------------------------------------------------
+RESPONSE DATA:
+Assigned To: ${emergency.assigned_to_name || 'Unassigned'}
+Responder Notes: ${emergency.responder_notes || 'No notes yet'}
+Created At: ${new Date(emergency.created_at).toLocaleString()}
+Updated At: ${new Date(emergency.updated_at).toLocaleString()}
+==================================================
+CONFIDENTIAL - OFFICIAL USE ONLY
+==================================================
+`;
+
+        res.setHeader('Content-Type', 'text/plain');
+        res.setHeader('Content-Disposition', `attachment; filename=emergency_report_${id}.txt`);
+        res.send(report);
+    } catch (error) {
+        console.error('Generate emergency report error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to generate report',
+            error: error.message,
+        });
+    }
+};
+
 module.exports = {
     createEmergency,
     getEmergencies,
@@ -524,4 +602,5 @@ module.exports = {
     updateEmergencyStatus,
     getUserEmergencies,
     getEmergencyStats,
+    generateEmergencyReport,
 };

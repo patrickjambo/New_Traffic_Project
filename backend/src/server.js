@@ -83,6 +83,7 @@ app.use('/api', detectionRoutes);  // Detection endpoint: /api/detect
 app.use('/api/police', require('./routes/police'));
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api/dashboard', require('./routes/dashboard'));
+app.use('/api/notifications', require('./routes/notifications'));
 
 // Webhook endpoint for AI service analysis callbacks
 app.post('/webhook/analysis-complete', async (req, res) => {

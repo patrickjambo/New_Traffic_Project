@@ -1,41 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useData } from '../context/DataContext';
 import { AlertTriangle, Search, Filter, CheckCircle, Clock, MapPin } from 'lucide-react';
 import axios from '../config/axios';
 import toast from 'react-hot-toast';
 
 const Incidents = () => {
   const { isAuthenticated } = useAuth();
-  const [incidents, setIncidents] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const { incidents, loading, updateIncidentStatus } = useData();
   const [filter, setFilter] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
 
-  useEffect(() => {
-    fetchIncidents();
-  }, []);
-
-  const fetchIncidents = async () => {
-    try {
-      const response = await axios.get('/incidents');
-      setIncidents(response.data.data?.incidents || []);
-      setLoading(false);
-    } catch (error) {
-      console.error('Error fetching incidents:', error);
-      toast.error('Failed to load incidents');
-      setLoading(false);
-    }
-  };
-
   const handleStatusUpdate = async (id, newStatus) => {
-    try {
-      await axios.patch(`/incidents/${id}/status`, { status: newStatus });
-      toast.success(`Incident status updated to ${newStatus}`);
-      fetchIncidents();
-    } catch (error) {
-      console.error('Error updating status:', error);
-      toast.error('Failed to update status');
+    const result = await updateIncidentStatus(id, newStatus);
+    if (result.success) {
+      // DataContext will handle the state update via WebSocket
     }
   };
 

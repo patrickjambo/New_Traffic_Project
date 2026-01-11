@@ -111,7 +111,23 @@ class SocketManager {
             priority: incident.severity === 'critical' || incident.severity === 'high' ? 'high' : 'normal',
         });
 
-        console.log(`📢 Emitted incident:new - ID: ${incident.id}`);
+        // Emit notification for police and admin
+        this.emitNotificationToRole('police', {
+            id: `inc_${incident.id}`,
+            title: `New Incident: ${incident.type}`,
+            message: `A new ${incident.severity} severity incident has been reported at ${incident.address || 'Unknown location'}.`,
+            type: 'incident',
+            created_at: incident.created_at
+        });
+        this.emitNotificationToRole('admin', {
+            id: `inc_${incident.id}`,
+            title: `New Incident: ${incident.type}`,
+            message: `A new ${incident.severity} severity incident has been reported at ${incident.address || 'Unknown location'}.`,
+            type: 'incident',
+            created_at: incident.created_at
+        });
+
+        console.log(`📢 Emitted incident:new and notifications - ID: ${incident.id}`);
     }
 
     /**
@@ -170,7 +186,18 @@ class SocketManager {
             priority: emergency.severity === 'critical' ? 'critical' : 'high',
         });
 
-        console.log(`🚨 Emitted emergency:new - ID: ${emergency.id}`);
+        // Emit notification for police and admin
+        const emergencyNotification = {
+            id: `em_${emergency.id}`,
+            title: `🚨 EMERGENCY: ${emergency.type}`,
+            message: `URGENT: ${emergency.severity} severity emergency at ${emergency.location_name}. Services needed: ${Array.isArray(emergency.services_needed) ? emergency.services_needed.join(', ') : 'Immediate attention'}.`,
+            type: 'emergency',
+            created_at: emergency.created_at
+        };
+        this.emitNotificationToRole('police', emergencyNotification);
+        this.emitNotificationToRole('admin', emergencyNotification);
+
+        console.log(`🚨 Emitted emergency:new and notifications - ID: ${emergency.id}`);
     }
 
     /**

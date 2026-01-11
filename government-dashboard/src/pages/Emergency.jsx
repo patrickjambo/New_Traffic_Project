@@ -1,36 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useData } from '../context/DataContext';
 import { Users, Phone, MapPin, Clock, AlertTriangle, CheckCircle, XCircle } from 'lucide-react';
 import axios from '../config/axios';
 import toast from 'react-hot-toast';
 
 const Emergency = () => {
   const { isAuthenticated } = useAuth();
-  const [emergencies, setEmergencies] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    fetchEmergencies();
-  }, []);
-
-  const fetchEmergencies = async () => {
-    try {
-      const response = await axios.get('/emergency');
-      setEmergencies(response.data.data || []);
-      setLoading(false);
-    } catch (error) {
-      console.error('Error fetching emergencies:', error);
-      toast.error('Failed to load emergency alerts');
-      setLoading(false);
-    }
-  };
+  const { emergencies, loading, fetchEmergencies } = useData();
 
   const handleStatusUpdate = async (id, newStatus) => {
     try {
-      await axios.put(`/emergency/${id}/status`, { status: newStatus });
+      await axios.put(`/api/emergency/${id}/status`, { status: newStatus });
       toast.success(`Emergency status updated to ${newStatus}`);
-      fetchEmergencies();
+      // DataContext will handle the state update via WebSocket
     } catch (error) {
       console.error('Error updating status:', error);
       toast.error('Failed to update status');
@@ -136,6 +120,12 @@ const Emergency = () => {
                           className="bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-1"
                         >
                           <XCircle className="w-4 h-4" /> Cancel
+                        </button>
+                        <button
+                          onClick={() => downloadEmergencyReport(emergency.id)}
+                          className="bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-1 col-span-2"
+                        >
+                          <Download className="w-4 h-4" /> Download Official Report
                         </button>
                       </div>
                     )}

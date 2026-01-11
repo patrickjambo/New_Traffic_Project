@@ -2,6 +2,7 @@ const axios = require('axios');
 const FormData = require('form-data');
 const db = require('../config/database');
 const fs = require('fs');
+const socketManager = require('../services/socketManager');
 
 const AI_SERVICE_URL = process.env.AI_SERVICE_URL || 'http://localhost:8000';
 
@@ -121,35 +122,20 @@ const analyzeVideoAndCreateIncident = async (req, res) => {
             console.log('✅ Incident created in database:', incident.id);
 
             // Step 3: Broadcast real-time notification via WebSocket
-            const io = req.app.get('io');
-            if (io) {
-                const notificationData = {
-                    id: incident.id,
-                    type: incident.type,
-                    severity: incident.severity,
-                    location: {
-                        name: incident.location_name,
-                        latitude: parseFloat(incident.latitude),
-                        longitude: parseFloat(incident.longitude),
-                    },
-                    description: incident.description,
-                    aiConfidence: parseFloat(incident.ai_confidence),
-                    vehicleCount: aiResults.vehicle_count,
-                    avgSpeed: aiResults.avg_speed,
-                    createdAt: incident.created_at,
-                };
+            socketManager.emitIncidentNew({
+                ...incident,
+                source: 'ai'
+            });
 
-                // Broadcast to all connected clients
-                io.emit('incident:new', notificationData);
-
-                // Emit to location-based room if coordinates available
-                if (latitude && longitude) {
-                    const room = `loc_${Math.round(latitude * 100)}_${Math.round(longitude * 100)}`;
-                    io.to(room).emit('incident:nearby', notificationData);
-                }
-
-                console.log('📡 WebSocket notification sent to all clients');
-            }
+            // Emit analysis complete event
+            socketManager.emitAnalysisComplete({
+                incident_id: incident.id,
+                result: 'Incident detected',
+                confidence: aiResults.confidence,
+                vehicle_count: aiResults.vehicle_count,
+                incident_detected: true,
+                detected_type: aiResults.incident_type,
+            });
 
             // Step 4: Create notifications for police/admin users
             await createIncidentNotifications(incident, aiResults);
@@ -158,6 +144,12 @@ const analyzeVideoAndCreateIncident = async (req, res) => {
             if (incident.severity === 'critical' || incident.severity === 'high') {
                 await createAutomaticEmergency(incident, aiResults, latitude, longitude);
             }
+        } else {
+            // Even if no incident detected, notify about analysis completion if requested
+            socketManager.emitAnalysisComplete({
+                result: 'No incident detected',
+                incident_detected: false,
+            });
         }
 
         // Return results
@@ -263,26 +255,22 @@ async function createIncidentNotifications(incident, aiResults = {}) {
         // Create notification for each police/admin user
         const notifications = usersResult.rows.map(user => [
             user.id,
+            incident.id,
             'incident',
             `AI-Detected ${incidentSeverity.toUpperCase()} ${incidentType}`,
             `Location: ${incidentAddress}. Confidence: ${Math.round(confidence * 100)}%. Vehicles: ${vehicleCount}`,
-            JSON.stringify({
-                incident_id: incident.id,
-                ai_confidence: confidence,
-                vehicle_count: vehicleCount,
-            }),
             false, // is_read
         ]);
 
-        const query = `
+        const queryText = `
             INSERT INTO notifications 
-            (user_id, type, title, message, data, is_read)
-            VALUES ${notifications.map((_, i) => 
-                `($${i * 6 + 1}, $${i * 6 + 2}, $${i * 6 + 3}, $${i * 6 + 4}, $${i * 6 + 5}, $${i * 6 + 6})`
-            ).join(', ')}
+            (user_id, incident_id, type, title, message, is_read)
+            VALUES ${notifications.map((_, i) =>
+            `($${i * 6 + 1}, $${i * 6 + 2}, $${i * 6 + 3}, $${i * 6 + 4}, $${i * 6 + 5}, $${i * 6 + 6})`
+        ).join(', ')}
         `;
 
-        await db.query(query, notifications.flat());
+        await db.query(queryText, notifications.flat());
 
         console.log(`📬 Notifications sent to ${usersResult.rows.length} police/admin users`);
     } catch (error) {
@@ -344,28 +332,16 @@ async function createAutomaticEmergency(incident, aiResults, latitude, longitude
 
         console.log(`🚨 AUTOMATIC EMERGENCY CREATED: ID ${emergency.id}, Type: ${emergencyType}, Location: Kigali`);
 
-        // Broadcast via WebSocket to all emergency services
-        const io = global.io;
-        if (io) {
-            io.emit('emergency:auto', {
-                id: emergency.id,
-                type: emergency.emergency_type,
-                severity: emergency.severity,
-                location: {
-                    name: emergency.location_name,
-                    latitude: parseFloat(emergency.latitude),
-                    longitude: parseFloat(emergency.longitude),
-                },
-                description: emergency.description,
-                servicesNeeded: servicesNeeded,
-                incidentId: incident.id,
-                aiConfidence: aiResults.confidence,
-                createdAt: emergency.created_at,
-                automatic: true
-            });
+        // Broadcast via WebSocket using SocketManager
+        socketManager.emitEmergencyNew({
+            ...emergency,
+            latitude: parseFloat(emergency.latitude),
+            longitude: parseFloat(emergency.longitude),
+            automatic: true,
+            aiConfidence: aiResults.confidence
+        });
 
-            console.log('📡 Automatic emergency broadcast to all emergency services');
-        }
+        console.log('📡 Automatic emergency broadcast via SocketManager');
 
         // TODO: Send FCM push notifications to nearby police/ambulance
         // await sendFCMNotification(emergency, servicesNeeded);
@@ -437,25 +413,14 @@ const testIncidentDetection = async (req, res) => {
         };
         await createIncidentNotifications(incident, aiResults);
 
-        // Step 3: Broadcast via WebSocket
-        const io = req.app.get('io');
-        if (io) {
-            io.emit('incident:new', {
-                id: incident.id,
-                type: incident.type,
-                severity: incident.severity,
-                location: {
-                    name: incident.address,
-                    latitude: incident.latitude,
-                    longitude: incident.longitude
-                },
-                vehicleCount: vehicle_count,
-                confidence: confidence,
-                createdAt: incident.created_at,
-                test: true
-            });
-            console.log('📡 TEST INCIDENT broadcast via WebSocket');
-        }
+        // Step 3: Broadcast via WebSocket using SocketManager
+        socketManager.emitIncidentNew({
+            ...incident,
+            test: true,
+            confidence: confidence,
+            vehicleCount: vehicle_count
+        });
+        console.log('📡 TEST INCIDENT broadcast via SocketManager');
 
         // Step 4: Automatically create EMERGENCY for critical/high incidents
         let emergency = null;

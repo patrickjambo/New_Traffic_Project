@@ -1,18 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Menu, Bell, Search, Clock, ChevronDown, User, LogOut, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useData } from '../context/DataContext';
 import { useNavigate } from 'react-router-dom';
 import axios from '../config/axios';
 import toast from 'react-hot-toast';
 
 const Header = ({ onMenuClick }) => {
   const { user, logout } = useAuth();
+  const { notifications, unreadCount, markNotificationRead } = useData();
   const navigate = useNavigate();
   const [currentTime, setCurrentTime] = useState(new Date());
 
   // Notification State
-  const [notifications, setNotifications] = useState([]);
-  const [unreadCount, setUnreadCount] = useState(0);
   const [showNotifications, setShowNotifications] = useState(false);
 
   // Profile Dropdown State
@@ -26,7 +26,6 @@ const Header = ({ onMenuClick }) => {
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-    fetchNotifications();
 
     // Click outside handler
     const handleClickOutside = (event) => {
@@ -42,27 +41,8 @@ const Header = ({ onMenuClick }) => {
     };
   }, []);
 
-  // Fetch Notifications
-  const fetchNotifications = async () => {
-    try {
-      const response = await axios.get('/notifications');
-      // Handle both array and wrapped response formats
-      const data = Array.isArray(response.data) ? response.data : (response.data.data || []);
-      setNotifications(data);
-      setUnreadCount(data.filter(n => !n.read).length);
-    } catch (error) {
-      console.error('Error fetching notifications:', error);
-    }
-  };
-
-  const markAsRead = async (id) => {
-    try {
-      await axios.put(`/notifications/${id}/read`);
-      setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
-      setUnreadCount(prev => Math.max(0, prev - 1));
-    } catch (error) {
-      console.error('Error marking notification as read:', error);
-    }
+  const handleMarkAsRead = async (id) => {
+    await markNotificationRead(id);
   };
 
   // Search Functionality
@@ -227,12 +207,12 @@ const Header = ({ onMenuClick }) => {
                     notifications.map((notification) => (
                       <div
                         key={notification.id}
-                        className={`p-3 border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors cursor-pointer ${!notification.read ? 'bg-blue-500/5' : ''}`}
-                        onClick={() => markAsRead(notification.id)}
+                        className={`p-3 border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors cursor-pointer ${!notification.is_read ? 'bg-blue-500/5' : ''}`}
+                        onClick={() => handleMarkAsRead(notification.id)}
                       >
                         <div className="flex gap-3">
                           <div className="mt-1">
-                            <div className="w-2 h-2 rounded-full bg-blue-400"></div>
+                            <div className={`w-2 h-2 rounded-full ${!notification.is_read ? 'bg-blue-400' : 'bg-slate-600'}`}></div>
                           </div>
                           <div>
                             <p className="text-sm text-gray-200">{notification.message}</p>

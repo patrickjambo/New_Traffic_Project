@@ -574,30 +574,73 @@ const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-0">
                 {/* Left Panel - Input & Route Options */}
-                <div className="lg:col-span-1 p-5 border-r border-gray-200 bg-gray-50">
-                    {/* Start Location */}
-                    <div className="mb-4">
-                        <label className="block text-sm font-semibold text-gray-700 mb-2">
-                            Starting Point
-                        </label>
-                        <div className="flex gap-2">
-                            <div className="relative flex-1">
-                                <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-green-600" />
+                <div className="lg:col-span-1 h-[600px] flex flex-col border-r border-gray-200 bg-gray-50">
+                    <div className="p-5 flex-shrink-0 border-b border-gray-100">
+                        {/* Start Location */}
+                        <div className="mb-4">
+                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                Starting Point
+                            </label>
+                            <div className="flex gap-2">
+                                <div className="relative flex-1">
+                                    <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-green-600" />
+                                    <input
+                                        type="text"
+                                        value={start}
+                                        onChange={(e) => handleStartChange(e.target.value)}
+                                        onFocus={() => start && setShowStartSuggestions(true)}
+                                        onBlur={() => setTimeout(() => setShowStartSuggestions(false), 200)}
+                                        placeholder="e.g., Kigali Airport..."
+                                        className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                                    />
+                                    {showStartSuggestions && startSuggestions.length > 0 && (
+                                        <div className="absolute z-30 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-48 overflow-y-auto">
+                                            {startSuggestions.map((loc, idx) => (
+                                                <div
+                                                    key={idx}
+                                                    onClick={() => selectStart(loc)}
+                                                    className="px-3 py-2.5 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-b-0"
+                                                >
+                                                    <span className="text-sm font-medium text-gray-800">{loc.name}</span>
+                                                    <span className="text-xs text-gray-500 block">{loc.type}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                                <button
+                                    onClick={handleUseMyLocation}
+                                    disabled={loadingLocation}
+                                    className="px-3 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors"
+                                    title="Use my location"
+                                >
+                                    {loadingLocation ? <Loader2 className="w-5 h-5 animate-spin" /> : <Navigation className="w-5 h-5" />}
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Destination */}
+                        <div className="mb-4">
+                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                Destination
+                            </label>
+                            <div className="relative">
+                                <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-red-600" />
                                 <input
                                     type="text"
-                                    value={start}
-                                    onChange={(e) => handleStartChange(e.target.value)}
-                                    onFocus={() => start && setShowStartSuggestions(true)}
-                                    onBlur={() => setTimeout(() => setShowStartSuggestions(false), 200)}
-                                    placeholder="e.g., Kigali Airport..."
+                                    value={destination}
+                                    onChange={(e) => handleDestChange(e.target.value)}
+                                    onFocus={() => destination && setShowDestSuggestions(true)}
+                                    onBlur={() => setTimeout(() => setShowDestSuggestions(false), 200)}
+                                    placeholder="e.g., Nyabugogo..."
                                     className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
                                 />
-                                {showStartSuggestions && startSuggestions.length > 0 && (
+                                {showDestSuggestions && destSuggestions.length > 0 && (
                                     <div className="absolute z-30 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-48 overflow-y-auto">
-                                        {startSuggestions.map((loc, idx) => (
+                                        {destSuggestions.map((loc, idx) => (
                                             <div
                                                 key={idx}
-                                                onClick={() => selectStart(loc)}
+                                                onClick={() => selectDest(loc)}
                                                 className="px-3 py-2.5 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-b-0"
                                             >
                                                 <span className="text-sm font-medium text-gray-800">{loc.name}</span>
@@ -607,162 +650,122 @@ const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
                                     </div>
                                 )}
                             </div>
+                        </div>
+
+                        {/* Action Buttons */}
+                        <div className="flex gap-2 mb-6">
                             <button
-                                onClick={handleUseMyLocation}
-                                disabled={loadingLocation}
-                                className="px-3 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors"
-                                title="Use my location"
+                                onClick={findRoutes}
+                                disabled={loadingRoutes || (!start && !startCoords) || (!destination && !destCoords)}
+                                className="flex-1 bg-gradient-to-r from-blue-600 to-blue-700 text-white py-3 rounded-lg font-semibold hover:from-blue-700 hover:to-blue-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
                             >
-                                {loadingLocation ? <Loader2 className="w-5 h-5 animate-spin" /> : <Navigation className="w-5 h-5" />}
+                                {loadingRoutes ? (
+                                    <>
+                                        <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                                        Finding Routes...
+                                    </>
+                                ) : (
+                                    <>
+                                        <Route className="w-5 h-5 mr-2" />
+                                        Find Routes
+                                    </>
+                                )}
                             </button>
-                        </div>
-                    </div>
-
-                    {/* Destination */}
-                    <div className="mb-4">
-                        <label className="block text-sm font-semibold text-gray-700 mb-2">
-                            Destination
-                        </label>
-                        <div className="relative">
-                            <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-red-600" />
-                            <input
-                                type="text"
-                                value={destination}
-                                onChange={(e) => handleDestChange(e.target.value)}
-                                onFocus={() => destination && setShowDestSuggestions(true)}
-                                onBlur={() => setTimeout(() => setShowDestSuggestions(false), 200)}
-                                placeholder="e.g., Nyabugogo..."
-                                className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
-                            />
-                            {showDestSuggestions && destSuggestions.length > 0 && (
-                                <div className="absolute z-30 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-48 overflow-y-auto">
-                                    {destSuggestions.map((loc, idx) => (
-                                        <div
-                                            key={idx}
-                                            onClick={() => selectDest(loc)}
-                                            className="px-3 py-2.5 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-b-0"
-                                        >
-                                            <span className="text-sm font-medium text-gray-800">{loc.name}</span>
-                                            <span className="text-xs text-gray-500 block">{loc.type}</span>
-                                        </div>
-                                    ))}
-                                </div>
+                            {routes.length > 0 && (
+                                <button
+                                    onClick={clearRoutes}
+                                    className="px-4 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
+                                >
+                                    <X className="w-5 h-5" />
+                                </button>
                             )}
                         </div>
                     </div>
 
-                    {/* Action Buttons */}
-                    <div className="flex gap-2 mb-6">
-                        <button
-                            onClick={findRoutes}
-                            disabled={loadingRoutes || (!start && !startCoords) || (!destination && !destCoords)}
-                            className="flex-1 bg-gradient-to-r from-blue-600 to-blue-700 text-white py-3 rounded-lg font-semibold hover:from-blue-700 hover:to-blue-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
-                        >
-                            {loadingRoutes ? (
-                                <>
-                                    <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                                    Finding Routes...
-                                </>
-                            ) : (
-                                <>
-                                    <Route className="w-5 h-5 mr-2" />
-                                    Find Routes
-                                </>
-                            )}
-                        </button>
+                    {/* Route Options - Scrollable Area */}
+                    <div className="flex-1 overflow-y-auto p-5 custom-scrollbar">
                         {routes.length > 0 && (
-                            <button
-                                onClick={clearRoutes}
-                                className="px-4 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
-                            >
-                                <X className="w-5 h-5" />
-                            </button>
-                        )}
-                    </div>
+                            <div className="space-y-3">
+                                <h3 className="font-semibold text-gray-800 flex items-center">
+                                    <Route className="w-4 h-4 mr-2" />
+                                    Route Options ({routes.length})
+                                </h3>
 
-                    {/* Route Options */}
-                    {routes.length > 0 && (
-                        <div className="space-y-3">
-                            <h3 className="font-semibold text-gray-800 flex items-center">
-                                <Route className="w-4 h-4 mr-2" />
-                                Route Options ({routes.length})
-                            </h3>
+                                {routes.map((route, index) => {
+                                    const routeColor = getRouteBaseColor(index);
+                                    const isSelected = selectedRouteIndex === index;
 
-                            {routes.map((route, index) => {
-                                const routeColor = getRouteBaseColor(index);
-                                const isSelected = selectedRouteIndex === index;
-
-                                return (
-                                    <div
-                                        key={route.id}
-                                        onClick={() => setSelectedRouteIndex(index)}
-                                        className={`p-4 rounded-lg cursor-pointer transition-all border-l-4 ${isSelected
-                                            ? 'bg-gray-100 shadow-md'
-                                            : 'bg-white hover:bg-gray-50 border-gray-200'
-                                            }`}
-                                        style={{
-                                            borderLeftColor: routeColor,
-                                            boxShadow: isSelected ? `0 0 0 2px ${routeColor}40` : undefined
-                                        }}
-                                    >
-                                        {/* Route header */}
-                                        <div className="flex items-center justify-between mb-3">
-                                            <div className="flex items-center gap-2">
-                                                <div
-                                                    className="w-4 h-4 rounded-full flex items-center justify-center text-xs text-white font-bold"
-                                                    style={{ backgroundColor: routeColor }}
-                                                >
-                                                    {index + 1}
+                                    return (
+                                        <div
+                                            key={route.id}
+                                            onClick={() => setSelectedRouteIndex(index)}
+                                            className={`p-4 rounded-lg cursor-pointer transition-all border-l-4 ${isSelected
+                                                ? 'bg-gray-100 shadow-md'
+                                                : 'bg-white hover:bg-gray-50 border-gray-200'
+                                                }`}
+                                            style={{
+                                                borderLeftColor: routeColor,
+                                                boxShadow: isSelected ? `0 0 0 2px ${routeColor}40` : undefined
+                                            }}
+                                        >
+                                            {/* Route header */}
+                                            <div className="flex items-center justify-between mb-3">
+                                                <div className="flex items-center gap-2">
+                                                    <div
+                                                        className="w-4 h-4 rounded-full flex items-center justify-center text-xs text-white font-bold"
+                                                        style={{ backgroundColor: routeColor }}
+                                                    >
+                                                        {index + 1}
+                                                    </div>
+                                                    <span className="font-bold text-gray-800">
+                                                        {index === 0 ? '🥇 Recommended' : index === 1 ? '🥈 Alternative 1' : '🥉 Alternative 2'}
+                                                    </span>
                                                 </div>
-                                                <span className="font-bold text-gray-800">
-                                                    {index === 0 ? '🥇 Recommended' : index === 1 ? '🥈 Alternative 1' : '🥉 Alternative 2'}
+                                                {isSelected && (
+                                                    <Check className="w-5 h-5" style={{ color: routeColor }} />
+                                                )}
+                                            </div>
+
+                                            {/* Time and distance - prominent display */}
+                                            <div className="flex items-baseline gap-3 mb-2">
+                                                <span
+                                                    className="text-2xl font-bold"
+                                                    style={{ color: routeColor }}
+                                                >
+                                                    {formatDuration(route.duration)}
+                                                </span>
+                                                <span className="text-gray-500 text-sm">
+                                                    {formatDistance(route.distance)}
                                                 </span>
                                             </div>
-                                            {isSelected && (
-                                                <Check className="w-5 h-5" style={{ color: routeColor }} />
+
+                                            {/* Route summary if available */}
+                                            {route.summary && route.summary !== `Route ${index + 1}` && (
+                                                <div className="text-xs text-gray-500 mb-2 truncate">
+                                                    via {route.summary}
+                                                </div>
+                                            )}
+
+                                            {/* Incident status badge */}
+                                            {route.hasIncidents ? (
+                                                <div className="flex items-center gap-1 text-xs text-orange-700 bg-orange-100 px-2 py-1.5 rounded-md">
+                                                    <AlertTriangle className="w-3.5 h-3.5" />
+                                                    <span className="font-medium">
+                                                        {route.incidents.length} incident{route.incidents.length > 1 ? 's' : ''} on this route
+                                                    </span>
+                                                </div>
+                                            ) : (
+                                                <div className="flex items-center gap-1 text-xs text-green-700 bg-green-100 px-2 py-1.5 rounded-md">
+                                                    <Check className="w-3.5 h-3.5" />
+                                                    <span className="font-medium">Route is clear</span>
+                                                </div>
                                             )}
                                         </div>
-
-                                        {/* Time and distance - prominent display */}
-                                        <div className="flex items-baseline gap-3 mb-2">
-                                            <span
-                                                className="text-2xl font-bold"
-                                                style={{ color: routeColor }}
-                                            >
-                                                {formatDuration(route.duration)}
-                                            </span>
-                                            <span className="text-gray-500 text-sm">
-                                                {formatDistance(route.distance)}
-                                            </span>
-                                        </div>
-
-                                        {/* Route summary if available */}
-                                        {route.summary && route.summary !== `Route ${index + 1}` && (
-                                            <div className="text-xs text-gray-500 mb-2 truncate">
-                                                via {route.summary}
-                                            </div>
-                                        )}
-
-                                        {/* Incident status badge */}
-                                        {route.hasIncidents ? (
-                                            <div className="flex items-center gap-1 text-xs text-orange-700 bg-orange-100 px-2 py-1.5 rounded-md">
-                                                <AlertTriangle className="w-3.5 h-3.5" />
-                                                <span className="font-medium">
-                                                    {route.incidents.length} incident{route.incidents.length > 1 ? 's' : ''} on this route
-                                                </span>
-                                            </div>
-                                        ) : (
-                                            <div className="flex items-center gap-1 text-xs text-green-700 bg-green-100 px-2 py-1.5 rounded-md">
-                                                <Check className="w-3.5 h-3.5" />
-                                                <span className="font-medium">Route is clear</span>
-                                            </div>
-                                        )}
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    )}
-                    {/* Legend removed from here */}
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </div>
                 </div>
 
                 {/* Right Panel - Map */}

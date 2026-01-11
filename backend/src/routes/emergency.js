@@ -123,4 +123,16 @@ router.put(
     updateEmergencyStatus
 );
 
+/**
+ * @route   GET /api/emergency/:id/report
+ * @desc    Generate and download emergency report
+ * @access  Private (Police/Admin)
+ */
+router.get(
+    '/:id/report',
+    authenticate,
+    authorize('police', 'admin'),
+    require('../controllers/emergencyController').generateEmergencyReport
+);
+
 module.exports = router;

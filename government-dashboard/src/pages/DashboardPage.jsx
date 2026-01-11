@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
 import { useWebSocket } from '../context/WebSocketContext';
@@ -10,12 +11,14 @@ import {
   MapPin,
   ChevronRight,
   Wifi,
-  WifiOff
+  WifiOff,
+  Download
 } from 'lucide-react';
 
 const DashboardPage = () => {
+  const navigate = useNavigate();
   const { user } = useAuth();
-  const { incidents, emergencies, statistics, loading, isConnected: dataConnected } = useData();
+  const { incidents, emergencies, statistics, loading, isConnected: dataConnected, downloadEmergencyReport } = useData();
   const { isConnected: wsConnected, connectionStatus } = useWebSocket();
 
   // Calculate real-time stats from actual data
@@ -38,23 +41,45 @@ const DashboardPage = () => {
     };
   }, [incidents, statistics]);
 
-  // Format recent incidents from real data
-  const recentIncidents = useMemo(() => {
-    return incidents
-      .slice(0, 5)
-      .map(inc => ({
-        id: inc.id,
-        type: inc.incident_type || inc.type || 'Incident',
-        location: inc.location || inc.address || 'Unknown Location',
-        time: formatTimeAgo(inc.created_at),
-        status: inc.status || 'pending',
-        severity: inc.severity || 'medium',
-        source: inc.source || 'manual',
-        color: inc.severity === 'critical' ? 'bg-red-500' :
-          inc.severity === 'high' ? 'bg-orange-500' :
-            inc.severity === 'medium' ? 'bg-yellow-500' : 'bg-blue-500'
-      }));
-  }, [incidents]);
+  // Format recent reports (incidents + emergencies)
+  const recentReports = useMemo(() => {
+    const formattedIncidents = incidents.map(inc => ({
+      id: inc.id,
+      type: inc.incident_type || inc.type || 'Incident',
+      location: inc.location || inc.address || 'Unknown Location',
+      time: formatTimeAgo(inc.created_at),
+      timestamp: new Date(inc.created_at),
+      status: inc.status || 'pending',
+      severity: inc.severity || 'medium',
+      source: inc.source || 'manual',
+      reportType: 'incident',
+      color: inc.severity === 'critical' ? 'bg-red-500' :
+        inc.severity === 'high' ? 'bg-orange-500' :
+          inc.severity === 'medium' ? 'bg-yellow-500' : 'bg-blue-500'
+    }));
+
+    const formattedEmergencies = emergencies.map(em => ({
+      id: em.id,
+      type: em.emergency_type || 'Emergency',
+      location: em.location_name || 'Unknown Location',
+      time: formatTimeAgo(em.created_at),
+      timestamp: new Date(em.created_at),
+      status: em.status || 'pending',
+      severity: em.severity || 'high',
+      source: 'emergency',
+      reportType: 'emergency',
+      color: 'bg-red-600'
+    }));
+
+    return [...formattedIncidents, ...formattedEmergencies]
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, 8);
+  }, [incidents, emergencies]);
+
+  // Active Emergencies
+  const activeEmergencies = useMemo(() => {
+    return emergencies.filter(em => em.status === 'pending' || em.status === 'active');
+  }, [emergencies]);
 
   // Stats Data - now using real data
   const stats = [
@@ -71,14 +96,14 @@ const DashboardPage = () => {
     },
     {
       id: 2,
-      title: 'AVG RESPONSE TIME',
-      value: loading ? '...' : `${realTimeStats.avgResponseTime}m`,
-      subtitle: 'Response time in minutes',
-      icon: Clock,
-      color: 'bg-blue-500',
+      title: 'EMERGENCIES',
+      value: loading ? '...' : String(activeEmergencies.length),
+      subtitle: 'Active alerts',
+      icon: Activity,
+      color: 'bg-orange-600',
       iconColor: 'text-white',
-      trend: 'Tracking',
-      trendColor: 'bg-blue-500/20 text-blue-300'
+      trend: activeEmergencies.length > 0 ? 'URGENT' : 'None',
+      trendColor: activeEmergencies.length > 0 ? 'bg-red-500 animate-pulse text-white' : 'bg-green-500/20 text-green-300'
     },
     {
       id: 3,
@@ -133,6 +158,82 @@ const DashboardPage = () => {
         </span>
         {loading && <span className="text-xs text-blue-400 ml-2">Loading data...</span>}
       </div>
+
+      {/* Emergency Alerts Section */}
+      {activeEmergencies.length > 0 && (
+        <div className="mb-8">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-6 h-6 text-red-500 animate-pulse" />
+              <h2 className="text-xl font-bold text-white">Emergency Alerts</h2>
+              <span className="bg-red-500 text-white text-xs px-2 py-0.5 rounded-full font-bold">
+                {activeEmergencies.length} ACTIVE
+              </span>
+            </div>
+            <button
+              onClick={() => navigate('/emergency')}
+              className="text-sm text-blue-400 hover:text-blue-300 font-medium"
+            >
+              View All Emergencies →
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {activeEmergencies.slice(0, 2).map((emergency) => (
+              <div
+                key={emergency.id}
+                className="bg-red-500/5 backdrop-blur-md border border-red-500/20 rounded-2xl p-5 flex flex-col justify-between hover:bg-red-500/10 transition-all group"
+              >
+                <div>
+                  <div className="flex justify-between items-start mb-3">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 bg-red-500 rounded-lg shadow-lg shadow-red-500/20">
+                        <Activity className="w-5 h-5 text-white" />
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-white text-lg">{emergency.emergency_type}</h3>
+                        <p className="text-xs text-red-400/70 flex items-center gap-1">
+                          <MapPin className="w-3 h-3" /> {emergency.location_name}
+                        </p>
+                      </div>
+                    </div>
+                    <span className={`text-[10px] font-bold px-2 py-1 rounded uppercase tracking-wider ${emergency.severity === 'critical' ? 'bg-red-500 text-white' : 'bg-orange-500 text-white'
+                      }`}>
+                      {emergency.severity}
+                    </span>
+                  </div>
+                  <p className="text-sm text-gray-300 line-clamp-2 mb-4">
+                    {emergency.description}
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-between pt-4 border-t border-white/5">
+                  <div className="flex items-center gap-4">
+                    <button
+                      onClick={() => navigate('/emergency')}
+                      className="text-xs font-bold text-white bg-red-600 hover:bg-red-700 px-4 py-2 rounded-lg transition-colors"
+                    >
+                      Respond
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        downloadEmergencyReport(emergency.id);
+                      }}
+                      className="flex items-center gap-1 text-xs font-medium text-gray-400 hover:text-white transition-colors"
+                    >
+                      <Download className="w-3 h-3" /> Report
+                    </button>
+                  </div>
+                  <span className="text-[10px] text-gray-500 font-mono">
+                    {formatTimeAgo(emergency.created_at)}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
@@ -225,53 +326,69 @@ const DashboardPage = () => {
         </div>
       </div>
 
-      {/* Recent Incidents & System Status */}
+      {/* Recent Reports & System Status */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2 bg-slate-800/50 backdrop-blur-md border border-white/5 rounded-2xl p-6">
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-2">
-              <AlertTriangle className="w-5 h-5 text-orange-400" />
-              <h2 className="text-lg font-bold text-white">Recent Incidents</h2>
+              <Activity className="w-5 h-5 text-blue-400" />
+              <h2 className="text-lg font-bold text-white">Recent Reports</h2>
               <span className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-green-500 animate-pulse' : 'bg-gray-500'}`}></span>
             </div>
-            <button className="text-sm text-blue-400 hover:text-blue-300">Live Feed →</button>
+            <div className="flex gap-4">
+              <button
+                onClick={() => navigate('/incidents')}
+                className="text-sm text-blue-400 hover:text-blue-300"
+              >
+                Incidents →
+              </button>
+              <button
+                onClick={() => navigate('/emergency')}
+                className="text-sm text-orange-400 hover:text-orange-300"
+              >
+                Emergencies →
+              </button>
+            </div>
           </div>
 
           {loading ? (
-            <div className="text-center py-8 text-gray-400">Loading incidents...</div>
-          ) : recentIncidents.length === 0 ? (
+            <div className="text-center py-8 text-gray-400">Loading reports...</div>
+          ) : recentReports.length === 0 ? (
             <div className="text-center py-8 text-gray-400">
               <AlertTriangle className="w-12 h-12 mx-auto mb-2 opacity-30" />
-              <p>No incidents reported</p>
+              <p>No reports found</p>
             </div>
           ) : (
             <div className="space-y-4">
-              {recentIncidents.map((inc, idx) => (
-                <div key={inc.id || idx} className="bg-slate-900/50 p-4 rounded-xl border border-white/5 flex items-center justify-between group hover:bg-slate-800 transition-colors">
+              {recentReports.map((report, idx) => (
+                <div key={`${report.reportType}-${report.id || idx}`} className="bg-slate-900/50 p-4 rounded-xl border border-white/5 flex items-center justify-between group hover:bg-slate-800 transition-colors">
                   <div className="flex items-center gap-4">
-                    <div className={`w-1 h-12 rounded-full ${inc.color}`}></div>
+                    <div className={`w-1 h-12 rounded-full ${report.color}`}></div>
                     <div>
                       <h3 className="font-bold text-white flex items-center gap-2">
-                        {inc.type}
-                        {inc.source === 'ai' && (
+                        {report.type}
+                        {report.reportType === 'emergency' && (
+                          <span className="text-[10px] bg-red-600 text-white px-2 py-0.5 rounded font-bold">EMERGENCY</span>
+                        )}
+                        {report.source === 'ai' && (
                           <span className="text-xs bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded">🤖 AI</span>
                         )}
-                        {inc.source === 'mobile_app' && (
+                        {report.source === 'mobile_app' && (
                           <span className="text-xs bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded">📱 Mobile</span>
                         )}
                       </h3>
                       <p className="text-xs text-gray-400 flex items-center gap-1">
-                        <MapPin className="w-3 h-3" /> {inc.location}
+                        <MapPin className="w-3 h-3" /> {report.location}
                       </p>
                     </div>
                   </div>
                   <div className="text-right">
-                    <p className="text-xs text-gray-500 mb-1">{inc.time}</p>
-                    <span className={`text-xs px-2 py-1 rounded-lg ${inc.status === 'resolved' ? 'bg-green-500/20 text-green-400' :
-                        inc.status === 'in_progress' ? 'bg-blue-500/20 text-blue-400' :
-                          'bg-red-500/20 text-red-400'
+                    <p className="text-xs text-gray-500 mb-1">{report.time}</p>
+                    <span className={`text-xs px-2 py-1 rounded-lg ${report.status === 'resolved' ? 'bg-green-500/20 text-green-400' :
+                      report.status === 'in_progress' || report.status === 'active' ? 'bg-blue-500/20 text-blue-400' :
+                        'bg-red-500/20 text-red-400'
                       }`}>
-                      {inc.status.replace('_', ' ')}
+                      {report.status.replace('_', ' ')}
                     </span>
                   </div>
                 </div>

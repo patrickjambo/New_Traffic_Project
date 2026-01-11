@@ -243,6 +243,30 @@ export const DataProvider = ({ children }) => {
     }
   };
 
+  // Download emergency report
+  const downloadEmergencyReport = async (emergencyId) => {
+    try {
+      const response = await axios.get(`/api/emergency/${emergencyId}/report`, {
+        responseType: 'blob',
+      });
+
+      // Create a link and trigger download
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `emergency_report_${emergencyId}.txt`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+
+      toast.success('Report downloaded successfully');
+    } catch (error) {
+      console.error('Error downloading report:', error);
+      toast.error('Failed to download report');
+    }
+  };
+
   // ============================================
   // Initial data load and refresh
   // ============================================
@@ -286,6 +310,7 @@ export const DataProvider = ({ children }) => {
     fetchNotifications,
     reportIncident,
     updateIncidentStatus,
+    downloadEmergencyReport,
     markNotificationRead,
     markAllNotificationsRead,
   };

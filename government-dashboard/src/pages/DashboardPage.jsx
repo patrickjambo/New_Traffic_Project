@@ -1,71 +1,115 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useData } from '../context/DataContext';
+import { useWebSocket } from '../context/WebSocketContext';
 import {
   AlertTriangle,
   Clock,
   Shield,
   Activity,
   MapPin,
-  ChevronRight
+  ChevronRight,
+  Wifi,
+  WifiOff
 } from 'lucide-react';
 
 const DashboardPage = () => {
   const { user } = useAuth();
+  const { incidents, emergencies, statistics, loading, isConnected: dataConnected } = useData();
+  const { isConnected: wsConnected, connectionStatus } = useWebSocket();
 
-  // Stats Data matching the screenshot
+  // Calculate real-time stats from actual data
+  const realTimeStats = useMemo(() => {
+    const activeIncidents = incidents.filter(i => i.status !== 'resolved');
+    const criticalCount = activeIncidents.filter(i => i.severity === 'critical' || i.severity === 'high').length;
+    const resolvedToday = incidents.filter(i => {
+      if (i.status !== 'resolved') return false;
+      const today = new Date();
+      const updated = new Date(i.updated_at || i.created_at);
+      return updated.toDateString() === today.toDateString();
+    }).length;
+
+    return {
+      activeIncidents: activeIncidents.length,
+      criticalCount,
+      resolvedToday,
+      avgResponseTime: statistics?.avg_response_time || 0,
+      totalIncidents: statistics?.total_incidents || incidents.length,
+    };
+  }, [incidents, statistics]);
+
+  // Format recent incidents from real data
+  const recentIncidents = useMemo(() => {
+    return incidents
+      .slice(0, 5)
+      .map(inc => ({
+        id: inc.id,
+        type: inc.incident_type || inc.type || 'Incident',
+        location: inc.location || inc.address || 'Unknown Location',
+        time: formatTimeAgo(inc.created_at),
+        status: inc.status || 'pending',
+        severity: inc.severity || 'medium',
+        source: inc.source || 'manual',
+        color: inc.severity === 'critical' ? 'bg-red-500' :
+          inc.severity === 'high' ? 'bg-orange-500' :
+            inc.severity === 'medium' ? 'bg-yellow-500' : 'bg-blue-500'
+      }));
+  }, [incidents]);
+
+  // Stats Data - now using real data
   const stats = [
     {
       id: 1,
       title: 'ACTIVE INCIDENTS',
-      value: '3',
-      subtitle: '2 Critical',
+      value: loading ? '...' : String(realTimeStats.activeIncidents),
+      subtitle: `${realTimeStats.criticalCount} Critical`,
       icon: AlertTriangle,
       color: 'bg-red-500',
       iconColor: 'text-white',
-      trend: '+15%',
-      trendColor: 'bg-red-500/20 text-red-300'
+      trend: realTimeStats.activeIncidents > 0 ? 'Active' : 'Clear',
+      trendColor: realTimeStats.activeIncidents > 0 ? 'bg-red-500/20 text-red-300' : 'bg-green-500/20 text-green-300'
     },
     {
       id: 2,
       title: 'AVG RESPONSE TIME',
-      value: '3.8m',
-      subtitle: '↓ 18% vs last week',
+      value: loading ? '...' : `${realTimeStats.avgResponseTime}m`,
+      subtitle: 'Response time in minutes',
       icon: Clock,
       color: 'bg-blue-500',
       iconColor: 'text-white',
-      trend: '-18%',
-      trendColor: 'bg-green-500/20 text-green-300'
+      trend: 'Tracking',
+      trendColor: 'bg-blue-500/20 text-blue-300'
     },
     {
       id: 3,
       title: 'RESOLVED TODAY',
-      value: '47',
-      subtitle: '94% Clearance Rate',
+      value: loading ? '...' : String(realTimeStats.resolvedToday),
+      subtitle: 'Incidents cleared',
       icon: Shield,
       color: 'bg-green-500',
       iconColor: 'text-white',
-      trend: '+8%',
+      trend: '+' + realTimeStats.resolvedToday,
       trendColor: 'bg-green-500/20 text-green-300'
     },
     {
       id: 4,
-      title: 'SYSTEM HEALTH',
-      value: '99%',
-      subtitle: 'All Systems Operational',
-      icon: Activity,
-      color: 'bg-purple-500',
+      title: 'SYSTEM STATUS',
+      value: wsConnected ? 'Online' : 'Offline',
+      subtitle: wsConnected ? 'Real-time updates active' : 'Reconnecting...',
+      icon: wsConnected ? Wifi : WifiOff,
+      color: wsConnected ? 'bg-green-500' : 'bg-yellow-500',
       iconColor: 'text-white',
-      trend: '+2%',
-      trendColor: 'bg-green-500/20 text-green-300'
+      trend: connectionStatus,
+      trendColor: wsConnected ? 'bg-green-500/20 text-green-300' : 'bg-yellow-500/20 text-yellow-300'
     }
   ];
 
   const regions = [
-    { name: 'Kigali City', load: 67, incidents: 234, officers: 89, color: 'bg-blue-500' },
-    { name: 'Northern Province', load: 45, incidents: 123, officers: 45, color: 'bg-purple-500' },
-    { name: 'Southern Province', load: 38, incidents: 98, officers: 52, color: 'bg-indigo-500' },
-    { name: 'Eastern Province', load: 52, incidents: 156, officers: 61, color: 'bg-cyan-500' },
-    { name: 'Western Province', load: 41, incidents: 112, officers: 48, color: 'bg-teal-500' },
+    { name: 'Kigali City', load: 67, incidents: incidents.filter(i => i.location?.toLowerCase().includes('kigali')).length || 0, officers: 89, color: 'bg-blue-500' },
+    { name: 'Northern Province', load: 45, incidents: 0, officers: 45, color: 'bg-purple-500' },
+    { name: 'Southern Province', load: 38, incidents: 0, officers: 52, color: 'bg-indigo-500' },
+    { name: 'Eastern Province', load: 52, incidents: 0, officers: 61, color: 'bg-cyan-500' },
+    { name: 'Western Province', load: 41, incidents: 0, officers: 48, color: 'bg-teal-500' },
   ];
 
   const deployments = [
@@ -74,16 +118,20 @@ const DashboardPage = () => {
     { name: 'Unit Charlie', location: 'Remera', officers: 6, time: '1h 15m', status: 'Standby', statusColor: 'bg-yellow-500/20 text-yellow-400' },
   ];
 
-  const recentIncidents = [
-    { type: 'Accident', location: 'KN 5 Ave, Kigali', time: '12m ago', status: 'Active', color: 'bg-red-500' },
-    { type: 'Traffic Jam', location: 'Nyabugogo', time: '25m ago', status: 'Active', color: 'bg-orange-500' },
-  ];
-
   return (
     <div className="p-6 relative z-10">
       {/* Background Watermark */}
       <div className="absolute inset-0 pointer-events-none z-[-1] opacity-10 fixed">
         <img src="/rnp-logo.png" className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] object-contain" alt="" />
+      </div>
+
+      {/* Real-time Connection Indicator */}
+      <div className="mb-4 flex items-center gap-2">
+        <div className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-green-500 animate-pulse' : 'bg-yellow-500'}`}></div>
+        <span className="text-xs text-gray-400">
+          {wsConnected ? 'Live updates active' : `${connectionStatus}...`}
+        </span>
+        {loading && <span className="text-xs text-blue-400 ml-2">Loading data...</span>}
       </div>
 
       {/* Stats Grid */}
@@ -184,31 +232,52 @@ const DashboardPage = () => {
             <div className="flex items-center gap-2">
               <AlertTriangle className="w-5 h-5 text-orange-400" />
               <h2 className="text-lg font-bold text-white">Recent Incidents</h2>
+              <span className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-green-500 animate-pulse' : 'bg-gray-500'}`}></span>
             </div>
             <button className="text-sm text-blue-400 hover:text-blue-300">Live Feed →</button>
           </div>
 
-          <div className="space-y-4">
-            {recentIncidents.map((inc, idx) => (
-              <div key={idx} className="bg-slate-900/50 p-4 rounded-xl border border-white/5 flex items-center justify-between group hover:bg-slate-800 transition-colors">
-                <div className="flex items-center gap-4">
-                  <div className={`w-1 h-12 rounded-full ${inc.color}`}></div>
-                  <div>
-                    <h3 className="font-bold text-white">{inc.type}</h3>
-                    <p className="text-xs text-gray-400 flex items-center gap-1">
-                      <MapPin className="w-3 h-3" /> {inc.location}
-                    </p>
+          {loading ? (
+            <div className="text-center py-8 text-gray-400">Loading incidents...</div>
+          ) : recentIncidents.length === 0 ? (
+            <div className="text-center py-8 text-gray-400">
+              <AlertTriangle className="w-12 h-12 mx-auto mb-2 opacity-30" />
+              <p>No incidents reported</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {recentIncidents.map((inc, idx) => (
+                <div key={inc.id || idx} className="bg-slate-900/50 p-4 rounded-xl border border-white/5 flex items-center justify-between group hover:bg-slate-800 transition-colors">
+                  <div className="flex items-center gap-4">
+                    <div className={`w-1 h-12 rounded-full ${inc.color}`}></div>
+                    <div>
+                      <h3 className="font-bold text-white flex items-center gap-2">
+                        {inc.type}
+                        {inc.source === 'ai' && (
+                          <span className="text-xs bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded">🤖 AI</span>
+                        )}
+                        {inc.source === 'mobile_app' && (
+                          <span className="text-xs bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded">📱 Mobile</span>
+                        )}
+                      </h3>
+                      <p className="text-xs text-gray-400 flex items-center gap-1">
+                        <MapPin className="w-3 h-3" /> {inc.location}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xs text-gray-500 mb-1">{inc.time}</p>
+                    <span className={`text-xs px-2 py-1 rounded-lg ${inc.status === 'resolved' ? 'bg-green-500/20 text-green-400' :
+                        inc.status === 'in_progress' ? 'bg-blue-500/20 text-blue-400' :
+                          'bg-red-500/20 text-red-400'
+                      }`}>
+                      {inc.status.replace('_', ' ')}
+                    </span>
                   </div>
                 </div>
-                <div className="text-right">
-                  <p className="text-xs text-gray-500 mb-1">{inc.time}</p>
-                  <span className="text-xs bg-red-500/20 text-red-400 px-2 py-1 rounded-lg">
-                    {inc.status}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="bg-gradient-to-br from-blue-600 to-purple-600 rounded-2xl p-6 text-white relative overflow-hidden">
@@ -216,16 +285,20 @@ const DashboardPage = () => {
             <h2 className="text-lg font-bold mb-6">System Status</h2>
             <div className="space-y-4">
               <div className="flex justify-between items-center">
-                <span className="text-blue-100">AI Processor</span>
-                <span className="font-bold">Online</span>
+                <span className="text-blue-100">WebSocket</span>
+                <span className="font-bold">{wsConnected ? 'Connected' : 'Disconnected'}</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-blue-100">Database</span>
                 <span className="font-bold">Healthy</span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-blue-100">Network Latency</span>
-                <span className="font-bold">24ms</span>
+                <span className="text-blue-100">Total Incidents</span>
+                <span className="font-bold">{realTimeStats.totalIncidents}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-blue-100">Emergencies</span>
+                <span className="font-bold">{emergencies.length}</span>
               </div>
             </div>
           </div>
@@ -237,6 +310,23 @@ const DashboardPage = () => {
       </div>
     </div>
   );
+};
+
+// Helper function to format time ago
+const formatTimeAgo = (timestamp) => {
+  if (!timestamp) return 'Just now';
+  try {
+    const date = new Date(timestamp);
+    const now = new Date();
+    const diff = Math.floor((now - date) / 1000);
+
+    if (diff < 60) return 'Just now';
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+    return `${Math.floor(diff / 86400)}d ago`;
+  } catch {
+    return 'Recently';
+  }
 };
 
 export default DashboardPage;

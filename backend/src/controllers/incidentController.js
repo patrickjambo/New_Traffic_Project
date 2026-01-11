@@ -122,43 +122,78 @@ const reportIncident = async (req, res) => {
 };
 
 /**
- * Get nearby incidents
+ * Get nearby incidents OR all incidents if no location specified
  */
 const getNearbyIncidents = async (req, res) => {
     try {
         const { latitude, longitude, radius, status, type, limit, offset } = req.query;
 
-        // Build query with filters
-        let queryText = `
-      SELECT 
-        i.id, 
-        i.type, 
-        i.severity, 
-        i.status,
-        ST_AsText(i.location::geometry) as location,
-        ST_Y(i.location::geometry) as latitude,
-        ST_X(i.location::geometry) as longitude,
-        i.address,
-        i.description,
-        i.video_url,
-        i.created_at,
-        i.updated_at,
-        u.full_name as reported_by_name,
-        ST_Distance(
-          i.location,
-          ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography
-        ) / 1000 as distance_km
-      FROM incidents i
-      LEFT JOIN users u ON i.reported_by = u.id
-      WHERE ST_DWithin(
-        i.location,
-        ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography,
-        $3 * 1000
-      )
-    `;
+        // Check if location params are provided
+        const hasLocation = latitude && longitude;
 
-        const params = [parseFloat(longitude), parseFloat(latitude), parseFloat(radius || 5)];
-        let paramCount = 3;
+        let queryText;
+        let params;
+        let paramCount;
+
+        if (hasLocation) {
+            // Location-based query
+            queryText = `
+              SELECT 
+                i.id, 
+                i.type as incident_type, 
+                i.severity, 
+                i.status,
+                ST_AsText(i.location::geometry) as location,
+                ST_Y(i.location::geometry) as latitude,
+                ST_X(i.location::geometry) as longitude,
+                i.address,
+                i.description,
+                i.video_url,
+                i.created_at,
+                i.updated_at,
+                COALESCE(i.is_anonymous, false) as is_anonymous,
+                'manual' as source,
+                u.full_name as reported_by_name,
+                ST_Distance(
+                  i.location,
+                  ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography
+                ) / 1000 as distance_km
+              FROM incidents i
+              LEFT JOIN users u ON i.reported_by = u.id
+              WHERE ST_DWithin(
+                i.location,
+                ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography,
+                $3 * 1000
+              )
+            `;
+            params = [parseFloat(longitude), parseFloat(latitude), parseFloat(radius || 5)];
+            paramCount = 3;
+        } else {
+            // No location - return all incidents (for dashboard)
+            queryText = `
+              SELECT 
+                i.id, 
+                i.type as incident_type, 
+                i.severity, 
+                i.status,
+                i.address as location,
+                ST_Y(i.location::geometry) as latitude,
+                ST_X(i.location::geometry) as longitude,
+                i.address,
+                i.description,
+                i.video_url,
+                i.created_at,
+                i.updated_at,
+                COALESCE(i.is_anonymous, false) as is_anonymous,
+                'manual' as source,
+                u.full_name as reported_by_name
+              FROM incidents i
+              LEFT JOIN users u ON i.reported_by = u.id
+              WHERE 1=1
+            `;
+            params = [];
+            paramCount = 0;
+        }
 
         // Add status filter
         if (status) {
@@ -174,20 +209,22 @@ const getNearbyIncidents = async (req, res) => {
             params.push(type);
         }
 
-        queryText += ` ORDER BY distance_km LIMIT $${paramCount + 1} OFFSET $${paramCount + 2}`;
-        params.push(parseInt(limit || 20), parseInt(offset || 0));
+        // Order by created_at (most recent first) or distance if location provided
+        if (hasLocation) {
+            queryText += ` ORDER BY distance_km LIMIT $${paramCount + 1} OFFSET $${paramCount + 2}`;
+        } else {
+            queryText += ` ORDER BY i.created_at DESC LIMIT $${paramCount + 1} OFFSET $${paramCount + 2}`;
+        }
+        params.push(parseInt(limit || 50), parseInt(offset || 0));
 
         const result = await query(queryText, params);
 
         res.json({
             success: true,
-            data: {
-                incidents: result.rows,
-                count: result.rowCount,
-            },
+            data: result.rows,
         });
     } catch (error) {
-        console.error('Get nearby incidents error:', error);
+        console.error('Get incidents error:', error);
         res.status(500).json({
             success: false,
             message: 'Failed to fetch incidents',
@@ -195,6 +232,7 @@ const getNearbyIncidents = async (req, res) => {
         });
     }
 };
+
 
 /**
  * Get incident by ID

@@ -57,8 +57,8 @@ const createEmergency = async (req, res) => {
             `INSERT INTO emergencies (
                 user_id, emergency_type, severity, location_name, location_description,
                 latitude, longitude, description, casualties_count, vehicles_involved,
-                services_needed, contact_name, contact_phone, images, status
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+                services_needed, contact_name, contact_phone, images, status, source
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
             RETURNING *`,
             [
                 userId,
@@ -70,12 +70,13 @@ const createEmergency = async (req, res) => {
                 longitude,
                 description,
                 casualtiesCount || 0,
-                vehiclesInvolved || 0,
+                vehicles_involved || 0,
                 JSON.stringify(servicesNeeded || []),
                 contactName || '',
                 contactPhone,
                 JSON.stringify(images || []),
-                'pending'
+                'pending',
+                'manual'
             ]
         );
 
@@ -138,6 +139,7 @@ const getEmergencies = async (req, res) => {
                 u.username as reporter_name,
                 u.email as reporter_email,
                 assigned.username as assigned_to_name,
+                e.source,
                 CASE 
                     WHEN $1::decimal IS NOT NULL AND $2::decimal IS NOT NULL 
                     THEN (ST_Distance(

@@ -2,13 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
-import { Users, Phone, MapPin, Clock, AlertTriangle, CheckCircle, XCircle } from 'lucide-react';
+import { Users, Phone, MapPin, Clock, AlertTriangle, CheckCircle, XCircle, Download, Activity } from 'lucide-react';
 import axios from '../config/axios';
 import toast from 'react-hot-toast';
 
 const Emergency = () => {
   const { isAuthenticated } = useAuth();
-  const { emergencies, loading, fetchEmergencies } = useData();
+  const { emergencies, loading, fetchEmergencies, downloadEmergencyReport, isConnected } = useData();
 
   const handleStatusUpdate = async (id, newStatus) => {
     try {
@@ -33,7 +33,14 @@ const Emergency = () => {
             <Users className="w-8 h-8 text-orange-500" />
             Emergency Response
           </h1>
-          <p className="text-gray-400 mt-1">Manage critical emergency situations and coordinate response teams</p>
+          <div className="flex items-center gap-3 mt-1">
+            <p className="text-gray-400">Manage critical emergency situations and coordinate response teams</p>
+            <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${isConnected ? 'bg-green-500/10 text-green-500 border border-green-500/20' : 'bg-red-500/10 text-red-500 border border-red-500/20'
+              }`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></span>
+              {isConnected ? 'Live' : 'Offline'}
+            </div>
+          </div>
         </div>
         <button
           onClick={fetchEmergencies}
@@ -67,6 +74,15 @@ const Emergency = () => {
                         }`}>
                         {emergency.severity} Priority
                       </span>
+                      {emergency.source === 'ai' ? (
+                        <span className="bg-purple-500/20 text-purple-400 border border-purple-500/30 px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
+                          <Activity className="w-3 h-3" /> AI Detected
+                        </span>
+                      ) : (
+                        <span className="bg-blue-500/20 text-blue-400 border border-blue-500/30 px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
+                          <Users className="w-3 h-3" /> Manual Report
+                        </span>
+                      )}
                       <span className={`text-xs font-mono text-gray-400 flex items-center gap-1`}>
                         <Clock className="w-3 h-3" />
                         {new Date(emergency.created_at).toLocaleString()}

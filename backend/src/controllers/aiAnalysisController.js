@@ -308,8 +308,8 @@ async function createAutomaticEmergency(incident, aiResults, latitude, longitude
             `INSERT INTO emergencies (
                 user_id, emergency_type, severity, location_name, location_description,
                 latitude, longitude, services_needed, description, contact_phone, 
-                contact_name, incident_id, status, created_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
+                contact_name, incident_id, status, source, created_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
             RETURNING *`,
             [
                 null, // System-generated (no specific user)
@@ -324,7 +324,8 @@ async function createAutomaticEmergency(incident, aiResults, latitude, longitude
                 '112', // Emergency hotline number for Rwanda
                 'TrafficGuard AI System', // System-generated emergency
                 incident.id,
-                'pending'
+                'pending',
+                'ai'
             ]
         );
 

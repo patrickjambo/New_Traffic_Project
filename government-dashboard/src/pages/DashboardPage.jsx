@@ -192,9 +192,20 @@ const DashboardPage = () => {
                       </div>
                       <div>
                         <h3 className="font-bold text-white text-lg">{emergency.emergency_type}</h3>
-                        <p className="text-xs text-red-400/70 flex items-center gap-1">
-                          <MapPin className="w-3 h-3" /> {emergency.location_name}
-                        </p>
+                        <div className="flex items-center gap-2">
+                          <p className="text-xs text-red-400/70 flex items-center gap-1">
+                            <MapPin className="w-3 h-3" /> {emergency.location_name}
+                          </p>
+                          {emergency.source === 'ai' ? (
+                            <span className="bg-purple-500/20 text-purple-400 border border-purple-500/30 px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider">
+                              AI
+                            </span>
+                          ) : (
+                            <span className="bg-blue-500/20 text-blue-400 border border-blue-500/30 px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider">
+                              Manual
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
                     <span className={`text-[10px] font-bold px-2 py-1 rounded uppercase tracking-wider ${emergency.severity === 'critical' ? 'bg-red-500 text-white' : 'bg-orange-500 text-white'

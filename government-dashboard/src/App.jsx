@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { WebSocketProvider } from './context/WebSocketContext';
 import { DataProvider } from './context/DataContext';
@@ -20,9 +20,24 @@ import Settings from './pages/Settings';
 function AppContent() {
   const { isAuthenticated, user } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const location = useLocation();
 
-  // If user is admin/police, show the admin dashboard layout with sidebar
-  if (isAuthenticated && (user?.role === 'admin' || user?.role === 'police')) {
+  // Define routes that should use the admin dashboard layout
+  const dashboardRoutes = [
+    '/dashboard',
+    '/incidents',
+    '/reports',
+    '/emergency',
+    '/analytics',
+    '/settings'
+  ];
+
+  const isAdminRoute = dashboardRoutes.some(path =>
+    location.pathname === path || location.pathname.startsWith(path + '/')
+  );
+
+  // If user is admin/police AND on a dashboard route, show the admin dashboard layout
+  if (isAuthenticated && (user?.role === 'admin' || user?.role === 'police') && isAdminRoute) {
     return (
       <div className="flex h-screen bg-slate-900 relative overflow-hidden">
         {/* Background Watermark */}
@@ -46,7 +61,6 @@ function AppContent() {
 
             <main className="flex-1 overflow-x-hidden overflow-y-auto">
               <Routes>
-                <Route path="/" element={<Navigate to="/dashboard" replace />} />
                 <Route path="/dashboard" element={<DashboardPage />} />
                 <Route path="/incidents" element={<Incidents />} />
                 <Route path="/reports" element={<Reports />} />
@@ -62,7 +76,7 @@ function AppContent() {
     );
   }
 
-  // For public users, show the regular layout
+  // For all other cases (public routes or admin on public pages), show the regular layout
   return (
     <div className="min-h-screen bg-gray-50">
       <Routes>
@@ -77,6 +91,7 @@ function AppContent() {
         <Route path="/incidents" element={<HomePage />} />
         <Route path="/report" element={<HomePage />} />
         <Route path="/emergency" element={<HomePage />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </div>
   );

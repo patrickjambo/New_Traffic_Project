@@ -73,7 +73,7 @@ const DashboardPage = () => {
 
     return [...formattedIncidents, ...formattedEmergencies]
       .sort((a, b) => b.timestamp - a.timestamp)
-      .slice(0, 8);
+      .slice(0, 20);
   }, [incidents, emergencies]);
 
   // Active Emergencies
@@ -309,26 +309,28 @@ const DashboardPage = () => {
             </div>
           </div>
 
-          <div className="space-y-4">
-            {deployments.map((dept, idx) => (
-              <div key={idx} className="bg-slate-900/50 p-4 rounded-xl border border-white/5">
-                <div className="flex justify-between items-start mb-2">
-                  <div>
-                    <h3 className="font-bold text-white">{dept.name}</h3>
-                    <p className="text-xs text-gray-400">{dept.location}</p>
+          <div className="max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+            <div className="space-y-4">
+              {deployments.map((dept, idx) => (
+                <div key={idx} className="bg-slate-900/50 p-4 rounded-xl border border-white/5">
+                  <div className="flex justify-between items-start mb-2">
+                    <div>
+                      <h3 className="font-bold text-white">{dept.name}</h3>
+                      <p className="text-xs text-gray-400">{dept.location}</p>
+                    </div>
+                    <span className={`text-xs px-2 py-1 rounded-lg font-medium ${dept.statusColor}`}>
+                      {dept.status}
+                    </span>
                   </div>
-                  <span className={`text-xs px-2 py-1 rounded-lg font-medium ${dept.statusColor}`}>
-                    {dept.status}
-                  </span>
+                  <div className="flex justify-between items-center text-xs text-gray-500 mt-3 pt-3 border-t border-white/5">
+                    <span>{dept.officers} officers</span>
+                    <span className="flex items-center gap-1">
+                      <Clock className="w-3 h-3" /> {dept.time}
+                    </span>
+                  </div>
                 </div>
-                <div className="flex justify-between items-center text-xs text-gray-500 mt-3 pt-3 border-t border-white/5">
-                  <span>{dept.officers} officers</span>
-                  <span className="flex items-center gap-1">
-                    <Clock className="w-3 h-3" /> {dept.time}
-                  </span>
-                </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
 
           <button className="w-full mt-6 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-medium transition-colors">
@@ -370,40 +372,42 @@ const DashboardPage = () => {
               <p>No reports found</p>
             </div>
           ) : (
-            <div className="space-y-4">
-              {recentReports.map((report, idx) => (
-                <div key={`${report.reportType}-${report.id || idx}`} className="bg-slate-900/50 p-4 rounded-xl border border-white/5 flex items-center justify-between group hover:bg-slate-800 transition-colors">
-                  <div className="flex items-center gap-4">
-                    <div className={`w-1 h-12 rounded-full ${report.color}`}></div>
-                    <div>
-                      <h3 className="font-bold text-white flex items-center gap-2">
-                        {report.type}
-                        {report.reportType === 'emergency' && (
-                          <span className="text-[10px] bg-red-600 text-white px-2 py-0.5 rounded font-bold">EMERGENCY</span>
-                        )}
-                        {report.source === 'ai' && (
-                          <span className="text-xs bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded">🤖 AI</span>
-                        )}
-                        {report.source === 'mobile_app' && (
-                          <span className="text-xs bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded">📱 Mobile</span>
-                        )}
-                      </h3>
-                      <p className="text-xs text-gray-400 flex items-center gap-1">
-                        <MapPin className="w-3 h-3" /> {report.location}
-                      </p>
+            <div className="max-h-[450px] overflow-y-auto pr-2 custom-scrollbar">
+              <div className="space-y-4">
+                {recentReports.map((report, idx) => (
+                  <div key={`${report.reportType}-${report.id || idx}`} className="bg-slate-900/50 p-4 rounded-xl border border-white/5 flex items-center justify-between group hover:bg-slate-800 transition-colors">
+                    <div className="flex items-center gap-4">
+                      <div className={`w-1 h-12 rounded-full ${report.color}`}></div>
+                      <div>
+                        <h3 className="font-bold text-white flex items-center gap-2">
+                          {report.type}
+                          {report.reportType === 'emergency' && (
+                            <span className="text-[10px] bg-red-600 text-white px-2 py-0.5 rounded font-bold">EMERGENCY</span>
+                          )}
+                          {report.source === 'ai' && (
+                            <span className="text-xs bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded">🤖 AI</span>
+                          )}
+                          {report.source === 'mobile_app' && (
+                            <span className="text-xs bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded">📱 Mobile</span>
+                          )}
+                        </h3>
+                        <p className="text-xs text-gray-400 flex items-center gap-1">
+                          <MapPin className="w-3 h-3" /> {report.location}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs text-gray-500 mb-1">{report.time}</p>
+                      <span className={`text-xs px-2 py-1 rounded-lg ${report.status === 'resolved' ? 'bg-green-500/20 text-green-400' :
+                        report.status === 'in_progress' || report.status === 'active' ? 'bg-blue-500/20 text-blue-400' :
+                          'bg-red-500/20 text-red-400'
+                        }`}>
+                        {report.status.replace('_', ' ')}
+                      </span>
                     </div>
                   </div>
-                  <div className="text-right">
-                    <p className="text-xs text-gray-500 mb-1">{report.time}</p>
-                    <span className={`text-xs px-2 py-1 rounded-lg ${report.status === 'resolved' ? 'bg-green-500/20 text-green-400' :
-                      report.status === 'in_progress' || report.status === 'active' ? 'bg-blue-500/20 text-blue-400' :
-                        'bg-red-500/20 text-red-400'
-                      }`}>
-                      {report.status.replace('_', ' ')}
-                    </span>
-                  </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           )}
         </div>

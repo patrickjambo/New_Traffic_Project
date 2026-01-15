@@ -161,6 +161,11 @@ export const WebSocketProvider = ({ children }) => {
                 'emergency:nearby',
                 'analysis:complete',
                 'notification:new',
+                'deployment:new',
+                'deployment:update',
+                'deployment:assigned',
+                'officer:assigned',
+                'officer:location',
                 'pong',
             ];
             events.forEach(forwardEvent);

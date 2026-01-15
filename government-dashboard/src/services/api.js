@@ -67,6 +67,18 @@ export const deploymentService = {
         const response = await api.post('/deployments', deploymentData);
         return response.data;
     },
+    updateStatus: async (id, status) => {
+        const response = await api.put(`/deployments/${id}/status`, { status });
+        return response.data;
+    },
+    assignOfficer: async (officerId, incidentId, emergencyId = null) => {
+        const response = await api.post('/deployments/assign', { officerId, incidentId, emergencyId });
+        return response.data;
+    },
+    getAvailableOfficers: async () => {
+        const response = await api.get('/deployments/officers/available');
+        return response.data;
+    },
 };
 
 export const trafficService = {

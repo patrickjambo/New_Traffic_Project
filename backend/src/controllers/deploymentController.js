@@ -1,11 +1,14 @@
 const { query, transaction } = require('../config/database');
+const socketManager = require('../services/socketManager');
 
 /**
  * Get all deployments
  */
 const getDeployments = async (req, res) => {
     try {
-        const result = await query(`
+        const { status, incidentId, emergencyId, officerId } = req.query;
+
+        let queryText = `
             SELECT d.*, 
                    json_agg(json_build_object(
                      'id', u.id,
@@ -15,14 +18,41 @@ const getDeployments = async (req, res) => {
             FROM deployments d
             LEFT JOIN deployment_officers d_o ON d.id = d_o.deployment_id
             LEFT JOIN users u ON d_o.officer_id = u.id
-            GROUP BY d.id
-            ORDER BY d.start_time DESC
-        `);
+            WHERE 1=1
+        `;
 
-        res.json(result.rows);
+        const params = [];
+        let paramCount = 0;
+
+        if (status) {
+            paramCount++;
+            queryText += ` AND d.status = $${paramCount}`;
+            params.push(status);
+        }
+
+        if (incidentId) {
+            paramCount++;
+            queryText += ` AND d.incident_id = $${paramCount}`;
+            params.push(incidentId);
+        }
+
+        if (emergencyId) {
+            paramCount++;
+            queryText += ` AND d.emergency_id = $${paramCount}`;
+            params.push(emergencyId);
+        }
+
+        queryText += ` GROUP BY d.id ORDER BY d.start_time DESC`;
+
+        const result = await query(queryText, params);
+
+        res.json({
+            success: true,
+            data: result.rows,
+        });
     } catch (error) {
         console.error('Get deployments error:', error);
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ success: false, error: error.message });
     }
 };
 
@@ -31,13 +61,13 @@ const getDeployments = async (req, res) => {
  */
 const createDeployment = async (req, res) => {
     try {
-        const { unitName, location, officers, status, incidentId } = req.body;
+        const { unitName, location, officers, status, incidentId, emergencyId } = req.body;
 
         const deployment = await transaction(async (client) => {
             const result = await client.query(
                 `INSERT INTO deployments 
-                 (unit_name, address, latitude, longitude, status, start_time, incident_id)
-                 VALUES ($1, $2, $3, $4, $5, NOW(), $6)
+                 (unit_name, address, latitude, longitude, status, start_time, incident_id, emergency_id)
+                 VALUES ($1, $2, $3, $4, $5, NOW(), $6, $7)
                  RETURNING *`,
                 [
                     unitName,
@@ -45,7 +75,8 @@ const createDeployment = async (req, res) => {
                     location?.latitude,
                     location?.longitude,
                     status || 'Standby',
-                    incidentId
+                    incidentId || null,
+                    emergencyId || null
                 ]
             );
 
@@ -64,19 +95,169 @@ const createDeployment = async (req, res) => {
             return newDeployment;
         });
 
-        // Emit socket event if io is available
-        if (req.app.get('io')) {
-            req.app.get('io').emit('new_deployment', deployment);
-        }
+        // Emit socket event using socketManager
+        socketManager.emitDeploymentNew({
+            ...deployment,
+            type: incidentId ? 'incident' : (emergencyId ? 'emergency' : 'patrol'),
+            officer_ids: officers,
+        });
 
-        res.status(201).json(deployment);
+        res.status(201).json({
+            success: true,
+            data: deployment,
+        });
     } catch (error) {
         console.error('Create deployment error:', error);
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+/**
+ * Update deployment status
+ */
+const updateDeploymentStatus = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { status, notes } = req.body;
+
+        const result = await query(
+            `UPDATE deployments 
+             SET status = $1, updated_at = NOW()
+             WHERE id = $2
+             RETURNING *`,
+            [status, id]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Deployment not found',
+            });
+        }
+
+        const deployment = result.rows[0];
+
+        // Emit socket event
+        socketManager.emitDeploymentUpdate(deployment);
+
+        res.json({
+            success: true,
+            data: deployment,
+        });
+    } catch (error) {
+        console.error('Update deployment status error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+/**
+ * Assign officer to incident/emergency
+ */
+const assignOfficer = async (req, res) => {
+    try {
+        const { officerId, incidentId, emergencyId } = req.body;
+
+        if (!officerId || (!incidentId && !emergencyId)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Officer ID and either incident ID or emergency ID required',
+            });
+        }
+
+        // Get officer details
+        const officerResult = await query(
+            'SELECT id, full_name as name, badge_number FROM users WHERE id = $1',
+            [officerId]
+        );
+
+        if (officerResult.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Officer not found',
+            });
+        }
+
+        const officer = officerResult.rows[0];
+        let targetResult;
+
+        if (incidentId) {
+            // Update incident with assigned officer
+            targetResult = await query(
+                `UPDATE incidents 
+                 SET verified_by = $1, status = 'in_progress', updated_at = NOW()
+                 WHERE id = $2
+                 RETURNING id, type, severity, address as location`,
+                [officerId, incidentId]
+            );
+        } else if (emergencyId) {
+            // Update emergency with assigned officer
+            targetResult = await query(
+                `UPDATE emergencies 
+                 SET assigned_to = $1, status = 'dispatched', updated_at = NOW()
+                 WHERE id = $2
+                 RETURNING id, emergency_type as type, severity, location_name as location`,
+                [officerId, emergencyId]
+            );
+        }
+
+        if (targetResult.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: incidentId ? 'Incident not found' : 'Emergency not found',
+            });
+        }
+
+        const target = targetResult.rows[0];
+
+        // Emit officer assignment event
+        socketManager.emitOfficerAssigned(officer, target);
+
+        res.json({
+            success: true,
+            message: `Officer ${officer.name} assigned successfully`,
+            data: {
+                officer,
+                target,
+            },
+        });
+    } catch (error) {
+        console.error('Assign officer error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+/**
+ * Get available officers (not currently deployed)
+ */
+const getAvailableOfficers = async (req, res) => {
+    try {
+        const result = await query(`
+            SELECT u.id, u.full_name, u.badge_number, u.phone
+            FROM users u
+            WHERE u.role = 'police'
+            AND u.id NOT IN (
+                SELECT d_o.officer_id 
+                FROM deployment_officers d_o
+                JOIN deployments d ON d_o.deployment_id = d.id
+                WHERE d.status IN ('Active', 'En Route', 'On Scene')
+            )
+            ORDER BY u.full_name
+        `);
+
+        res.json({
+            success: true,
+            data: result.rows,
+        });
+    } catch (error) {
+        console.error('Get available officers error:', error);
+        res.status(500).json({ success: false, error: error.message });
     }
 };
 
 module.exports = {
     getDeployments,
-    createDeployment
+    createDeployment,
+    updateDeploymentStatus,
+    assignOfficer,
+    getAvailableOfficers,
 };

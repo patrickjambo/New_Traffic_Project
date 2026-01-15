@@ -303,6 +303,110 @@ class SocketManager {
     }
 
     // ============================================
+    // DEPLOYMENT EVENTS (Police Officer Assignment)
+    // ============================================
+
+    /**
+     * Emit new deployment to all connected clients
+     */
+    emitDeploymentNew(deployment) {
+        if (!this.io) return;
+
+        const payload = {
+            id: deployment.id,
+            officerId: deployment.officer_id,
+            officerName: deployment.officer_name,
+            incidentId: deployment.incident_id,
+            emergencyId: deployment.emergency_id,
+            type: deployment.type, // 'incident' or 'emergency'
+            status: deployment.status || 'assigned',
+            location: deployment.location,
+            assignedAt: deployment.assigned_at || new Date().toISOString(),
+        };
+
+        // Emit to all police and admin
+        this.io.to('role:police').to('role:admin').emit('deployment:new', payload);
+
+        // Emit to specific officer
+        if (deployment.officer_id) {
+            this.io.to(`user:${deployment.officer_id}`).emit('deployment:assigned', payload);
+        }
+
+        console.log(`👮 Emitted deployment:new - Officer: ${deployment.officer_name}`);
+    }
+
+    /**
+     * Emit deployment status update
+     */
+    emitDeploymentUpdate(deployment) {
+        if (!this.io) return;
+
+        const payload = {
+            id: deployment.id,
+            status: deployment.status,
+            location: deployment.location,
+            updatedAt: deployment.updated_at || new Date().toISOString(),
+        };
+
+        this.io.to('role:police').to('role:admin').emit('deployment:update', payload);
+
+        // Also notify the assigned officer
+        if (deployment.officer_id) {
+            this.io.to(`user:${deployment.officer_id}`).emit('deployment:update', payload);
+        }
+
+        console.log(`🔄 Emitted deployment:update - ID: ${deployment.id}, Status: ${deployment.status}`);
+    }
+
+    /**
+     * Emit officer location update (for tracking)
+     */
+    emitOfficerLocation(officerId, location) {
+        if (!this.io) return;
+
+        const payload = {
+            officerId,
+            latitude: location.latitude,
+            longitude: location.longitude,
+            timestamp: new Date().toISOString(),
+        };
+
+        // Only emit to admin for tracking
+        this.io.to('role:admin').emit('officer:location', payload);
+    }
+
+    /**
+     * Emit officer assigned notification
+     */
+    emitOfficerAssigned(officer, incident) {
+        if (!this.io) return;
+
+        const payload = {
+            officerId: officer.id,
+            officerName: officer.name,
+            incidentId: incident.id,
+            incidentType: incident.type,
+            location: incident.location,
+            severity: incident.severity,
+            assignedAt: new Date().toISOString(),
+        };
+
+        // Notify all admin and police
+        this.io.to('role:police').to('role:admin').emit('officer:assigned', payload);
+
+        // Send targeted notification to the assigned officer
+        this.emitNotificationToUser(officer.id, {
+            id: `assign_${incident.id}_${Date.now()}`,
+            title: '📍 New Assignment',
+            message: `You have been assigned to a ${incident.severity} ${incident.type} incident.`,
+            type: 'assignment',
+            created_at: new Date().toISOString(),
+        });
+
+        console.log(`👮 Emitted officer:assigned - ${officer.name} → Incident ${incident.id}`);
+    }
+
+    // ============================================
     // UTILITY METHODS
     // ============================================
 

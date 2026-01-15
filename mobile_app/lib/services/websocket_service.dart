@@ -174,6 +174,30 @@ class WebSocketService {
     });
 
     // ============================================
+    // DEPLOYMENT EVENTS (Police Officers)
+    // ============================================
+
+    _socket!.on('deployment:new', (data) {
+      print('👮 New deployment received: $data');
+      _handleDeploymentNew(data);
+    });
+
+    _socket!.on('deployment:update', (data) {
+      print('🔄 Deployment update received: $data');
+      _handleDeploymentUpdate(data);
+    });
+
+    _socket!.on('deployment:assigned', (data) {
+      print('📍 Deployment assigned to me: $data');
+      _handleDeploymentAssigned(data);
+    });
+
+    _socket!.on('officer:assigned', (data) {
+      print('👮 Officer assigned: $data');
+      _handleOfficerAssigned(data);
+    });
+
+    // ============================================
     // HEARTBEAT
     // ============================================
 
@@ -339,6 +363,63 @@ class WebSocketService {
       }
     } catch (e) {
       print('Error handling analysis:complete: $e');
+    }
+  }
+
+  // ============================================
+  // DEPLOYMENT EVENT HANDLERS
+  // ============================================
+
+  void _handleDeploymentNew(dynamic data) {
+    try {
+      final deploymentData = _parseData(data);
+      _notificationService.addNotification(
+        title: '👮 New Deployment',
+        message: 'Officer ${deploymentData['officerName'] ?? 'unknown'} deployed to ${deploymentData['type'] ?? 'incident'}',
+        type: 'deployment',
+      );
+    } catch (e) {
+      print('Error handling deployment:new: $e');
+    }
+  }
+
+  void _handleDeploymentUpdate(dynamic data) {
+    try {
+      final updateData = _parseData(data);
+      _notificationService.addNotification(
+        title: '🔄 Deployment Update',
+        message: 'Deployment status changed to: ${updateData['status'] ?? 'unknown'}',
+        type: 'deployment_update',
+      );
+    } catch (e) {
+      print('Error handling deployment:update: $e');
+    }
+  }
+
+  void _handleDeploymentAssigned(dynamic data) {
+    try {
+      final assignmentData = _parseData(data);
+      // High priority notification for officer being assigned
+      _notificationService.addNotification(
+        title: '📍 NEW ASSIGNMENT',
+        message: 'You have been assigned to a ${assignmentData['type'] ?? 'incident'} at ${assignmentData['location'] ?? 'unknown location'}',
+        type: 'critical',
+      );
+    } catch (e) {
+      print('Error handling deployment:assigned: $e');
+    }
+  }
+
+  void _handleOfficerAssigned(dynamic data) {
+    try {
+      final assignmentData = _parseData(data);
+      _notificationService.addNotification(
+        title: '👮 Officer Assigned',
+        message: '${assignmentData['officerName'] ?? 'Officer'} assigned to ${assignmentData['incidentType'] ?? 'incident'}',
+        type: 'officer_assignment',
+      );
+    } catch (e) {
+      print('Error handling officer:assigned: $e');
     }
   }
 

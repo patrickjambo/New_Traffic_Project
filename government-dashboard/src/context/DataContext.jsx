@@ -16,6 +16,8 @@ export const useData = () => {
 export const DataProvider = ({ children }) => {
   const [incidents, setIncidents] = useState([]);
   const [emergencies, setEmergencies] = useState([]);
+  const [deployments, setDeployments] = useState([]);
+  const [availableOfficers, setAvailableOfficers] = useState([]);
   const [statistics, setStatistics] = useState(null);
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -103,6 +105,36 @@ export const DataProvider = ({ children }) => {
     });
   }, []);
 
+  // Handle new deployment
+  const handleNewDeployment = useCallback((deployment) => {
+    console.log('👮 New deployment received:', deployment);
+    setDeployments(prev => [deployment, ...prev]);
+
+    toast.success(`Officer deployed to ${deployment.type}`, {
+      icon: '👮',
+      duration: 5000,
+    });
+  }, []);
+
+  // Handle deployment update
+  const handleDeploymentUpdate = useCallback((update) => {
+    console.log('🔄 Deployment update received:', update);
+    setDeployments(prev =>
+      prev.map(dep => dep.id === update.id ? { ...dep, ...update } : dep)
+    );
+  }, []);
+
+  // Handle officer assigned
+  const handleOfficerAssigned = useCallback((assignment) => {
+    console.log('👮 Officer assigned:', assignment);
+    toast.success(`${assignment.officerName} assigned to incident`, {
+      icon: '📍',
+      duration: 5000,
+    });
+    // Refresh available officers
+    fetchAvailableOfficers();
+  }, []);
+
   // ============================================
   // Subscribe to WebSocket events
   // ============================================
@@ -119,12 +151,15 @@ export const DataProvider = ({ children }) => {
       subscribe('emergency:alert', handleNewEmergency),
       subscribe('analysis:complete', handleAnalysisComplete),
       subscribe('notification:new', handleNewNotification),
+      subscribe('deployment:new', handleNewDeployment),
+      subscribe('deployment:update', handleDeploymentUpdate),
+      subscribe('officer:assigned', handleOfficerAssigned),
     ];
 
     return () => {
       unsubscribers.forEach(unsub => unsub());
     };
-  }, [isConnected, subscribe, handleNewIncident, handleIncidentUpdate, handleNewEmergency, handleEmergencyUpdate, handleAnalysisComplete, handleNewNotification]);
+  }, [isConnected, subscribe, handleNewIncident, handleIncidentUpdate, handleNewEmergency, handleEmergencyUpdate, handleAnalysisComplete, handleNewNotification, handleNewDeployment, handleDeploymentUpdate, handleOfficerAssigned]);
 
   // ============================================
   // API Functions
@@ -268,6 +303,86 @@ export const DataProvider = ({ children }) => {
   };
 
   // ============================================
+  // Deployment API Functions
+  // ============================================
+
+  // Fetch deployments
+  const fetchDeployments = async () => {
+    try {
+      const response = await axios.get('/api/deployments');
+      if (response.data.success) {
+        setDeployments(response.data.data || []);
+      }
+    } catch (error) {
+      console.warn('⚠️ Deployments fetch failed');
+    }
+  };
+
+  // Fetch available officers
+  const fetchAvailableOfficers = async () => {
+    try {
+      const response = await axios.get('/api/deployments/officers/available');
+      if (response.data.success) {
+        setAvailableOfficers(response.data.data || []);
+      }
+    } catch (error) {
+      console.warn('⚠️ Available officers fetch failed');
+    }
+  };
+
+  // Create deployment
+  const createDeployment = async (deploymentData) => {
+    try {
+      const response = await axios.post('/api/deployments', deploymentData);
+      if (response.data.success) {
+        toast.success('Deployment created successfully!');
+        return { success: true, data: response.data.data };
+      }
+      return { success: false, message: 'Failed to create deployment' };
+    } catch (error) {
+      console.error('Error creating deployment:', error);
+      toast.error('Failed to create deployment');
+      return { success: false, message: error.message };
+    }
+  };
+
+  // Assign officer to incident/emergency
+  const assignOfficer = async (officerId, incidentId, emergencyId = null) => {
+    try {
+      const response = await axios.post('/api/deployments/assign', {
+        officerId,
+        incidentId,
+        emergencyId,
+      });
+      if (response.data.success) {
+        toast.success(response.data.message);
+        return { success: true, data: response.data.data };
+      }
+      return { success: false, message: 'Failed to assign officer' };
+    } catch (error) {
+      console.error('Error assigning officer:', error);
+      toast.error('Failed to assign officer');
+      return { success: false, message: error.message };
+    }
+  };
+
+  // Update deployment status
+  const updateDeploymentStatus = async (deploymentId, status) => {
+    try {
+      const response = await axios.put(`/api/deployments/${deploymentId}/status`, { status });
+      if (response.data.success) {
+        toast.success('Deployment status updated!');
+        return { success: true };
+      }
+      return { success: false };
+    } catch (error) {
+      console.error('Error updating deployment status:', error);
+      toast.error('Failed to update deployment status');
+      return { success: false };
+    }
+  };
+
+  // ============================================
   // Initial data load and refresh
   // ============================================
 
@@ -279,6 +394,8 @@ export const DataProvider = ({ children }) => {
         fetchEmergencies(),
         fetchStatistics(),
         fetchNotifications(),
+        fetchDeployments(),
+        fetchAvailableOfficers(),
       ]);
       setLoading(false);
     };
@@ -297,6 +414,8 @@ export const DataProvider = ({ children }) => {
     // Data
     incidents,
     emergencies,
+    deployments,
+    availableOfficers,
     statistics,
     notifications,
     unreadCount,
@@ -306,6 +425,8 @@ export const DataProvider = ({ children }) => {
     // Actions
     fetchIncidents,
     fetchEmergencies,
+    fetchDeployments,
+    fetchAvailableOfficers,
     fetchStatistics,
     fetchNotifications,
     reportIncident,
@@ -313,6 +434,9 @@ export const DataProvider = ({ children }) => {
     downloadEmergencyReport,
     markNotificationRead,
     markAllNotificationsRead,
+    createDeployment,
+    assignOfficer,
+    updateDeploymentStatus,
   };
 
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;

@@ -4,6 +4,7 @@ const multer = require('multer');
 const path = require('path');
 const axios = require('axios');
 const fs = require('fs').promises;
+const socketManager = require('../services/socketManager');
 
 // Configure multer for video uploads
 const storage = multer.diskStorage({
@@ -27,7 +28,7 @@ const upload = multer({
         const allowedTypes = /mp4|avi|mov|mkv/;
         const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
         const mimetype = allowedTypes.test(file.mimetype);
-        
+
         if (extname && mimetype) {
             return cb(null, true);
         }
@@ -50,63 +51,73 @@ router.post('/detect', upload.single('video'), async (req, res) => {
 
         const videoPath = req.file.path;
         const videoId = path.basename(videoPath, path.extname(videoPath));
-        
+
         console.log(`📥 Received video: ${req.file.originalname}`);
         console.log(`   Size: ${(req.file.size / 1024 / 1024).toFixed(2)} MB`);
         console.log(`   Saved as: ${videoPath}`);
-        
+
         // Send to AI service for analysis
         const aiServiceUrl = process.env.AI_SERVICE_URL || 'http://localhost:8000';
-        
+
         try {
             // Forward video to Python AI service
             const formData = new FormData();
             const fileBuffer = await fs.readFile(videoPath);
             const blob = new Blob([fileBuffer], { type: 'video/mp4' });
             formData.append('file', blob, req.file.originalname);
-            
+
             console.log(`🤖 Sending to AI service: ${aiServiceUrl}/analyze`);
-            
+
             const aiResponse = await axios.post(`${aiServiceUrl}/analyze`, formData, {
                 headers: {
                     'Content-Type': 'multipart/form-data'
                 },
                 timeout: 120000 // 2 minute timeout
             });
-            
+
             const incidents = aiResponse.data.incidents || [];
-            
+
             console.log(`✅ AI analysis complete: ${incidents.length} detection(s)`);
-            
-            // Store incidents in database
+
+            // Store incidents in database and emit via socketManager
             if (incidents.length > 0) {
-                await storeIncidents(incidents, videoId, videoPath);
-                
-                // Send real-time notifications via WebSocket
-                const io = req.app.get('io');
-                io.emit('new_incident', {
-                    videoId: videoId,
-                    count: incidents.length,
-                    incidents: incidents
-                });
-                
-                console.log(`📢 Notifications sent to connected clients`);
+                const storedIncidents = await storeIncidents(incidents, videoId, videoPath);
+
+                // Send real-time notifications via socketManager for each incident
+                for (const incident of storedIncidents) {
+                    socketManager.emitIncidentNew({
+                        id: incident.id,
+                        type: incident.type,
+                        severity: incident.severity || 'medium',
+                        location: {
+                            latitude: incident.location_lat,
+                            longitude: incident.location_lng,
+                        },
+                        address: incident.description,
+                        description: incident.description,
+                        status: 'pending',
+                        source: 'ai', // Mark as AI-detected
+                        created_at: incident.created_at,
+                    });
+                }
+
+                console.log(`📢 Notifications sent for ${storedIncidents.length} AI-detected incidents`);
             }
-            
+
             return res.json({
                 success: true,
                 status: incidents.length > 0 ? 'incident_detected' : 'no_incident',
                 count: incidents.length,
                 incidents: incidents,
                 videoId: videoId,
-                message: incidents.length > 0 
-                    ? `${incidents.length} incident(s) detected` 
+                message: incidents.length > 0
+                    ? `${incidents.length} incident(s) detected`
                     : 'No incidents detected'
             });
-            
+
         } catch (aiError) {
             console.error('❌ AI service error:', aiError.message);
-            
+
             // Fallback: Return success but note AI service unavailable
             return res.json({
                 success: true,
@@ -116,10 +127,10 @@ router.post('/detect', upload.single('video'), async (req, res) => {
                 error: aiError.message
             });
         }
-        
+
     } catch (error) {
         console.error('❌ Error processing video:', error);
-        
+
         // Clean up uploaded file on error
         if (req.file) {
             try {
@@ -128,7 +139,7 @@ router.post('/detect', upload.single('video'), async (req, res) => {
                 console.error('Error deleting file:', unlinkError);
             }
         }
-        
+
         return res.status(500).json({
             success: false,
             error: error.message
@@ -143,7 +154,7 @@ router.post('/detect', upload.single('video'), async (req, res) => {
 router.get('/status/:videoId', async (req, res) => {
     try {
         const { videoId } = req.params;
-        
+
         // Query database for incidents related to this video
         const { pool } = require('../config/database');
         const result = await pool.query(
@@ -153,14 +164,14 @@ router.get('/status/:videoId', async (req, res) => {
              ORDER BY created_at DESC`,
             [videoId]
         );
-        
+
         res.json({
             success: true,
             videoId: videoId,
             incidents: result.rows,
             count: result.rows.length
         });
-        
+
     } catch (error) {
         console.error('Error fetching status:', error);
         res.status(500).json({
@@ -172,16 +183,19 @@ router.get('/status/:videoId', async (req, res) => {
 
 /**
  * Helper function to store incidents in database
+ * Returns array of stored incidents with their IDs
  */
 async function storeIncidents(incidents, videoId, videoPath) {
     const { pool } = require('../config/database');
-    
+    const storedIncidents = [];
+
     for (const incident of incidents) {
         try {
-            await pool.query(
+            const result = await pool.query(
                 `INSERT INTO incidents 
-                (type, location_lat, location_lng, description, status, video_path, video_id, confidence, timestamp_in_video, reported_by)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+                (type, location_lat, location_lng, description, status, video_path, video_id, confidence, timestamp_in_video, reported_by, source)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                RETURNING id, type, location_lat, location_lng, description, status, confidence, created_at`,
                 [
                     incident.type,
                     incident.location?.latitude || -1.9441,  // Default Kigali coords
@@ -192,16 +206,26 @@ async function storeIncidents(incidents, videoId, videoPath) {
                     videoId,
                     incident.confidence,
                     incident.timestamp,
-                    'AI_SYSTEM'
+                    'AI_SYSTEM',
+                    'ai'  // Mark source as AI
                 ]
             );
-            
-            console.log(`💾 Stored incident: ${incident.type} at ${incident.timestamp}s`);
-            
+
+            if (result.rows[0]) {
+                storedIncidents.push({
+                    ...result.rows[0],
+                    severity: incident.confidence > 0.8 ? 'high' : (incident.confidence > 0.6 ? 'medium' : 'low'),
+                });
+            }
+
+            console.log(`💾 Stored incident: ${incident.type} at ${incident.timestamp}s (ID: ${result.rows[0]?.id})`);
+
         } catch (dbError) {
             console.error('Error storing incident:', dbError.message);
         }
     }
+
+    return storedIncidents;
 }
 
 module.exports = router;

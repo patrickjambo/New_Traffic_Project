@@ -70,7 +70,7 @@ const createEmergency = async (req, res) => {
                 longitude,
                 description,
                 casualtiesCount || 0,
-                vehicles_involved || 0,
+                vehiclesInvolved || 0,
                 JSON.stringify(servicesNeeded || []),
                 contactName || '',
                 contactPhone,
@@ -136,9 +136,9 @@ const getEmergencies = async (req, res) => {
         let query = `
             SELECT 
                 e.*,
-                u.username as reporter_name,
+                u.full_name as reporter_name,
                 u.email as reporter_email,
-                assigned.username as assigned_to_name,
+                assigned.full_name as assigned_to_name,
                 e.source,
                 CASE 
                     WHEN $1::decimal IS NOT NULL AND $2::decimal IS NOT NULL 
@@ -246,10 +246,10 @@ const getEmergencyById = async (req, res) => {
         const result = await db.query(
             `SELECT 
                 e.*,
-                u.username as reporter_name,
+                u.full_name as reporter_name,
                 u.email as reporter_email,
                 u.phone as reporter_phone,
-                assigned.username as assigned_to_name,
+                assigned.full_name as assigned_to_name,
                 assigned.email as assigned_to_email
             FROM emergencies e
             LEFT JOIN users u ON e.user_id = u.id
@@ -269,7 +269,7 @@ const getEmergencyById = async (req, res) => {
         const historyResult = await db.query(
             `SELECT 
                 sh.*,
-                u.username as changed_by_name
+                u.full_name as changed_by_name
             FROM emergency_status_history sh
             LEFT JOIN users u ON sh.changed_by = u.id
             WHERE sh.emergency_id = $1
@@ -412,7 +412,7 @@ const getUserEmergencies = async (req, res) => {
         const result = await db.query(
             `SELECT 
                 e.*,
-                assigned.username as assigned_to_name
+                assigned.full_name as assigned_to_name
             FROM emergencies e
             LEFT JOIN users assigned ON e.assigned_to = assigned.id
             WHERE e.user_id = $1
@@ -441,7 +441,7 @@ const createEmergencyNotifications = async (emergency) => {
     try {
         // Get all police and admin users
         const usersResult = await db.query(
-            `SELECT id FROM users WHERE role IN ('police', 'admin')`
+            `SELECT id FROM users WHERE role IN('police', 'admin')`
         );
 
         const notifications = usersResult.rows.map(user => [
@@ -454,11 +454,12 @@ const createEmergencyNotifications = async (emergency) => {
 
         if (notifications.length > 0) {
             const query = `
-                INSERT INTO emergency_notifications 
-                (emergency_id, user_id, notification_type, title, message)
+                INSERT INTO emergency_notifications
+            (emergency_id, user_id, notification_type, title, message)
                 VALUES ${notifications.map((_, i) =>
                 `($${i * 5 + 1}, $${i * 5 + 2}, $${i * 5 + 3}, $${i * 5 + 4}, $${i * 5 + 5})`
-            ).join(', ')}
+            ).join(', ')
+                }
             `;
 
             await db.query(query, notifications.flat());
@@ -478,17 +479,17 @@ const getEmergencyStats = async (req, res) => {
         const statsQuery = `
             SELECT 
                 COUNT(*) as total,
-                COUNT(*) FILTER (WHERE status = 'pending') as pending,
-                COUNT(*) FILTER (WHERE status = 'active') as active,
-                COUNT(*) FILTER (WHERE status = 'dispatched') as dispatched,
-                COUNT(*) FILTER (WHERE status = 'resolved') as resolved,
-                COUNT(*) FILTER (WHERE severity = 'critical') as critical,
-                COUNT(*) FILTER (WHERE severity = 'high') as high,
-                AVG(EXTRACT(EPOCH FROM response_time)) as avg_response_time_seconds,
-                AVG(EXTRACT(EPOCH FROM resolution_time)) as avg_resolution_time_seconds
+            COUNT(*) FILTER(WHERE status = 'pending') as pending,
+            COUNT(*) FILTER(WHERE status = 'active') as active,
+            COUNT(*) FILTER(WHERE status = 'dispatched') as dispatched,
+            COUNT(*) FILTER(WHERE status = 'resolved') as resolved,
+            COUNT(*) FILTER(WHERE severity = 'critical') as critical,
+            COUNT(*) FILTER(WHERE severity = 'high') as high,
+            AVG(EXTRACT(EPOCH FROM response_time)) as avg_response_time_seconds,
+            AVG(EXTRACT(EPOCH FROM resolution_time)) as avg_resolution_time_seconds
             FROM emergencies
             WHERE created_at >= NOW() - INTERVAL '30 days'
-        `;
+            `;
 
         const result = await db.query(statsQuery);
         const stats = result.rows[0];
@@ -526,10 +527,10 @@ const generateEmergencyReport = async (req, res) => {
         const result = await db.query(
             `SELECT 
                 e.*,
-                u.username as reporter_name,
+                u.full_name as reporter_name,
                 u.email as reporter_email,
                 u.phone as reporter_phone,
-                assigned.username as assigned_to_name
+                assigned.full_name as assigned_to_name
             FROM emergencies e
             LEFT JOIN users u ON e.user_id = u.id
             LEFT JOIN users assigned ON e.assigned_to = assigned.id

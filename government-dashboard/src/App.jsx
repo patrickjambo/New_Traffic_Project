@@ -16,6 +16,7 @@ import Reports from './pages/Reports';
 import Emergency from './pages/Emergency';
 import Analytics from './pages/Analytics';
 import Settings from './pages/Settings';
+import DeploymentsPage from './pages/DeploymentsPage';
 
 function AppContent() {
   const { isAuthenticated, user } = useAuth();
@@ -29,7 +30,8 @@ function AppContent() {
     '/reports',
     '/emergency',
     '/analytics',
-    '/settings'
+    '/settings',
+    '/deployments'
   ];
 
   const isAdminRoute = dashboardRoutes.some(path =>
@@ -67,6 +69,7 @@ function AppContent() {
                 <Route path="/emergency" element={<Emergency />} />
                 <Route path="/analytics" element={<Analytics />} />
                 <Route path="/settings" element={<Settings />} />
+                <Route path="/deployments" element={<DeploymentsPage />} />
                 <Route path="*" element={<Navigate to="/dashboard" replace />} />
               </Routes>
             </main>

@@ -8,7 +8,8 @@ import {
   BarChart3,
   Settings,
   Home,
-  LogOut
+  LogOut,
+  Shield
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -22,6 +23,7 @@ const Sidebar = ({ isOpen }) => {
     { path: '/incidents', icon: AlertTriangle, label: 'Incidents', roles: ['police', 'admin'] },
     { path: '/reports', icon: FileText, label: 'Reports', roles: ['police', 'admin'] },
     { path: '/emergency', icon: Users, label: 'Emergency', roles: ['police', 'admin'] },
+    { path: '/deployments', icon: Shield, label: 'Deployments', roles: ['police', 'admin'] },
     { path: '/analytics', icon: BarChart3, label: 'Analytics', roles: ['admin'] },
     { path: '/settings', icon: Settings, label: 'Settings', roles: ['admin'] },
   ];

@@ -12,12 +12,9 @@ const api = axios.create({
 // Add a request interceptor to include the auth token
 api.interceptors.request.use(
     (config) => {
-        const userStr = localStorage.getItem('user');
-        if (userStr) {
-            const user = JSON.parse(userStr);
-            if (user.token) {
-                config.headers.Authorization = `Bearer ${user.token}`;
-            }
+        const token = localStorage.getItem('token');
+        if (token) {
+            config.headers.Authorization = `Bearer ${token}`;
         }
         return config;
     },
@@ -29,9 +26,10 @@ api.interceptors.request.use(
 export const authService = {
     login: async (email, password) => {
         const response = await api.post('/auth/login', { email, password });
-        if (response.data && response.data.token) {
-            // Store the whole response data which includes token and user
-            localStorage.setItem('user', JSON.stringify(response.data));
+        if (response.data.success) {
+            const { token, user } = response.data.data;
+            localStorage.setItem('token', token);
+            localStorage.setItem('user', JSON.stringify(user));
         }
         return response.data;
     },
@@ -43,7 +41,8 @@ export const authService = {
         return response.data;
     },
     getCurrentUser: () => {
-        return JSON.parse(localStorage.getItem('user'));
+        const userStr = localStorage.getItem('user');
+        return userStr ? JSON.parse(userStr) : null;
     },
 };
 
@@ -79,6 +78,32 @@ export const deploymentService = {
         const response = await api.get('/deployments/officers/available');
         return response.data;
     },
+    delete: async (id) => {
+        const response = await api.delete(`/deployments/${id}`);
+        return response.data;
+    },
+    getStats: async () => {
+        const response = await api.get('/deployments/stats');
+        return response.data;
+    },
+    updateOfficers: async (id, officerIds) => {
+        const response = await api.put(`/deployments/${id}/officers`, { officers: officerIds });
+        return response.data;
+    },
+};
+
+export const incidentService = {
+    getAll: async (params) => {
+        const response = await api.get('/incidents', { params });
+        return response.data;
+    },
+};
+
+export const emergencyService = {
+    getAll: async (params) => {
+        const response = await api.get('/emergency', { params });
+        return response.data;
+    },
 };
 
 export const trafficService = {
@@ -95,6 +120,17 @@ export const notificationService = {
     },
     markAsRead: async (id) => {
         const response = await api.put(`/notifications/${id}/read`);
+        return response.data;
+    },
+};
+
+export const adminService = {
+    createOfficer: async (officerData) => {
+        const response = await api.post('/admin/officers', officerData);
+        return response.data;
+    },
+    getUsers: async (params) => {
+        const response = await api.get('/admin/users', { params });
         return response.data;
     },
 };

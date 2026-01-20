@@ -1,4 +1,5 @@
 const { query } = require('../config/database');
+const { hashPassword } = require('../utils/auth');
 
 /**
  * Get system metrics for admin dashboard
@@ -86,7 +87,9 @@ const getUsers = async (req, res) => {
                 full_name,
                 phone,
                 role,
-                is_verified,
+                badge_number,
+                unit,
+                is_active,
                 created_at,
                 updated_at,
                 (SELECT COUNT(*) FROM incidents WHERE reported_by = users.id) as incidents_reported
@@ -103,10 +106,10 @@ const getUsers = async (req, res) => {
             params.push(role);
         }
 
-        if (status === 'verified') {
-            queryText += ` AND is_verified = true`;
-        } else if (status === 'unverified') {
-            queryText += ` AND is_verified = false`;
+        if (status === 'active') {
+            queryText += ` AND is_active = true`;
+        } else if (status === 'inactive') {
+            queryText += ` AND is_active = false`;
         }
 
         queryText += ` ORDER BY created_at DESC LIMIT $${paramCount + 1} OFFSET $${paramCount + 2}`;
@@ -138,7 +141,7 @@ const getUsers = async (req, res) => {
 const updateUser = async (req, res) => {
     try {
         const { id } = req.params;
-        const { role, is_verified } = req.body;
+        const { role, is_active } = req.body;
 
         const updates = [];
         const params = [];
@@ -150,10 +153,10 @@ const updateUser = async (req, res) => {
             params.push(role);
         }
 
-        if (typeof is_verified === 'boolean') {
+        if (typeof is_active === 'boolean') {
             paramCount++;
-            updates.push(`is_verified = $${paramCount}`);
-            params.push(is_verified);
+            updates.push(`is_active = $${paramCount}`);
+            params.push(is_active);
         }
 
         if (updates.length === 0) {
@@ -169,7 +172,7 @@ const updateUser = async (req, res) => {
         const result = await query(
             `UPDATE users SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP 
              WHERE id = $${paramCount}
-             RETURNING id, email, full_name, role, is_verified`,
+             RETURNING id, email, full_name, role, is_active`,
             params
         );
 
@@ -304,10 +307,55 @@ const generateReport = async (req, res) => {
     }
 };
 
+/**
+ * Create a new police officer
+ */
+const createOfficer = async (req, res) => {
+    try {
+        const { email, full_name, password, badge_number, unit, phone } = req.body;
+
+        if (!email || !password || !full_name) {
+            return res.status(400).json({
+                success: false,
+                message: 'Email, password, and full name are required',
+            });
+        }
+
+        const password_hash = await hashPassword(password);
+
+        const result = await query(
+            `INSERT INTO users (email, full_name, password_hash, role, badge_number, unit, phone, is_active)
+             VALUES ($1, $2, $3, 'police', $4, $5, $6, true)
+             RETURNING id, email, full_name, role, badge_number, unit`,
+            [email, full_name, password_hash, badge_number, unit, phone]
+        );
+
+        res.status(201).json({
+            success: true,
+            message: 'Officer created successfully',
+            data: result.rows[0],
+        });
+    } catch (error) {
+        console.error('Create officer error:', error);
+        if (error.code === '23505') { // Unique violation
+            return res.status(400).json({
+                success: false,
+                message: 'Email already exists',
+            });
+        }
+        res.status(500).json({
+            success: false,
+            message: 'Failed to create officer',
+            error: error.message,
+        });
+    }
+};
+
 module.exports = {
     getSystemMetrics,
     getUsers,
     updateUser,
     getSystemLogs,
     generateReport,
+    createOfficer,
 };

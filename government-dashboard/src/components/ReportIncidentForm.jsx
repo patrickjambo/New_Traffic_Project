@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { FaCarCrash, FaFireExtinguisher, FaAmbulance, FaPhone, FaUser, FaCar, FaShieldAlt, FaMedkit, FaExclamationTriangle, FaMapMarkerAlt, FaSyncAlt, FaUsers } from 'react-icons/fa';
 import { AlertTriangle, MapPin, FileText, Send, Zap, Crosshair } from 'lucide-react';
-import { searchKigaliLocation } from '../data/kigaliLocations';
+import { searchKigaliLocation, getLocationCoordinates } from '../data/kigaliLocations';
+import { useData } from '../context/DataContext';
 import toast from 'react-hot-toast';
 
 const EMERGENCY_TYPE_OPTIONS = [
@@ -23,11 +24,15 @@ function ReportIncidentForm(props) {
   const [vehicles, setVehicles] = useState(0);
   const [contactPhone, setContactPhone] = useState('');
   const [location, setLocation] = useState('');
+  const [latitude, setLatitude] = useState(-1.9536);
+  const [longitude, setLongitude] = useState(30.0606);
   const [description, setDescription] = useState('');
   const [severity, setSeverity] = useState('low');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  const { reportIncident, reportEmergency } = useData();
 
   // Autocomplete State
   const [suggestions, setSuggestions] = useState([]);
@@ -72,6 +77,14 @@ function ReportIncidentForm(props) {
 
   const selectLocation = (loc) => {
     setLocation(loc.name);
+    if (loc.lat && loc.lng) {
+      setLatitude(loc.lat);
+      setLongitude(loc.lng);
+    } else {
+      const coords = getLocationCoordinates(loc.name);
+      setLatitude(coords.lat);
+      setLongitude(coords.lng);
+    }
     setShowSuggestions(false);
   };
 
@@ -87,7 +100,9 @@ function ReportIncidentForm(props) {
         // In a real app, we would reverse geocode here
         // For now, we'll just format the coordinates nicely
         const { latitude, longitude } = position.coords;
-        setLocation(`Lat: ${latitude.toFixed(4)}, Lng: ${longitude.toFixed(4)}`);
+        setLatitude(latitude);
+        setLongitude(longitude);
+        setLocation(`Current Location (${latitude.toFixed(4)}, ${longitude.toFixed(4)})`);
         setLocationLoading(false);
         toast.success('Location acquired!');
       },
@@ -99,18 +114,63 @@ function ReportIncidentForm(props) {
     );
   };
 
-  function handleSubmit(e) {
+  async function handleSubmit(e) {
     e.preventDefault();
+
+    if (!incidentType && isEmergency) {
+      toast.error('Please select an emergency type');
+      return;
+    }
+
     setSubmitting(true);
     setError('');
     setSuccess(false);
-    // Simulate form submission
-    setTimeout(() => {
+
+    try {
+      let result;
+      if (isEmergency) {
+        result = await reportEmergency({
+          emergencyType: incidentType,
+          severity,
+          locationName: location,
+          locationDescription: location, // Use location as description if not separate
+          latitude,
+          longitude,
+          description,
+          casualtiesCount: casualties,
+          vehiclesInvolved: vehicles,
+          servicesNeeded: emergencyHelp,
+          contactPhone: contactPhone || '0780000000', // Ensure phone is never empty
+          contactName: 'Public User' // Fallback name
+        });
+      } else {
+        result = await reportIncident({
+          type: incidentType,
+          severity,
+          latitude,
+          longitude,
+          address: location,
+          description,
+          isAnonymous: true
+        });
+      }
+
+      if (result.success) {
+        setSuccess(true);
+        if (props.onSuccess) props.onSuccess();
+        // Reset form
+        setIncidentType('');
+        setDescription('');
+        setLocation('');
+      } else {
+        setError(result.message || 'Failed to submit report');
+      }
+    } catch (err) {
+      console.error('Submission error:', err);
+      setError('An unexpected error occurred');
+    } finally {
       setSubmitting(false);
-      setSuccess(true);
-      toast.success(isEmergency ? 'Emergency reported successfully!' : 'Incident reported successfully!');
-      if (props.onSuccess) props.onSuccess();
-    }, 1000);
+    }
   }
 
   return (

@@ -5,12 +5,18 @@ const {
     createDeployment,
     updateDeploymentStatus,
     assignOfficer,
-    getAvailableOfficers
+    getAvailableOfficers,
+    deleteDeployment,
+    getDeploymentStats,
+    updateDeploymentOfficers
 } = require('../controllers/deploymentController');
 const { authenticate, authorize } = require('../middleware/auth');
 
 // All routes require authentication
 router.use(authenticate);
+
+// Get deployment statistics (admin only)
+router.get('/stats', authorize('admin'), getDeploymentStats);
 
 // Get deployments (police and admin)
 router.get('/', getDeployments);
@@ -23,6 +29,12 @@ router.post('/', authorize('admin'), createDeployment);
 
 // Update deployment status
 router.put('/:id/status', updateDeploymentStatus);
+
+// Delete deployment (admin only)
+router.delete('/:id', authorize('admin'), deleteDeployment);
+
+// Update deployment officers (admin only)
+router.put('/:id/officers', authorize('admin'), updateDeploymentOfficers);
 
 // Assign officer to incident/emergency
 router.post('/assign', authorize('admin'), assignOfficer);

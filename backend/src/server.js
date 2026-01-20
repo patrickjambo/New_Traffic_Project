@@ -17,6 +17,7 @@ const incidentRoutes = require('./routes/incidents');
 const emergencyRoutes = require('./routes/emergency');
 const autoAnalysisRoutes = require('./routes/autoAnalysis');
 const detectionRoutes = require('./routes/detection');
+const deploymentRoutes = require('./routes/deployments');
 
 // Initialize app
 const app = express();
@@ -84,6 +85,7 @@ app.use('/api/police', require('./routes/police'));
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api/dashboard', require('./routes/dashboard'));
 app.use('/api/notifications', require('./routes/notifications'));
+app.use('/api/deployments', deploymentRoutes);
 
 // Webhook endpoint for AI service analysis callbacks
 app.post('/webhook/analysis-complete', async (req, res) => {

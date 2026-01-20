@@ -333,7 +333,10 @@ const DashboardPage = () => {
             </div>
           </div>
 
-          <button className="w-full mt-6 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-medium transition-colors">
+          <button
+            onClick={() => navigate('/deployments')}
+            className="w-full mt-6 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-medium transition-colors"
+          >
             Manage Deployments
           </button>
         </div>

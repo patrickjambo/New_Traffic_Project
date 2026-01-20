@@ -359,6 +359,16 @@ class SocketManager {
     }
 
     /**
+     * Emit deployment deletion
+     */
+    emitDeploymentDelete(deploymentId) {
+        if (!this.io) return;
+
+        this.io.to('role:police').to('role:admin').emit('deployment:delete', { id: deploymentId });
+        console.log(`🗑️ Emitted deployment:delete - ID: ${deploymentId}`);
+    }
+
+    /**
      * Emit officer location update (for tracking)
      */
     emitOfficerLocation(officerId, location) {

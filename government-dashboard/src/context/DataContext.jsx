@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import axios from 'axios';
+import axios from '../config/axios';
 import toast from 'react-hot-toast';
 import { useWebSocket } from './WebSocketContext';
 
@@ -247,9 +247,8 @@ export const DataProvider = ({ children }) => {
   // Report new incident
   const reportIncident = async (incidentData) => {
     try {
-      const response = await axios.post('/api/incidents', incidentData);
+      const response = await axios.post('/api/incidents/report', incidentData);
       if (response.data.success) {
-        // Optimistic update - incident will also come via WebSocket
         toast.success('Incident reported successfully!');
         return { success: true, data: response.data.data };
       }
@@ -257,6 +256,25 @@ export const DataProvider = ({ children }) => {
     } catch (error) {
       console.error('Error reporting incident:', error);
       toast.error('Failed to report incident');
+      return { success: false, message: error.message };
+    }
+  };
+
+  // Report new emergency
+  const reportEmergency = async (emergencyData) => {
+    try {
+      const response = await axios.post('/api/emergency', emergencyData);
+      if (response.data.success) {
+        toast.success('Emergency reported successfully! Help is on the way.', {
+          icon: '🚨',
+          duration: 6000
+        });
+        return { success: true, data: response.data.data };
+      }
+      return { success: false, message: 'Failed to report emergency' };
+    } catch (error) {
+      console.error('Error reporting emergency:', error);
+      toast.error('Failed to report emergency');
       return { success: false, message: error.message };
     }
   };
@@ -430,6 +448,7 @@ export const DataProvider = ({ children }) => {
     fetchStatistics,
     fetchNotifications,
     reportIncident,
+    reportEmergency,
     updateIncidentStatus,
     downloadEmergencyReport,
     markNotificationRead,

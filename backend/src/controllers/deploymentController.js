@@ -232,15 +232,26 @@ const assignOfficer = async (req, res) => {
 const getAvailableOfficers = async (req, res) => {
     try {
         const result = await query(`
-            SELECT u.id, u.full_name, u.badge_number, u.phone
+            SELECT 
+                u.id, 
+                u.full_name, 
+                u.badge_number, 
+                u.phone, 
+                u.unit,
+                CASE 
+                    WHEN d.id IS NOT NULL THEN 'Deployed'
+                    ELSE 'Available'
+                END as status,
+                d.unit_name as current_deployment,
+                d.address as deployment_location
             FROM users u
-            WHERE u.role = 'police'
-            AND u.id NOT IN (
-                SELECT d_o.officer_id 
+            LEFT JOIN (
+                SELECT d_o.officer_id, d.id, d.unit_name, d.address
                 FROM deployment_officers d_o
                 JOIN deployments d ON d_o.deployment_id = d.id
                 WHERE d.status IN ('Active', 'En Route', 'On Scene')
-            )
+            ) d ON u.id = d.officer_id
+            WHERE u.role = 'police'
             ORDER BY u.full_name
         `);
 
@@ -254,10 +265,126 @@ const getAvailableOfficers = async (req, res) => {
     }
 };
 
+/**
+ * Delete a deployment
+ */
+const deleteDeployment = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        await transaction(async (client) => {
+            // Delete officer assignments first
+            await client.query('DELETE FROM deployment_officers WHERE deployment_id = $1', [id]);
+            // Delete the deployment
+            const result = await client.query('DELETE FROM deployments WHERE id = $1 RETURNING *', [id]);
+
+            if (result.rows.length === 0) {
+                throw new Error('Deployment not found');
+            }
+        });
+
+        // Emit socket event
+        socketManager.emitDeploymentDelete(id);
+
+        res.json({
+            success: true,
+            message: 'Deployment deleted successfully',
+        });
+    } catch (error) {
+        console.error('Delete deployment error:', error);
+        res.status(error.message === 'Deployment not found' ? 404 : 500).json({
+            success: false,
+            error: error.message
+        });
+    }
+};
+
+/**
+ * Get deployment statistics
+ */
+const getDeploymentStats = async (req, res) => {
+    try {
+        const statsQuery = `
+            SELECT 
+                COUNT(*) as total_deployments,
+                COUNT(*) FILTER (WHERE status = 'Active') as active_deployments,
+                COUNT(*) FILTER (WHERE status = 'Standby') as standby_deployments,
+                (SELECT COUNT(*) FROM deployment_officers) as total_officers_deployed
+            FROM deployments
+        `;
+
+        const result = await query(statsQuery);
+
+        res.json({
+            success: true,
+            data: result.rows[0],
+        });
+    } catch (error) {
+        console.error('Get deployment stats error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+/**
+ * Update officers assigned to a deployment
+ */
+const updateDeploymentOfficers = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { officers } = req.body;
+
+        await transaction(async (client) => {
+            // Remove existing officers
+            await client.query('DELETE FROM deployment_officers WHERE deployment_id = $1', [id]);
+
+            // Add new officers
+            if (officers && officers.length > 0) {
+                for (const officerId of officers) {
+                    await client.query(
+                        'INSERT INTO deployment_officers (deployment_id, officer_id) VALUES ($1, $2)',
+                        [id, officerId]
+                    );
+                }
+            }
+        });
+
+        // Fetch updated deployment with officers
+        const result = await query(`
+            SELECT d.*, 
+                   json_agg(json_build_object(
+                     'id', u.id,
+                     'fullName', u.full_name,
+                     'badgeNumber', u.badge_number
+                   )) FILTER (WHERE u.id IS NOT NULL) as officers
+            FROM deployments d
+            LEFT JOIN deployment_officers d_o ON d.id = d_o.deployment_id
+            LEFT JOIN users u ON d_o.officer_id = u.id
+            WHERE d.id = $1
+            GROUP BY d.id
+        `, [id]);
+
+        const updatedDeployment = result.rows[0];
+
+        // Emit socket event
+        socketManager.emitDeploymentUpdate(updatedDeployment);
+
+        res.json({
+            success: true,
+            data: updatedDeployment,
+        });
+    } catch (error) {
+        console.error('Update deployment officers error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
 module.exports = {
     getDeployments,
     createDeployment,
     updateDeploymentStatus,
     assignOfficer,
     getAvailableOfficers,
+    deleteDeployment,
+    getDeploymentStats,
+    updateDeploymentOfficers,
 };

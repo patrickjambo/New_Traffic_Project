@@ -28,8 +28,8 @@ const validateEmergency = [
     body('locationName')
         .notEmpty()
         .withMessage('Location name is required')
-        .isLength({ min: 3, max: 500 })
-        .withMessage('Location name must be between 3 and 500 characters'),
+        .isLength({ min: 2, max: 1000 })
+        .withMessage('Location name must be between 2 and 1000 characters'),
     body('latitude')
         .notEmpty()
         .withMessage('Latitude is required')
@@ -43,8 +43,8 @@ const validateEmergency = [
     body('description')
         .notEmpty()
         .withMessage('Description is required')
-        .isLength({ min: 10, max: 2000 })
-        .withMessage('Description must be between 10 and 2000 characters'),
+        .isLength({ min: 2, max: 5000 })
+        .withMessage('Description must be between 2 and 5000 characters'),
     body('contactPhone')
         .notEmpty()
         .withMessage('Contact phone is required'),

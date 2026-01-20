@@ -6,6 +6,7 @@ const {
     updateUser,
     getSystemLogs,
     generateReport,
+    createOfficer,
 } = require('../controllers/adminController');
 
 const router = express.Router();
@@ -13,6 +14,13 @@ const router = express.Router();
 // All routes require admin authentication
 router.use(authenticate);
 router.use(authorize('admin'));
+
+/**
+ * @route   POST /api/admin/officers
+ * @desc    Create a new police officer
+ * @access  Private (Admin only)
+ */
+router.post('/officers', createOfficer);
 
 /**
  * @route   GET /api/admin/metrics

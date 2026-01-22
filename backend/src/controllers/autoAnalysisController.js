@@ -113,13 +113,14 @@ async function processClipAsync(req, videoFile, latitude, longitude) {
         const formData = new FormData();
         const videoStream = require('fs').createReadStream(videoFile.path);
         formData.append('video', videoStream, videoFile.filename);
+        formData.append('test_mode', 'true');
 
         const aiResponse = await axios.post(
-            `${aiServiceUrl}/analyze`,
+            `${aiServiceUrl}/ai/analyze-traffic`,
             formData,
             {
                 headers: formData.getHeaders(),
-                timeout: 10000, // 10 seconds timeout for quick analysis
+                timeout: 30000, // 30 seconds timeout for analysis
                 maxContentLength: Infinity,
                 maxBodyLength: Infinity
             }

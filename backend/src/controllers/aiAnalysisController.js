@@ -60,7 +60,7 @@ const analyzeVideoAndCreateIncident = async (req, res) => {
         formData.append('test_mode', 'true');
 
         const aiResponse = await axios.post(
-            `${AI_SERVICE_URL}/analyze`,
+            `${AI_SERVICE_URL}/ai/analyze-traffic`,
             formData,
             {
                 headers: formData.getHeaders(),

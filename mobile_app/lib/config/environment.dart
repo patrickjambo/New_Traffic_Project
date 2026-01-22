@@ -18,8 +18,8 @@ class EnvironmentConfig {
     switch (_currentEnvironment) {
       case Environment.development:
         // 🔥 UPDATED: Using your computer's IP for mobile device
-        // Computer IP: 192.168.34.237
-        return 'http://192.168.34.237:3000';
+        // Computer IP: 192.168.31.115
+        return 'http://192.168.31.115:3000';
       case Environment.staging:
         return 'https://staging.trafficguard.ai';
       case Environment.production:
@@ -32,7 +32,7 @@ class EnvironmentConfig {
     switch (_currentEnvironment) {
       case Environment.development:
         // 🔥 UPDATED: Using your computer's IP for mobile device
-        return 'http://192.168.34.237:8000';
+        return 'http://192.168.31.115:8000';
       case Environment.staging:
         return 'https://staging-ai.trafficguard.ai';
       case Environment.production:
@@ -45,7 +45,7 @@ class EnvironmentConfig {
     switch (_currentEnvironment) {
       case Environment.development:
         // 🔥 UPDATED: Using your computer's IP for mobile device
-        return 'http://192.168.34.237:3000';
+        return 'http://192.168.31.115:3000';
       case Environment.staging:
         return 'https://staging.trafficguard.ai';
       case Environment.production:

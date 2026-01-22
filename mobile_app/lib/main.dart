@@ -8,6 +8,7 @@ import 'screens/map_screen.dart';
 import 'screens/report_screen.dart';
 import 'screens/profile_screen.dart';
 import 'screens/auto_capture_screen.dart';
+import 'screens/high_performance_capture_screen.dart';
 import 'screens/report_history_screen.dart';
 import 'screens/notifications_screen.dart';
 import 'screens/settings_screen.dart';
@@ -168,6 +169,8 @@ class _TrafficGuardAppState extends State<TrafficGuardApp> {
             return MaterialPageRoute(builder: (_) => const ProfileScreen());
           case '/auto-capture':
             return MaterialPageRoute(builder: (_) => const AutoCaptureScreen());
+          case '/fast-capture':
+            return MaterialPageRoute(builder: (_) => const HighPerformanceCaptureScreen());
           case '/emergency-report':
             return MaterialPageRoute(builder: (_) => const EmergencyReportScreen());
           case '/auto-monitor':

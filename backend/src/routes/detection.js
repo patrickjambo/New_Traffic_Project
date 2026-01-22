@@ -64,11 +64,12 @@ router.post('/detect', upload.single('video'), async (req, res) => {
             const formData = new FormData();
             const fileBuffer = await fs.readFile(videoPath);
             const blob = new Blob([fileBuffer], { type: 'video/mp4' });
-            formData.append('file', blob, req.file.originalname);
+            formData.append('video', blob, req.file.originalname);
+            formData.append('test_mode', 'true');
 
-            console.log(`🤖 Sending to AI service: ${aiServiceUrl}/analyze`);
+            console.log(`🤖 Sending to AI service: ${aiServiceUrl}/ai/analyze-traffic`);
 
-            const aiResponse = await axios.post(`${aiServiceUrl}/analyze`, formData, {
+            const aiResponse = await axios.post(`${aiServiceUrl}/ai/analyze-traffic`, formData, {
                 headers: {
                     'Content-Type': 'multipart/form-data'
                 },

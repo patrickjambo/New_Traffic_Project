@@ -31,6 +31,9 @@ const authenticate = (req, res, next) => {
  * Middleware to check user role
  */
 const authorize = (...roles) => {
+    // Flatten array if passed as authorize(['admin', 'police'])
+    const allowedRoles = roles.flat();
+    
     return (req, res, next) => {
         if (!req.user) {
             return res.status(401).json({
@@ -39,7 +42,7 @@ const authorize = (...roles) => {
             });
         }
 
-        if (!roles.includes(req.user.role)) {
+        if (!allowedRoles.includes(req.user.role)) {
             return res.status(403).json({
                 success: false,
                 message: 'Insufficient permissions'

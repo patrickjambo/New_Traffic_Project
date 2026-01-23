@@ -17,6 +17,7 @@ import Emergency from './pages/Emergency';
 import Analytics from './pages/Analytics';
 import Settings from './pages/Settings';
 import DeploymentsPage from './pages/DeploymentsPage';
+import GeoFencingPage from './pages/GeoFencingPage';
 
 function AppContent() {
   const { isAuthenticated, user } = useAuth();
@@ -31,7 +32,8 @@ function AppContent() {
     '/emergency',
     '/analytics',
     '/settings',
-    '/deployments'
+    '/deployments',
+    '/geofencing'
   ];
 
   const isAdminRoute = dashboardRoutes.some(path =>
@@ -70,6 +72,7 @@ function AppContent() {
                 <Route path="/analytics" element={<Analytics />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="/deployments" element={<DeploymentsPage />} />
+                <Route path="/geofencing" element={<GeoFencingPage />} />
                 <Route path="*" element={<Navigate to="/dashboard" replace />} />
               </Routes>
             </main>

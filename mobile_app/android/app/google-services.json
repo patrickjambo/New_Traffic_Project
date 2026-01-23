@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "967349560399",
+    "project_id": "traffic-fbecb",
+    "storage_bucket": "traffic-fbecb.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:967349560399:android:5d120ee2f0977daeb0f63a",
+        "android_client_info": {
+          "package_name": "ai.trafficguard.trafficguard_mobile"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBC0OjfjBdDCKW7b8BXBdDs-Z7QaFibuaI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

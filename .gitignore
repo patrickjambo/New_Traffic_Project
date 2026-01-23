@@ -56,3 +56,17 @@ training_workspace/
 .venv/
 venv/
 
+# Firebase service account (secrets)
+backend/config/firebase-service-account.json
+**/serviceAccountKey.json
+**/firebase-service-account.json
+
+# APK files
+*.apk
+
+# Root level env
+.env
+
+# Junk files (accidentally created terminal artifacts)
+**/s_123*
+s_123*

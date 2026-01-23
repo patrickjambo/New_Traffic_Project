@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/incident_service.dart';
+import '../services/auth_service.dart';
 import '../config/app_config.dart';
 import 'package:intl/intl.dart';
 
@@ -12,14 +13,26 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final IncidentService _incidentService = IncidentService();
+  final AuthService _authService = AuthService();
   List<dynamic> _incidents = [];
   bool _isLoading = true;
   int _selectedIndex = 0;
+  String _userRole = 'public';
 
   @override
   void initState() {
     super.initState();
+    _loadUserRole();
     _loadNearbyIncidents();
+  }
+
+  Future<void> _loadUserRole() async {
+    final userData = await _authService.getUserData();
+    if (userData != null && mounted) {
+      setState(() {
+        _userRole = userData['role'] ?? 'public';
+      });
+    }
   }
 
   Future<void> _loadNearbyIncidents() async {
@@ -293,6 +306,76 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
         ),
+        const SizedBox(height: 12),
+        
+        // Deployments Card (Police Officers only)
+        if (_userRole == 'police')
+          Card(
+            color: Colors.indigo.shade50,
+            child: InkWell(
+              onTap: () {
+                Navigator.of(context).pushNamed('/deployments');
+              },
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.indigo,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(
+                        Icons.assignment,
+                        color: Colors.white,
+                        size: 28,
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Text(
+                                'My Deployments',
+                                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.indigo.shade900,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.indigo,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: const Text(
+                                  'OFFICER',
+                                  style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'View and acknowledge your assigned deployments',
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: Colors.indigo.shade700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Icon(Icons.arrow_forward_ios, size: 16, color: Colors.indigo.shade700),
+                  ],
+                ),
+              ),
+            ),
+          ),
         const SizedBox(height: 24),
         
         // Section Header

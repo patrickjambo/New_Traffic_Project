@@ -1,0 +1,724 @@
+/**
+ * GeoFencing Service - Intelligent Location-Based Alert System
+ * Handles geo-fence processing, officer location tracking, and targeted alerts
+ * Uses FREE technologies: PostgreSQL/PostGIS, Socket.IO, Firebase (free tier)
+ */
+
+const { query } = require('../config/database');
+const socketManager = require('./socketManager');
+const fcmService = require('./fcmService');
+
+class GeoFencingService {
+    constructor() {
+        // Kigali district boundaries (approximate center points)
+        this.kigaliDistricts = {
+            'Nyarugenge': { lat: -1.9536, lng: 30.0606, radius: 5 },
+            'Gasabo': { lat: -1.9147, lng: 30.1045, radius: 8 },
+            'Kicukiro': { lat: -1.9876, lng: 30.1029, radius: 6 }
+        };
+        
+        // Alert priority levels
+        this.PRIORITY = {
+            CRITICAL: 1,
+            HIGH: 2,
+            MEDIUM: 5,
+            LOW: 8
+        };
+    }
+
+    // ============================================================
+    // OFFICER LOCATION MANAGEMENT
+    // ============================================================
+
+    /**
+     * Update officer's current location
+     * @param {number} officerId - Officer profile ID
+     * @param {number} latitude - GPS latitude
+     * @param {number} longitude - GPS longitude
+     * @param {object} metadata - Additional location data (accuracy, speed, heading)
+     */
+    async updateOfficerLocation(officerId, latitude, longitude, metadata = {}) {
+        try {
+            // Find district for this location using Haversine distance
+            const districtResult = await query(`
+                SELECT id, name, code, radius_km,
+                    (6371 * acos(
+                        LEAST(1, GREATEST(-1,
+                            cos(radians($1)) * cos(radians(center_lat)) *
+                            cos(radians(center_lng) - radians($2)) +
+                            sin(radians($1)) * sin(radians(center_lat))
+                        ))
+                    )) as distance_km
+                FROM districts
+                WHERE is_active = TRUE
+                ORDER BY distance_km ASC
+                LIMIT 1
+            `, [latitude, longitude]);
+            
+            let districtId = null;
+            if (districtResult.rows.length > 0) {
+                const district = districtResult.rows[0];
+                if (district.distance_km <= district.radius_km) {
+                    districtId = district.id;
+                }
+            }
+
+            // Update officer profile with current location
+            const updateResult = await query(`
+                UPDATE officer_profiles 
+                SET 
+                    current_latitude = $1,
+                    current_longitude = $2,
+                    current_district_id = $3,
+                    location_updated_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = $4
+                RETURNING id, badge_number, is_on_duty
+            `, [latitude, longitude, districtId, officerId]);
+
+            if (updateResult.rows.length === 0) {
+                console.log(`Officer ${officerId} not found for location update`);
+                return null;
+            }
+
+            // Record location history (for auditing)
+            await query(`
+                INSERT INTO officer_location_history (officer_id, latitude, longitude, district_id, accuracy_meters, speed_kmh, heading)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+            `, [officerId, latitude, longitude, districtId, metadata.accuracy || null, metadata.speed || null, metadata.heading || null]);
+
+            // Emit location update to admin dashboard
+            socketManager.emitOfficerLocation(officerId, { latitude, longitude, districtId, ...metadata });
+
+            console.log(`📍 Officer ${officerId} location updated: ${latitude}, ${longitude}`);
+            return { success: true, districtId };
+        } catch (error) {
+            console.error('Error updating officer location:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Update officer FCM token for push notifications
+     */
+    async updateOfficerFCMToken(officerId, fcmToken, deviceInfo = {}) {
+        try {
+            await query(`
+                UPDATE officer_profiles 
+                SET 
+                    fcm_token = $1,
+                    device_id = $2,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = $3
+            `, [fcmToken, deviceInfo.deviceId || null, officerId]);
+
+            console.log(`📱 FCM token updated for officer ${officerId}`);
+            return { success: true };
+        } catch (error) {
+            console.error('Error updating FCM token:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Update officer duty status
+     */
+    async updateOfficerDutyStatus(officerId, isOnDuty) {
+        try {
+            await query(`
+                UPDATE officer_profiles 
+                SET 
+                    is_on_duty = $1, 
+                    duty_start_time = CASE WHEN $1 = true THEN CURRENT_TIMESTAMP ELSE duty_start_time END,
+                    duty_end_time = CASE WHEN $1 = false THEN CURRENT_TIMESTAMP ELSE NULL END,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = $2
+            `, [isOnDuty, officerId]);
+
+            // Notify admin dashboard
+            socketManager.emitToRole('admin', 'officer:status_changed', {
+                officerId,
+                isOnDuty,
+                timestamp: new Date().toISOString()
+            });
+
+            return { success: true };
+        } catch (error) {
+            console.error('Error updating duty status:', error);
+            throw error;
+        }
+    }
+
+    // ============================================================
+    // GEO-FENCE PROCESSING
+    // ============================================================
+
+    /**
+     * Find all officers in a specific district
+     * @param {number} districtId - District ID
+     * @param {object} options - Filter options
+     */
+    async findOfficersInDistrict(districtId, options = {}) {
+        try {
+            const { onDuty = false, alertEnabled = false } = options;
+            
+            let whereClause = 'WHERE (op.current_district_id = $1 OR op.assigned_district_id = $1)';
+            if (onDuty) whereClause += ' AND op.is_on_duty = TRUE';
+            if (alertEnabled) whereClause += ' AND op.notification_enabled = TRUE';
+
+            const result = await query(`
+                SELECT 
+                    op.id as officer_id,
+                    op.user_id,
+                    op.badge_number,
+                    op.full_name,
+                    op.rank,
+                    op.fcm_token,
+                    op.is_on_duty,
+                    op.current_latitude,
+                    op.current_longitude,
+                    op.notification_enabled,
+                    op.emergency_alert_enabled
+                FROM officer_profiles op
+                ${whereClause}
+                ORDER BY op.is_on_duty DESC, op.location_updated_at DESC
+            `, [districtId]);
+
+            return result.rows;
+        } catch (error) {
+            console.error('Error finding officers in district:', error);
+            return [];
+        }
+    }
+
+    /**
+     * Get district from GPS coordinates
+     */
+    async getDistrictFromLocation(latitude, longitude) {
+        try {
+            // Find district where coordinates fall within radius
+            const result = await query(`
+                SELECT id, name, code,
+                    (6371 * acos(
+                        cos(radians($1)) * cos(radians(center_lat)) *
+                        cos(radians(center_lng) - radians($2)) +
+                        sin(radians($1)) * sin(radians(center_lat))
+                    )) as distance_km
+                FROM districts
+                WHERE is_active = TRUE
+                ORDER BY distance_km ASC
+                LIMIT 1
+            `, [latitude, longitude]);
+
+            if (result.rows.length > 0 && result.rows[0].distance_km <= result.rows[0].radius_km) {
+                return result.rows[0];
+            }
+
+            // Return closest district anyway
+            return result.rows[0] || { id: 1, name: 'Nyarugenge', code: 'NYA' };
+        } catch (error) {
+            console.error('Error getting district:', error);
+            // Return default district on error
+            return { id: 1, name: 'Nyarugenge', code: 'NYA' };
+        }
+    }
+
+    /**
+     * Find officers within geo-fence radius
+     * @param {number} latitude - Incident latitude
+     * @param {number} longitude - Incident longitude
+     * @param {number} radiusKm - Search radius in km
+     * @param {number} districtId - Optional: include officers assigned to district
+     * @param {boolean} includeOffDuty - Whether to include off-duty officers for emergencies
+     */
+    async findOfficersInGeoFence(latitude, longitude, radiusKm = 5, districtId = null, includeOffDuty = false) {
+        try {
+            // Simple distance-based query without PostGIS - using subquery for filtering
+            const result = await query(`
+                SELECT * FROM (
+                    SELECT 
+                        op.id as officer_id,
+                        op.user_id,
+                        op.badge_number,
+                        op.full_name,
+                        op.fcm_token,
+                        op.is_on_duty,
+                        op.assigned_district_id,
+                        op.current_latitude,
+                        op.current_longitude,
+                        -- Haversine distance calculation (approx km)
+                        (6371 * acos(
+                            LEAST(1, GREATEST(-1,
+                                cos(radians($1)) * cos(radians(op.current_latitude)) *
+                                cos(radians(op.current_longitude) - radians($2)) +
+                                sin(radians($1)) * sin(radians(op.current_latitude))
+                            ))
+                        )) as distance_km
+                    FROM officer_profiles op
+                    WHERE 
+                        op.notification_enabled = TRUE
+                        AND ($4 OR op.is_on_duty = TRUE)
+                        AND op.current_latitude IS NOT NULL
+                        AND op.current_longitude IS NOT NULL
+                ) AS officers_with_distance
+                WHERE distance_km <= $3
+                ORDER BY distance_km ASC
+                LIMIT 50
+            `, [latitude, longitude, radiusKm, includeOffDuty]);
+
+            return result.rows;
+        } catch (error) {
+            console.error('Error finding officers in geo-fence:', error);
+            
+            // Fallback: Simple query by district
+            const fallbackResult = await query(`
+                SELECT 
+                    op.id as officer_id,
+                    op.user_id,
+                    op.badge_number,
+                    op.full_name,
+                    op.fcm_token,
+                    op.is_on_duty,
+                    op.assigned_district_id
+                FROM officer_profiles op
+                WHERE 
+                    op.notification_enabled = TRUE
+                    AND ($1 OR op.is_on_duty = TRUE)
+                ORDER BY op.location_updated_at DESC
+                LIMIT 50
+            `, [includeOffDuty]);
+
+            return fallbackResult.rows;
+        }
+    }
+
+    // ============================================================
+    // ALERT CREATION & TARGETING
+    // ============================================================
+
+    /**
+     * Create and send targeted alert for an incident
+     * This is the main function that processes incidents and sends geo-fenced alerts
+     * 
+     * @param {object} incident - Incident data
+     * @param {boolean} isEmergency - Whether this is an emergency alert
+     * @param {object} aiData - AI detection data (confidence, detected object, etc.)
+     */
+    async createTargetedAlert(incident, isEmergency = false, aiData = {}) {
+        try {
+            const latitude = incident.latitude || incident.lat;
+            const longitude = incident.longitude || incident.lng;
+
+            // Get district for the incident location
+            const district = await this.getDistrictFromLocation(latitude, longitude);
+            
+            // Determine alert type and priority
+            const alertType = this.determineAlertType(incident.type, isEmergency, aiData);
+            const priority = isEmergency ? this.PRIORITY.CRITICAL : this.PRIORITY.MEDIUM;
+            
+            // Determine search radius based on priority
+            const searchRadius = isEmergency ? 10 : 5; // km
+
+            // Create alert record (compatible with existing schema)
+            const alertResult = await query(`
+                INSERT INTO incident_alerts (
+                    incident_id, emergency_id, alert_type_id,
+                    alert_type, is_emergency, priority,
+                    incident_location, incident_lat, incident_lng,
+                    latitude, longitude,
+                    district_id,
+                    title, message, ai_confidence, detected_object,
+                    media_urls, target_radius_km, source, created_by
+                ) VALUES (
+                    $1, $2, 
+                    (SELECT id FROM alert_types WHERE code = $3 LIMIT 1),
+                    $3, $4, $5,
+                    POINT($7, $6)::TEXT, $6, $7,
+                    $6, $7,
+                    $8,
+                    $9, $10, $11, $12,
+                    $13, $14, $15, $16
+                )
+                RETURNING id
+            `, [
+                incident.id || null,                      // $1 incident_id
+                incident.emergency_id || null,            // $2 emergency_id
+                alertType,                                // $3 alert_type code
+                isEmergency,                              // $4 is_emergency
+                priority,                                 // $5 priority
+                latitude,                                 // $6 incident_lat / latitude
+                longitude,                                // $7 incident_lng / longitude
+                district?.id || null,                     // $8 district_id
+                this.generateAlertTitle(incident, isEmergency, aiData),   // $9 title
+                this.generateAlertMessage(incident, isEmergency, aiData), // $10 message
+                aiData.confidence || null,                // $11 ai_confidence
+                aiData.detectedObject || null,            // $12 detected_object
+                incident.media_urls || null,              // $13 media_urls
+                searchRadius,                             // $14 target_radius_km
+                aiData.source || 'manual',                // $15 source
+                incident.reported_by || null              // $16 created_by
+            ]);
+
+            const alertId = alertResult.rows[0]?.id;
+
+            // Find target officers within geo-fence
+            const officers = await this.findOfficersInGeoFence(
+                latitude, 
+                longitude, 
+                searchRadius, 
+                district?.id,
+                isEmergency // Include off-duty officers for emergencies
+            );
+
+            console.log(`🎯 Found ${officers.length} officers in geo-fence for alert ${alertId}`);
+
+            // Send alerts to each officer
+            const alertPayload = {
+                alertId,
+                incidentId: incident.id,
+                type: incident.type,
+                severity: incident.severity || 'medium',
+                isEmergency,
+                priority,
+                location: {
+                    latitude,
+                    longitude,
+                    address: incident.address || incident.location_name,
+                    district: district?.name || 'Kigali'
+                },
+                title: this.generateAlertTitle(incident, isEmergency, aiData),
+                message: this.generateAlertMessage(incident, isEmergency, aiData),
+                ai: {
+                    confidence: aiData.confidence,
+                    detectedObject: aiData.detectedObject,
+                    detectionMethod: aiData.detectionMethod
+                },
+                mediaUrls: incident.media_urls || [],
+                timestamp: new Date().toISOString()
+            };
+
+            // Send to each officer and record delivery
+            for (const officer of officers) {
+                await this.sendAlertToOfficer(alertId, officer, alertPayload);
+            }
+
+            // Also broadcast via WebSocket for real-time
+            this.broadcastAlert(alertPayload, district?.id);
+
+            return {
+                success: true,
+                alertId,
+                targetedOfficers: officers.length,
+                district: district?.name
+            };
+        } catch (error) {
+            console.error('Error creating targeted alert:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Send alert to a specific officer
+     */
+    async sendAlertToOfficer(alertId, officer, alertPayload) {
+        try {
+            // Record delivery attempt
+            await query(`
+                INSERT INTO alert_deliveries (alert_id, officer_id, distance_km, delivery_status, delivery_method, sent_at)
+                VALUES ($1, $2, $3, 'sent', 'websocket', CURRENT_TIMESTAMP)
+                ON CONFLICT (alert_id, officer_id) DO UPDATE SET
+                    delivery_status = 'sent',
+                    sent_at = CURRENT_TIMESTAMP
+            `, [alertId, officer.officer_id, officer.distance_km || null]);
+
+            // Send via WebSocket (immediate)
+            socketManager.emitToUser(officer.user_id, 
+                alertPayload.isEmergency ? 'emergency:alarm' : 'incident:alert',
+                {
+                    ...alertPayload,
+                    distanceKm: officer.distance_km
+                }
+            );
+
+            // If officer has FCM token, queue push notification
+            if (officer.fcm_token) {
+                // Push notification will be handled by FCM service
+                await this.queuePushNotification(officer.fcm_token, alertPayload);
+            }
+
+            console.log(`📤 Alert ${alertId} sent to officer ${officer.badge_number || officer.user_id}`);
+        } catch (error) {
+            console.error(`Error sending alert to officer ${officer.user_id}:`, error);
+        }
+    }
+
+    /**
+     * Send push notification via FCM
+     */
+    async queuePushNotification(fcmToken, alertPayload) {
+        try {
+            const notification = {
+                title: alertPayload.title,
+                body: alertPayload.message,
+            };
+
+            const data = {
+                alertId: String(alertPayload.alertId || ''),
+                incidentId: String(alertPayload.incidentId || ''),
+                isEmergency: String(alertPayload.isEmergency),
+                latitude: String(alertPayload.location?.latitude || ''),
+                longitude: String(alertPayload.location?.longitude || ''),
+                address: alertPayload.location?.address || '',
+                district: alertPayload.location?.district || '',
+                type: alertPayload.type || 'incident',
+                severity: alertPayload.severity || 'medium',
+                aiConfidence: String(alertPayload.ai?.confidence || ''),
+                detectedObject: alertPayload.ai?.detectedObject || '',
+                timestamp: new Date().toISOString(),
+            };
+
+            // Send via FCM service
+            const result = await fcmService.sendToDevice(
+                fcmToken, 
+                notification, 
+                data, 
+                alertPayload.isEmergency
+            );
+
+            if (result.success) {
+                console.log(`📱 FCM push sent for alert ${alertPayload.alertId}`);
+            }
+
+            return result;
+        } catch (error) {
+            console.error('FCM push notification error:', error.message);
+            return { success: false, error: error.message };
+        }
+    }
+
+    /**
+     * Send emergency alarm to multiple officers via FCM
+     */
+    async sendEmergencyAlarmToOfficers(officers, alertPayload) {
+        try {
+            const result = await fcmService.sendEmergencyAlarm(officers, alertPayload);
+            console.log(`🚨 Emergency FCM sent: ${result.successCount || 0} delivered`);
+            return result;
+        } catch (error) {
+            console.error('Emergency FCM error:', error.message);
+            return { success: false };
+        }
+    }
+
+    /**
+     * Broadcast alert via WebSocket to targeted rooms
+     */
+    broadcastAlert(alertPayload, districtId) {
+        if (!socketManager.io) return;
+
+        const eventName = alertPayload.isEmergency ? 'emergency:alarm' : 'incident:alert';
+
+        // Broadcast to police and admin
+        socketManager.io.to('role:police').to('role:admin').emit(eventName, alertPayload);
+
+        // Broadcast to location-based room
+        if (alertPayload.location) {
+            const locRoom = `loc:${Math.round(alertPayload.location.latitude * 100)}_${Math.round(alertPayload.location.longitude * 100)}`;
+            socketManager.io.to(locRoom).emit(eventName, alertPayload);
+        }
+
+        // Broadcast to district room if available
+        if (districtId) {
+            socketManager.io.to(`district:${districtId}`).emit(eventName, alertPayload);
+        }
+
+        console.log(`📡 Alert broadcasted: ${eventName}`);
+    }
+
+    // ============================================================
+    // HELPER METHODS
+    // ============================================================
+
+    /**
+     * Determine alert type code based on incident
+     * Returns: 'standard' or 'emergency' (matching DB constraint)
+     */
+    determineAlertType(incidentType, isEmergency, aiData) {
+        // DB constraint only allows 'standard' or 'emergency'
+        if (isEmergency) return 'emergency';
+        
+        // Check for emergency-level incidents
+        if (aiData.detectedObject) {
+            const object = aiData.detectedObject.toLowerCase();
+            if (object.includes('fire') || object.includes('flame')) return 'emergency';
+            if (object.includes('gun') || object.includes('firearm') || object.includes('weapon')) return 'emergency';
+            if (object.includes('accident') || object.includes('crash') || object.includes('collision')) return 'emergency';
+        }
+
+        // Check incident type for emergency level
+        if (incidentType) {
+            const type = incidentType.toLowerCase();
+            if (type.includes('accident')) return 'emergency';
+            if (type.includes('fire')) return 'emergency';
+            if (type.includes('assault')) return 'emergency';
+            if (type.includes('robbery')) return 'emergency';
+        }
+
+        return 'standard';
+    }
+
+    /**
+     * Get detailed alert category (for display/logging purposes)
+     */
+    getAlertCategory(incidentType, isEmergency, aiData) {
+        if (aiData.detectedObject) {
+            const object = aiData.detectedObject.toLowerCase();
+            if (object.includes('fire') || object.includes('flame')) return 'FIRE';
+            if (object.includes('gun') || object.includes('weapon')) return 'FIREARM';
+            if (object.includes('accident') || object.includes('crash')) return 'ACCIDENT';
+        }
+        if (incidentType) {
+            const type = incidentType.toLowerCase();
+            if (type.includes('accident')) return 'ACCIDENT';
+            if (type.includes('fire')) return 'FIRE';
+            if (type.includes('congestion')) return 'CONGESTION';
+        }
+        return isEmergency ? 'EMERGENCY' : 'GENERAL';
+    }
+
+    /**
+     * Generate alert title
+     */
+    generateAlertTitle(incident, isEmergency, aiData) {
+        if (isEmergency) {
+            if (aiData.detectedObject) {
+                return `🚨 EMERGENCY: ${aiData.detectedObject} Detected!`;
+            }
+            return `🚨 EMERGENCY: ${incident.type || 'Critical Incident'}`;
+        }
+        return `📢 Incident: ${incident.type || 'Traffic Update'}`;
+    }
+
+    /**
+     * Generate alert message
+     */
+    generateAlertMessage(incident, isEmergency, aiData) {
+        let message = '';
+        
+        if (isEmergency) {
+            message = 'URGENT RESPONSE REQUIRED!\n';
+        }
+
+        message += `${incident.description || incident.type || 'Incident reported'}`;
+        
+        if (incident.address || incident.location_name) {
+            message += `\n📍 Location: ${incident.address || incident.location_name}`;
+        }
+
+        if (aiData.confidence) {
+            message += `\n🤖 AI Confidence: ${Math.round(aiData.confidence * 100)}%`;
+        }
+
+        if (aiData.detectedObject) {
+            message += `\n⚠️ Detected: ${aiData.detectedObject}`;
+        }
+
+        return message;
+    }
+
+    /**
+     * Get all officers with their current locations
+     */
+    async getAllOfficersWithLocations() {
+        try {
+            const result = await query(`
+                SELECT 
+                    op.id,
+                    op.user_id,
+                    op.badge_number,
+                    op.full_name,
+                    op.current_latitude as latitude,
+                    op.current_longitude as longitude,
+                    op.is_on_duty,
+                    op.location_updated_at,
+                    op.assigned_district_id,
+                    d.name as district_name
+                FROM officer_profiles op
+                LEFT JOIN districts d ON op.assigned_district_id = d.id
+                WHERE op.current_latitude IS NOT NULL
+                ORDER BY op.location_updated_at DESC
+            `);
+
+            return result.rows;
+        } catch (error) {
+            console.error('Error getting officers:', error);
+            return [];
+        }
+    }
+
+    /**
+     * Get districts with officer counts
+     */
+    async getDistrictsWithStats() {
+        try {
+            const result = await query(`
+                SELECT 
+                    d.id,
+                    d.name,
+                    d.code,
+                    d.center_lat,
+                    d.center_lng,
+                    d.radius_km,
+                    COUNT(op.id) FILTER (WHERE op.is_on_duty = TRUE) as officers_on_duty,
+                    COUNT(op.id) as total_officers
+                FROM districts d
+                LEFT JOIN officer_profiles op ON op.assigned_district_id = d.id OR op.current_district_id = d.id
+                WHERE d.is_active = TRUE
+                GROUP BY d.id
+                ORDER BY d.name
+            `);
+
+            return result.rows;
+        } catch (error) {
+            console.error('Error getting districts:', error);
+            return [];
+        }
+    }
+
+    /**
+     * Acknowledge alert by officer
+     */
+    async acknowledgeAlert(alertId, officerId, action = 'acknowledged', note = null) {
+        try {
+            await query(`
+                UPDATE alert_deliveries
+                SET 
+                    status = 'acknowledged',
+                    acknowledged_at = CURRENT_TIMESTAMP,
+                    response_action = $3,
+                    response_note = $4,
+                    response_at = CURRENT_TIMESTAMP
+                WHERE alert_id = $1 AND officer_id = (
+                    SELECT id FROM officer_profiles WHERE user_id = $2
+                )
+            `, [alertId, officerId, action, note]);
+
+            // Notify admin of acknowledgment
+            socketManager.emitToRole('admin', 'alert:acknowledged', {
+                alertId,
+                officerId,
+                action,
+                timestamp: new Date().toISOString()
+            });
+
+            return { success: true };
+        } catch (error) {
+            console.error('Error acknowledging alert:', error);
+            throw error;
+        }
+    }
+}
+
+// Export singleton instance
+const geoFencingService = new GeoFencingService();
+module.exports = geoFencingService;

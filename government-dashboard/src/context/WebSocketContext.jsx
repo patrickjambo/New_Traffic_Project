@@ -164,6 +164,8 @@ export const WebSocketProvider = ({ children }) => {
                 'deployment:new',
                 'deployment:update',
                 'deployment:assigned',
+                'deployment:acknowledged',
+                'deployment:officer_status',
                 'officer:assigned',
                 'officer:location',
                 'pong',

@@ -86,6 +86,7 @@ app.use('/api/admin', require('./routes/admin'));
 app.use('/api/dashboard', require('./routes/dashboard'));
 app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/deployments', deploymentRoutes);
+app.use('/api/geofencing', require('./routes/geofencing'));  // Geo-fencing & alerts
 
 // Webhook endpoint for AI service analysis callbacks
 app.post('/webhook/analysis-complete', async (req, res) => {

@@ -15,18 +15,26 @@ import {
     CheckCircle2,
     AlertCircle,
     Activity,
-    BarChart3
+    BarChart3,
+    Bell,
+    Radio,
+    Navigation
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useWebSocket } from '../context/WebSocketContext';
 import { deploymentService, incidentService, emergencyService, adminService } from '../services/api';
+import OfficerLocationTracker from '../components/OfficerLocationTracker';
+import toast from 'react-hot-toast';
 
 const DeploymentsPage = () => {
     const { isAuthenticated } = useAuth();
+    const { subscribe, isConnected } = useWebSocket();
     const [deployments, setDeployments] = useState([]);
     const [stats, setStats] = useState({
         total_deployments: 0,
         active_deployments: 0,
         standby_deployments: 0,
+        pending_acknowledgments: 0,
         total_officers_deployed: 0
     });
     const [loading, setLoading] = useState(true);
@@ -57,6 +65,10 @@ const DeploymentsPage = () => {
         unit: 'Traffic Unit',
         phone: ''
     });
+
+    // Live Officer Tracking State
+    const [showOfficerTracker, setShowOfficerTracker] = useState(true);
+    const [officerLocations, setOfficerLocations] = useState(new Map());
 
     const fetchDeployments = async () => {
         try {
@@ -131,8 +143,100 @@ const DeploymentsPage = () => {
         if (isAuthenticated) {
             fetchDeployments();
             fetchStats();
+            fetchAvailableOfficers(); // Load officers for tracker
         }
     }, [isAuthenticated]);
+
+    // Real-time WebSocket subscriptions for deployment updates
+    useEffect(() => {
+        if (!isAuthenticated) return;
+
+        // Listen for officer acknowledgments
+        const unsubAck = subscribe('deployment:acknowledged', (data) => {
+            console.log('📬 Officer acknowledged deployment:', data);
+            toast.success(
+                `${data.officerName || 'Officer'} acknowledged deployment`,
+                { icon: '✅', duration: 4000 }
+            );
+            
+            // Update local state
+            setDeployments(prev => prev.map(d => {
+                if (d.id === data.deploymentId && d.officers) {
+                    return {
+                        ...d,
+                        officers: d.officers.map(o => 
+                            o.id === data.officerId 
+                                ? { ...o, acknowledged: true, acknowledgedAt: data.acknowledgedAt }
+                                : o
+                        )
+                    };
+                }
+                return d;
+            }));
+            
+            // Refresh stats
+            fetchStats();
+        });
+
+        // Listen for officer status updates
+        const unsubStatus = subscribe('deployment:officer_status', (data) => {
+            console.log('📍 Officer status update:', data);
+            toast(
+                `${data.officerName || 'Officer'}: ${data.status.replace('_', ' ')}`,
+                { icon: data.status === 'on_scene' ? '📍' : (data.status === 'completed' ? '✅' : '🚗') }
+            );
+            
+            // Update local state
+            setDeployments(prev => prev.map(d => {
+                if (d.id === data.deploymentId && d.officers) {
+                    return {
+                        ...d,
+                        officers: d.officers.map(o => 
+                            o.id === data.officerId 
+                                ? { ...o, status: data.status }
+                                : o
+                        )
+                    };
+                }
+                return d;
+            }));
+        });
+
+        // Listen for new deployments
+        const unsubNew = subscribe('deployment:new', (data) => {
+            console.log('🆕 New deployment:', data);
+            fetchDeployments();
+            fetchStats();
+        });
+
+        // Listen for deployment updates
+        const unsubUpdate = subscribe('deployment:update', (data) => {
+            console.log('🔄 Deployment updated:', data);
+            fetchDeployments();
+        });
+
+        // Listen for real-time officer location updates
+        const unsubLocation = subscribe('officer:location', (data) => {
+            console.log('📍 Real-time officer location:', data);
+            setOfficerLocations(prev => {
+                const newMap = new Map(prev);
+                newMap.set(data.officerId, {
+                    ...data,
+                    receivedAt: new Date(),
+                    isOnline: true,
+                });
+                return newMap;
+            });
+        });
+
+        return () => {
+            unsubAck();
+            unsubStatus();
+            unsubNew();
+            unsubUpdate();
+            unsubLocation();
+        };
+    }, [isAuthenticated, subscribe]);
 
     useEffect(() => {
         if (isModalOpen || isManageOfficersOpen) {
@@ -295,7 +399,7 @@ const DeploymentsPage = () => {
     const statCards = [
         { label: 'Total Units', value: stats.total_deployments, icon: Shield, color: 'text-blue-400', bg: 'bg-blue-500/10' },
         { label: 'Active Now', value: stats.active_deployments, icon: Activity, color: 'text-green-400', bg: 'bg-green-500/10' },
-        { label: 'On Standby', value: stats.standby_deployments, icon: Clock, color: 'text-yellow-400', bg: 'bg-yellow-500/10' },
+        { label: 'Pending Ack', value: stats.pending_acknowledgments || 0, icon: Bell, color: 'text-orange-400', bg: 'bg-orange-500/10' },
         { label: 'Total Officers', value: stats.total_officers_deployed, icon: Users, color: 'text-purple-400', bg: 'bg-purple-500/10' },
     ];
 
@@ -318,13 +422,27 @@ const DeploymentsPage = () => {
                             <p className="text-blue-400/80 font-medium">Real-time police unit coordination & oversight</p>
                         </div>
                     </div>
-                    <button
-                        onClick={() => setIsModalOpen(true)}
-                        className="flex items-center justify-center gap-2 px-6 py-3.5 bg-blue-600 hover:bg-blue-500 rounded-2xl transition-all font-bold shadow-lg shadow-blue-600/25 active:scale-95"
-                    >
-                        <Plus className="w-5 h-5" />
-                        New Deployment
-                    </button>
+                    <div className="flex items-center gap-3">
+                        <button
+                            onClick={() => setShowOfficerTracker(!showOfficerTracker)}
+                            className={`flex items-center justify-center gap-2 px-4 py-3.5 ${
+                                showOfficerTracker 
+                                    ? 'bg-indigo-600 hover:bg-indigo-500' 
+                                    : 'bg-white/5 hover:bg-white/10'
+                            } rounded-2xl transition-all font-bold active:scale-95`}
+                            title="Toggle Live Officer Tracking"
+                        >
+                            <Radio className={`w-5 h-5 ${showOfficerTracker ? 'animate-pulse' : ''}`} />
+                            <span className="hidden sm:inline">Live Tracking</span>
+                        </button>
+                        <button
+                            onClick={() => setIsModalOpen(true)}
+                            className="flex items-center justify-center gap-2 px-6 py-3.5 bg-blue-600 hover:bg-blue-500 rounded-2xl transition-all font-bold shadow-lg shadow-blue-600/25 active:scale-95"
+                        >
+                            <Plus className="w-5 h-5" />
+                            New Deployment
+                        </button>
+                    </div>
                 </div>
 
                 {/* Stats Grid */}
@@ -342,6 +460,25 @@ const DeploymentsPage = () => {
                         </div>
                     ))}
                 </div>
+
+                {/* Live Officer Tracking Panel */}
+                {showOfficerTracker && (
+                    <div className="mb-8 animate-in slide-in-from-top duration-300">
+                        <OfficerLocationTracker
+                            officers={availableOfficers}
+                            deployments={deployments}
+                            onOfficerClick={(officer, location, deployment) => {
+                                console.log('Officer clicked:', officer, location, deployment);
+                                if (deployment) {
+                                    toast(`${officer.full_name || officer.fullName} is on ${deployment.unit_name || deployment.unitName}`, {
+                                        icon: '👮',
+                                        duration: 3000,
+                                    });
+                                }
+                            }}
+                        />
+                    </div>
+                )}
 
                 {/* Filters & Search */}
                 <div className="bg-slate-800/40 backdrop-blur-md rounded-3xl p-5 mb-8 border border-white/5 flex flex-col lg:flex-row gap-4 items-center justify-between">
@@ -460,13 +597,48 @@ const DeploymentsPage = () => {
                                         <Shield className="w-4 h-4 text-green-500/50" />
                                         <span className="text-sm font-bold text-white">{deployment.officers?.length || 0} Officers Assigned</span>
                                     </div>
+                                    {/* Acknowledgment Status */}
+                                    {deployment.officers && deployment.officers.length > 0 && (
+                                        <div className="flex items-center gap-3">
+                                            <CheckCircle2 className={`w-4 h-4 ${
+                                                deployment.officers.every(o => o.acknowledged) 
+                                                    ? 'text-green-500' 
+                                                    : deployment.officers.some(o => o.acknowledged)
+                                                        ? 'text-yellow-500'
+                                                        : 'text-gray-500'
+                                            }`} />
+                                            <span className="text-sm font-medium">
+                                                <span className={`font-bold ${
+                                                    deployment.officers.every(o => o.acknowledged)
+                                                        ? 'text-green-400'
+                                                        : deployment.officers.some(o => o.acknowledged)
+                                                            ? 'text-yellow-400'
+                                                            : 'text-gray-400'
+                                                }`}>
+                                                    {deployment.officers.filter(o => o.acknowledged).length}/{deployment.officers.length}
+                                                </span>
+                                                <span className="text-gray-500 ml-1">Acknowledged</span>
+                                            </span>
+                                        </div>
+                                    )}
                                 </div>
 
                                 <div className="flex items-center justify-between pt-5 border-t border-white/5">
                                     <div className="flex -space-x-3">
                                         {deployment.officers?.slice(0, 4).map((officer, i) => (
-                                            <div key={i} className="w-10 h-10 rounded-full bg-slate-700 border-4 border-slate-800 flex items-center justify-center text-xs font-black text-white shadow-xl" title={officer.fullName}>
+                                            <div 
+                                                key={i} 
+                                                className={`w-10 h-10 rounded-full border-4 border-slate-800 flex items-center justify-center text-xs font-black text-white shadow-xl relative ${
+                                                    officer.acknowledged ? 'bg-green-600' : 'bg-slate-700'
+                                                }`} 
+                                                title={`${officer.fullName}${officer.acknowledged ? ' ✓ Acknowledged' : ' - Pending'}`}
+                                            >
                                                 {officer.fullName?.charAt(0)}
+                                                {officer.acknowledged && (
+                                                    <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 rounded-full flex items-center justify-center border-2 border-slate-800">
+                                                        <CheckCircle2 className="w-3 h-3 text-white" />
+                                                    </div>
+                                                )}
                                             </div>
                                         ))}
                                         {deployment.officers?.length > 4 && (

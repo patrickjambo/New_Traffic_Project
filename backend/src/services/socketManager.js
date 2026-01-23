@@ -27,6 +27,9 @@ class SocketManager {
             this.connectedClients.set(socket.id, {
                 connectedAt: new Date(),
                 rooms: [],
+                userId: null,
+                role: null,
+                lastLocation: null,
             });
 
             // Handle client disconnection
@@ -47,6 +50,13 @@ class SocketManager {
                         socket.join(`user:${userId}`);
                     }
 
+                    // Store user info
+                    const clientData = this.connectedClients.get(socket.id);
+                    if (clientData) {
+                        clientData.userId = userId;
+                        clientData.role = role;
+                    }
+
                     this.updateClientRoom(socket.id, roomName);
                     console.log(`👮 Client ${socket.id} joined room: ${roomName}`);
                 }
@@ -64,11 +74,79 @@ class SocketManager {
                 }
             });
 
+            // ============================================
+            // REAL-TIME OFFICER LOCATION TRACKING
+            // ============================================
+            
+            // Officer sends location update
+            socket.on('officer:location_update', async (data) => {
+                const clientData = this.connectedClients.get(socket.id);
+                if (!clientData || clientData.role !== 'police') return;
+
+                const { latitude, longitude, accuracy, speed, heading, address, timestamp } = data;
+                
+                if (!latitude || !longitude) return;
+
+                // Store in client data
+                clientData.lastLocation = {
+                    latitude,
+                    longitude,
+                    accuracy,
+                    speed,
+                    heading,
+                    address,
+                    timestamp: timestamp || new Date().toISOString(),
+                };
+
+                // Broadcast to admin for real-time tracking dashboard
+                this.io.to('role:admin').emit('officer:location', {
+                    officerId: clientData.userId,
+                    socketId: socket.id,
+                    latitude,
+                    longitude,
+                    accuracy,
+                    speed,
+                    heading,
+                    address,
+                    timestamp: clientData.lastLocation.timestamp,
+                });
+
+                // Update database (async, don't block)
+                this._updateOfficerLocationInDB(clientData.userId, {
+                    latitude,
+                    longitude,
+                    address,
+                }).catch(err => console.error('DB location update error:', err));
+
+                console.log(`📍 Officer ${clientData.userId} location: ${latitude}, ${longitude}`);
+            });
+
             // Heartbeat for connection health
             socket.on('ping', () => {
                 socket.emit('pong', { timestamp: Date.now() });
             });
         });
+    }
+
+    /**
+     * Update officer location in database (async helper)
+     */
+    async _updateOfficerLocationInDB(officerId, location) {
+        // This will be called asynchronously to update the database
+        // We use a try-catch to prevent socket disruption
+        try {
+            const { query } = require('../config/database');
+            await query(`
+                UPDATE officer_profiles 
+                SET current_latitude = $1, 
+                    current_longitude = $2, 
+                    current_address = $3,
+                    last_location_update = NOW()
+                WHERE user_id = $4
+            `, [location.latitude, location.longitude, location.address || null, officerId]);
+        } catch (error) {
+            console.error('Error updating officer location in DB:', error.message);
+        }
     }
 
     /**
@@ -414,6 +492,98 @@ class SocketManager {
         });
 
         console.log(`👮 Emitted officer:assigned - ${officer.name} → Incident ${incident.id}`);
+    }
+
+    // ============================================
+    // GEO-FENCING & EMERGENCY ALERT METHODS
+    // ============================================
+
+    /**
+     * Emit emergency alarm to specific user (for mobile app full-screen alert)
+     */
+    emitEmergencyAlarm(userId, alertData) {
+        if (!this.io) return;
+
+        const payload = {
+            alertId: alertData.alertId,
+            incidentId: alertData.incidentId,
+            type: alertData.type,
+            severity: 'critical',
+            isEmergency: true,
+            priority: alertData.priority || 1,
+            location: alertData.location,
+            title: alertData.title,
+            message: alertData.message,
+            ai: alertData.ai || {},
+            mediaUrls: alertData.mediaUrls || [],
+            distanceKm: alertData.distanceKm,
+            timestamp: new Date().toISOString(),
+            // Special flags for mobile app
+            requiresFullScreen: true,
+            overrideDoNotDisturb: true,
+            soundType: 'siren',
+            vibrationPattern: 'emergency'
+        };
+
+        // Send to specific user
+        this.io.to(`user:${userId}`).emit('emergency:alarm', payload);
+        console.log(`🚨 EMERGENCY ALARM sent to user ${userId}`);
+    }
+
+    /**
+     * Emit to specific user room
+     */
+    emitToUser(userId, event, data) {
+        if (!this.io) return;
+        this.io.to(`user:${userId}`).emit(event, data);
+        console.log(`📤 Emitted ${event} to user:${userId}`);
+    }
+
+    /**
+     * Emit to specific role (police, admin, public)
+     */
+    emitToRole(role, event, data) {
+        if (!this.io) return;
+        this.io.to(`role:${role}`).emit(event, data);
+        console.log(`📤 Emitted ${event} to role:${role}`);
+    }
+
+    /**
+     * Emit to district room
+     */
+    emitToDistrict(districtId, event, data) {
+        if (!this.io) return;
+        this.io.to(`district:${districtId}`).emit(event, data);
+        console.log(`📤 Emitted ${event} to district:${districtId}`);
+    }
+
+    /**
+     * Internal event emitter (for service-to-service communication)
+     */
+    emitInternal(event, data) {
+        if (!this.io) return;
+        // This can be used for internal event handling
+        // For example, triggering FCM sends
+        this.io.emit(`internal:${event}`, data);
+    }
+
+    /**
+     * Broadcast alert to all police in geo-fence
+     */
+    broadcastGeoFencedAlert(alertData, targetRooms = []) {
+        if (!this.io) return;
+
+        const event = alertData.isEmergency ? 'emergency:alarm' : 'incident:alert';
+
+        // Always send to police and admin
+        this.io.to('role:police').to('role:admin').emit(event, alertData);
+
+        // Send to additional target rooms
+        for (const room of targetRooms) {
+            this.io.to(room).emit(event, alertData);
+        }
+
+        console.log(`📡 Geo-fenced alert broadcast: ${event} to ${targetRooms.length + 2} rooms`);
     }
 
     // ============================================

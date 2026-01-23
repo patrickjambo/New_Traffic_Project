@@ -344,8 +344,44 @@ async function createAutomaticEmergency(incident, aiResults, latitude, longitude
 
         console.log('📡 Automatic emergency broadcast via SocketManager');
 
-        // TODO: Send FCM push notifications to nearby police/ambulance
-        // await sendFCMNotification(emergency, servicesNeeded);
+        // ============================================================
+        // TRIGGER GEO-FENCED ALERT TO NEARBY OFFICERS
+        // ============================================================
+        try {
+            const geoFencingService = require('../services/geoFencingService');
+            
+            // Determine if this is an emergency-level alert
+            const isEmergencyAlert = incident.severity === 'critical' || 
+                                     incident.type === 'accident' ||
+                                     emergencyType === 'accident';
+
+            // Create targeted geo-fenced alert
+            const alertResult = await geoFencingService.createTargetedAlert({
+                id: incident.id,
+                emergency_id: emergency.id,
+                type: incident.type || emergencyType,
+                severity: incident.severity,
+                latitude: latitude || incident.latitude || -1.9536,
+                longitude: longitude || incident.longitude || 30.0606,
+                address: incident.address || 'Kigali, Rwanda',
+                location_name: incident.location_name || 'Kigali',
+                description: description,
+                media_urls: incident.video_url ? [incident.video_url] : [],
+                reported_by: null // AI-generated
+            }, isEmergencyAlert, {
+                source: 'ai',
+                confidence: aiResults.confidence,
+                detectedObject: incident.type,
+                detectionMethod: 'AI Traffic Analysis',
+                vehicleCount: aiResults.vehicle_count,
+                stationaryCount: aiResults.stationary_count
+            });
+
+            console.log(`🎯 GEO-FENCED ALERT sent to ${alertResult.targetedOfficers} officers in ${alertResult.district}`);
+        } catch (geoError) {
+            console.error('⚠️ Geo-fencing alert failed (non-critical):', geoError && geoError.message ? geoError.message : geoError);
+            // Continue even if geo-fencing fails - the emergency was still created
+        }
 
         return emergency;
     } catch (error) {

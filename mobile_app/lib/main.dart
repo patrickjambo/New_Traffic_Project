@@ -16,12 +16,19 @@ import 'screens/help_support_screen.dart';
 import 'screens/about_screen.dart';
 import 'screens/emergency_report_screen.dart';
 import 'screens/auto_monitor_screen.dart';
+import 'screens/emergency_alert_screen.dart';
+import 'screens/deployments_screen.dart';
 import 'services/websocket_service.dart';
 import 'services/notification_service.dart';
 import 'services/settings_service.dart';
 import 'services/api_service.dart';
+import 'services/emergency_alert_service.dart';
+import 'services/deployment_service.dart';
 import 'utils/error_handler.dart';
 import 'widgets/network_banner.dart';
+
+// Global navigator key for showing alerts from anywhere
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -50,6 +57,15 @@ void main() async {
     await notificationService.initialize();
   } catch (e) {
     print('Failed to initialize Notification Service: $e');
+  }
+  
+  // Initialize Emergency Alert Service
+  try {
+    final emergencyAlertService = EmergencyAlertService();
+    await emergencyAlertService.initialize();
+    print('✅ Emergency Alert Service initialized');
+  } catch (e) {
+    print('Failed to initialize Emergency Alert Service: $e');
   }
   
   try {
@@ -99,6 +115,7 @@ class _TrafficGuardAppState extends State<TrafficGuardApp> {
     }
 
     return MaterialApp(
+      navigatorKey: navigatorKey,
       title: 'TrafficGuard AI',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
@@ -175,6 +192,12 @@ class _TrafficGuardAppState extends State<TrafficGuardApp> {
             return MaterialPageRoute(builder: (_) => const EmergencyReportScreen());
           case '/auto-monitor':
             return MaterialPageRoute(builder: (_) => const AutoMonitorScreen());
+          case '/emergency-alert':
+            final args = settings.arguments as Map<String, dynamic>?;
+            return MaterialPageRoute(
+              builder: (_) => EmergencyAlertScreen(alertData: args ?? {}),
+              fullscreenDialog: true,
+            );
           case '/history':
             return MaterialPageRoute(builder: (_) => const ReportHistoryScreen());
           case '/notifications':
@@ -185,6 +208,8 @@ class _TrafficGuardAppState extends State<TrafficGuardApp> {
             return MaterialPageRoute(builder: (_) => const HelpSupportScreen());
           case '/about':
             return MaterialPageRoute(builder: (_) => const AboutScreen());
+          case '/deployments':
+            return MaterialPageRoute(builder: (_) => const DeploymentsScreen());
           default:
             return MaterialPageRoute(builder: (_) => const SplashScreen());
         }

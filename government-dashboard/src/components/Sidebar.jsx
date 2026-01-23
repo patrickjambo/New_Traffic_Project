@@ -9,7 +9,8 @@ import {
   Settings,
   Home,
   LogOut,
-  Shield
+  Shield,
+  MapPin
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -24,6 +25,7 @@ const Sidebar = ({ isOpen }) => {
     { path: '/reports', icon: FileText, label: 'Reports', roles: ['police', 'admin'] },
     { path: '/emergency', icon: Users, label: 'Emergency', roles: ['police', 'admin'] },
     { path: '/deployments', icon: Shield, label: 'Deployments', roles: ['police', 'admin'] },
+    { path: '/geofencing', icon: MapPin, label: 'Geo-Fencing', roles: ['admin'], badge: 'NEW' },
     { path: '/analytics', icon: BarChart3, label: 'Analytics', roles: ['admin'] },
     { path: '/settings', icon: Settings, label: 'Settings', roles: ['admin'] },
   ];
@@ -72,7 +74,12 @@ const Sidebar = ({ isOpen }) => {
                   }`}
               >
                 <Icon className="w-5 h-5" />
-                {item.label}
+                <span className="flex-1">{item.label}</span>
+                {item.badge && (
+                  <span className="px-2 py-0.5 text-xs font-bold bg-green-500 text-white rounded-full animate-pulse">
+                    {item.badge}
+                  </span>
+                )}
               </Link>
             );
           })}

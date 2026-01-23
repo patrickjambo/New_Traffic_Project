@@ -7,22 +7,35 @@ const socketManager = require('../services/socketManager');
 const getDeployments = async (req, res) => {
     try {
         const { status, incidentId, emergencyId, officerId } = req.query;
+        const userId = req.user.id;
+        const userRole = req.user.role;
 
         let queryText = `
             SELECT d.*, 
                    json_agg(json_build_object(
                      'id', u.id,
                      'fullName', u.full_name,
-                     'badgeNumber', u.badge_number
-                   )) FILTER (WHERE u.id IS NOT NULL) as officers
+                     'badgeNumber', op.badge_number,
+                     'acknowledged', d_o.acknowledged,
+                     'acknowledgedAt', d_o.acknowledged_at,
+                     'status', d_o.status
+                   ) ORDER BY u.full_name) FILTER (WHERE u.id IS NOT NULL) as officers
             FROM deployments d
             LEFT JOIN deployment_officers d_o ON d.id = d_o.deployment_id
             LEFT JOIN users u ON d_o.officer_id = u.id
+            LEFT JOIN officer_profiles op ON u.id = op.user_id
             WHERE 1=1
         `;
 
         const params = [];
         let paramCount = 0;
+
+        // If police officer, only show their deployments
+        if (userRole === 'police') {
+            paramCount++;
+            queryText += ` AND d.id IN (SELECT deployment_id FROM deployment_officers WHERE officer_id = $${paramCount})`;
+            params.push(userId);
+        }
 
         if (status) {
             paramCount++;
@@ -42,7 +55,7 @@ const getDeployments = async (req, res) => {
             params.push(emergencyId);
         }
 
-        queryText += ` GROUP BY d.id ORDER BY d.start_time DESC`;
+        queryText += ` GROUP BY d.id ORDER BY d.created_at DESC`;
 
         const result = await query(queryText, params);
 
@@ -57,26 +70,98 @@ const getDeployments = async (req, res) => {
 };
 
 /**
+ * Get single deployment by ID
+ */
+const getDeploymentById = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const result = await query(`
+            SELECT d.*, 
+                   json_agg(json_build_object(
+                     'id', u.id,
+                     'fullName', u.full_name,
+                     'badgeNumber', op.badge_number,
+                     'phone', op.phone,
+                     'acknowledged', d_o.acknowledged,
+                     'acknowledgedAt', d_o.acknowledged_at,
+                     'status', d_o.status,
+                     'notes', d_o.notes,
+                     'currentLatitude', op.current_latitude,
+                     'currentLongitude', op.current_longitude
+                   ) ORDER BY u.full_name) FILTER (WHERE u.id IS NOT NULL) as officers,
+                   i.type as incident_type,
+                   i.severity as incident_severity,
+                   e.type as emergency_type,
+                   e.severity as emergency_severity
+            FROM deployments d
+            LEFT JOIN deployment_officers d_o ON d.id = d_o.deployment_id
+            LEFT JOIN users u ON d_o.officer_id = u.id
+            LEFT JOIN officer_profiles op ON u.id = op.user_id
+            LEFT JOIN incidents i ON d.incident_id = i.id
+            LEFT JOIN emergencies e ON d.emergency_id = e.id
+            WHERE d.id = $1
+            GROUP BY d.id, i.type, i.severity, e.type, e.severity
+        `, [id]);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Deployment not found',
+            });
+        }
+
+        res.json({
+            success: true,
+            data: result.rows[0],
+        });
+    } catch (error) {
+        console.error('Get deployment by ID error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+/**
  * Create a new deployment
  */
 const createDeployment = async (req, res) => {
     try {
-        const { unitName, location, officers, status, incidentId, emergencyId } = req.body;
+        const { 
+            unitName, 
+            location, 
+            officers, 
+            status, 
+            incidentId, 
+            emergencyId,
+            priority,
+            instructions,
+            scheduledTime,
+            estimatedDuration
+        } = req.body;
+
+        const createdBy = req.user.id;
 
         const deployment = await transaction(async (client) => {
             const result = await client.query(
                 `INSERT INTO deployments 
-                 (unit_name, address, latitude, longitude, status, start_time, incident_id, emergency_id)
-                 VALUES ($1, $2, $3, $4, $5, NOW(), $6, $7)
+                 (unit_name, address, latitude, longitude, status, start_time, 
+                  incident_id, emergency_id, priority, instructions, 
+                  scheduled_time, estimated_duration, created_by)
+                 VALUES ($1, $2, $3, $4, $5, NOW(), $6, $7, $8, $9, $10, $11, $12)
                  RETURNING *`,
                 [
                     unitName,
                     location?.address,
                     location?.latitude,
                     location?.longitude,
-                    status || 'Standby',
+                    status || 'Pending',
                     incidentId || null,
-                    emergencyId || null
+                    emergencyId || null,
+                    priority || 'normal',
+                    instructions || null,
+                    scheduledTime || null,
+                    estimatedDuration || null,
+                    createdBy
                 ]
             );
 
@@ -86,7 +171,9 @@ const createDeployment = async (req, res) => {
             if (officers && officers.length > 0) {
                 for (const officerId of officers) {
                     await client.query(
-                        'INSERT INTO deployment_officers (deployment_id, officer_id) VALUES ($1, $2)',
+                        `INSERT INTO deployment_officers 
+                         (deployment_id, officer_id, acknowledged, status, assigned_at) 
+                         VALUES ($1, $2, FALSE, 'assigned', NOW())`,
                         [newDeployment.id, officerId]
                     );
                 }
@@ -95,16 +182,62 @@ const createDeployment = async (req, res) => {
             return newDeployment;
         });
 
-        // Emit socket event using socketManager
+        // Fetch complete deployment with officers
+        const fullDeployment = await query(`
+            SELECT d.*, 
+                   json_agg(json_build_object(
+                     'id', u.id,
+                     'fullName', u.full_name,
+                     'badgeNumber', op.badge_number
+                   )) FILTER (WHERE u.id IS NOT NULL) as officers
+            FROM deployments d
+            LEFT JOIN deployment_officers d_o ON d.id = d_o.deployment_id
+            LEFT JOIN users u ON d_o.officer_id = u.id
+            LEFT JOIN officer_profiles op ON u.id = op.user_id
+            WHERE d.id = $1
+            GROUP BY d.id
+        `, [deployment.id]);
+
+        const deploymentWithOfficers = fullDeployment.rows[0];
+
+        // Emit socket event to all police and admin
         socketManager.emitDeploymentNew({
-            ...deployment,
+            ...deploymentWithOfficers,
             type: incidentId ? 'incident' : (emergencyId ? 'emergency' : 'patrol'),
             officer_ids: officers,
         });
 
+        // Send targeted notifications to each assigned officer
+        if (officers && officers.length > 0) {
+            for (const officerId of officers) {
+                socketManager.emitToUser(officerId, 'deployment:assigned', {
+                    deploymentId: deployment.id,
+                    unitName: deployment.unit_name,
+                    address: deployment.address,
+                    latitude: deployment.latitude,
+                    longitude: deployment.longitude,
+                    priority: priority || 'normal',
+                    instructions: instructions || null,
+                    status: 'Pending',
+                    assignedAt: new Date().toISOString(),
+                    type: incidentId ? 'incident' : (emergencyId ? 'emergency' : 'patrol'),
+                    requiresAcknowledgment: true
+                });
+
+                // Also send notification
+                socketManager.emitNotificationToUser(officerId, {
+                    id: `deploy_${deployment.id}_${Date.now()}`,
+                    title: '📍 New Deployment Assignment',
+                    message: `You have been assigned to ${deployment.unit_name} at ${deployment.address || 'assigned location'}. Please acknowledge.`,
+                    type: 'deployment',
+                    created_at: new Date().toISOString()
+                });
+            }
+        }
+
         res.status(201).json({
             success: true,
-            data: deployment,
+            data: deploymentWithOfficers,
         });
     } catch (error) {
         console.error('Create deployment error:', error);
@@ -113,7 +246,234 @@ const createDeployment = async (req, res) => {
 };
 
 /**
- * Update deployment status
+ * Officer acknowledges deployment
+ */
+const acknowledgeDeployment = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const officerId = req.user.id;
+        const { notes, estimatedArrival, latitude, longitude, currentAddress } = req.body;
+
+        // Update acknowledgment with location
+        const result = await query(
+            `UPDATE deployment_officers 
+             SET acknowledged = TRUE, 
+                 acknowledged_at = NOW(),
+                 status = 'en_route',
+                 notes = $3,
+                 estimated_arrival = $4,
+                 last_location_lat = $5,
+                 last_location_lng = $6,
+                 last_location_time = NOW()
+             WHERE deployment_id = $1 AND officer_id = $2
+             RETURNING *`,
+            [id, officerId, notes || null, estimatedArrival || null, latitude || null, longitude || null]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Deployment assignment not found',
+            });
+        }
+
+        // Also update officer profile location
+        if (latitude && longitude) {
+            await query(
+                `UPDATE officer_profiles 
+                 SET current_latitude = $1, current_longitude = $2, current_address = $3, last_location_update = NOW()
+                 WHERE user_id = $4`,
+                [latitude, longitude, currentAddress || null, officerId]
+            ).catch(err => console.error('Error updating officer profile location:', err));
+        }
+
+        // Get officer details
+        const officerResult = await query(
+            `SELECT u.full_name, op.badge_number 
+             FROM users u 
+             LEFT JOIN officer_profiles op ON u.id = op.user_id 
+             WHERE u.id = $1`,
+            [officerId]
+        );
+
+        const officer = officerResult.rows[0];
+
+        // Check if all officers have acknowledged
+        const ackStatus = await query(
+            `SELECT 
+               COUNT(*) as total,
+               COUNT(*) FILTER (WHERE acknowledged = TRUE) as acknowledged
+             FROM deployment_officers 
+             WHERE deployment_id = $1`,
+            [id]
+        );
+
+        const { total, acknowledged } = ackStatus.rows[0];
+        const allAcknowledged = parseInt(total) === parseInt(acknowledged);
+
+        // Update deployment status if all acknowledged
+        if (allAcknowledged) {
+            await query(
+                `UPDATE deployments SET status = 'Active', updated_at = NOW() WHERE id = $1`,
+                [id]
+            );
+        }
+
+        // Get full deployment for socket emission
+        const deploymentResult = await query(
+            `SELECT d.*, created_by FROM deployments d WHERE d.id = $1`,
+            [id]
+        );
+        const deployment = deploymentResult.rows[0];
+
+        // Emit acknowledgment event to admin dashboard
+        socketManager.emitToRole('admin', 'deployment:acknowledged', {
+            deploymentId: parseInt(id),
+            officerId: officerId,
+            officerName: officer?.full_name,
+            badgeNumber: officer?.badge_number,
+            acknowledgedAt: new Date().toISOString(),
+            notes: notes || null,
+            estimatedArrival: estimatedArrival || null,
+            allAcknowledged: allAcknowledged,
+            acknowledgmentStatus: {
+                total: parseInt(total),
+                acknowledged: parseInt(acknowledged)
+            },
+            // Include location in real-time event
+            location: latitude && longitude ? {
+                latitude,
+                longitude,
+                address: currentAddress || null,
+            } : null,
+        });
+
+        // Also emit deployment update
+        socketManager.emitDeploymentUpdate({
+            ...deployment,
+            status: allAcknowledged ? 'Active' : deployment.status
+        });
+
+        res.json({
+            success: true,
+            message: 'Deployment acknowledged successfully',
+            data: {
+                acknowledged: true,
+                acknowledgedAt: result.rows[0].acknowledged_at,
+                allOfficersAcknowledged: allAcknowledged,
+                acknowledgmentStatus: {
+                    total: parseInt(total),
+                    acknowledged: parseInt(acknowledged)
+                }
+            },
+        });
+    } catch (error) {
+        console.error('Acknowledge deployment error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+/**
+ * Officer updates their deployment status
+ */
+const updateOfficerDeploymentStatus = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const officerId = req.user.id;
+        const { status, notes, latitude, longitude, currentAddress } = req.body;
+
+        const validStatuses = ['assigned', 'en_route', 'on_scene', 'completed', 'unable'];
+
+        if (!validStatuses.includes(status)) {
+            return res.status(400).json({
+                success: false,
+                message: `Invalid status. Must be one of: ${validStatuses.join(', ')}`,
+            });
+        }
+
+        // Update officer's deployment status
+        const result = await query(
+            `UPDATE deployment_officers 
+             SET status = $3, 
+                 notes = COALESCE($4, notes),
+                 last_location_lat = $5,
+                 last_location_lng = $6,
+                 last_location_time = NOW()
+             WHERE deployment_id = $1 AND officer_id = $2
+             RETURNING *`,
+            [id, officerId, status, notes, latitude || null, longitude || null]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Deployment assignment not found',
+            });
+        }
+
+        // Also update officer profile location for real-time tracking
+        if (latitude && longitude) {
+            await query(
+                `UPDATE officer_profiles 
+                 SET current_latitude = $1, current_longitude = $2, current_address = $3, last_location_update = NOW(), is_online = TRUE
+                 WHERE user_id = $4`,
+                [latitude, longitude, currentAddress || null, officerId]
+            ).catch(err => console.error('Error updating officer profile location:', err));
+        }
+
+        // Get officer details
+        const officerResult = await query(
+            `SELECT u.full_name, op.badge_number 
+             FROM users u 
+             LEFT JOIN officer_profiles op ON u.id = op.user_id 
+             WHERE u.id = $1`,
+            [officerId]
+        );
+
+        const officer = officerResult.rows[0];
+
+        // Check deployment completion
+        if (status === 'completed') {
+            const completionCheck = await query(
+                `SELECT COUNT(*) as remaining 
+                 FROM deployment_officers 
+                 WHERE deployment_id = $1 AND status != 'completed' AND status != 'unable'`,
+                [id]
+            );
+
+            if (parseInt(completionCheck.rows[0].remaining) === 0) {
+                await query(
+                    `UPDATE deployments SET status = 'Completed', end_time = NOW(), updated_at = NOW() WHERE id = $1`,
+                    [id]
+                );
+            }
+        }
+
+        // Emit status update to admin
+        socketManager.emitToRole('admin', 'deployment:officer_status', {
+            deploymentId: parseInt(id),
+            officerId: officerId,
+            officerName: officer?.full_name,
+            badgeNumber: officer?.badge_number,
+            status: status,
+            notes: notes || null,
+            location: latitude && longitude ? { latitude, longitude } : null,
+            updatedAt: new Date().toISOString()
+        });
+
+        res.json({
+            success: true,
+            message: 'Status updated successfully',
+            data: result.rows[0],
+        });
+    } catch (error) {
+        console.error('Update officer deployment status error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+/**
+ * Update deployment status (admin)
  */
 const updateDeploymentStatus = async (req, res) => {
     try {
@@ -122,7 +482,9 @@ const updateDeploymentStatus = async (req, res) => {
 
         const result = await query(
             `UPDATE deployments 
-             SET status = $1, updated_at = NOW()
+             SET status = $1, 
+                 updated_at = NOW(),
+                 end_time = CASE WHEN $1 IN ('Completed', 'Cancelled') THEN NOW() ELSE end_time END
              WHERE id = $2
              RETURNING *`,
             [status, id]
@@ -137,8 +499,23 @@ const updateDeploymentStatus = async (req, res) => {
 
         const deployment = result.rows[0];
 
-        // Emit socket event
+        // Get officers for this deployment
+        const officersResult = await query(
+            `SELECT officer_id FROM deployment_officers WHERE deployment_id = $1`,
+            [id]
+        );
+
+        // Emit socket event to all
         socketManager.emitDeploymentUpdate(deployment);
+
+        // Notify assigned officers of status change
+        for (const row of officersResult.rows) {
+            socketManager.emitToUser(row.officer_id, 'deployment:status_changed', {
+                deploymentId: deployment.id,
+                newStatus: status,
+                updatedAt: new Date().toISOString()
+            });
+        }
 
         res.json({
             success: true,
@@ -166,7 +543,10 @@ const assignOfficer = async (req, res) => {
 
         // Get officer details
         const officerResult = await query(
-            'SELECT id, full_name as name, badge_number FROM users WHERE id = $1',
+            `SELECT u.id, u.full_name as name, op.badge_number 
+             FROM users u 
+             LEFT JOIN officer_profiles op ON u.id = op.user_id 
+             WHERE u.id = $1`,
             [officerId]
         );
 
@@ -181,21 +561,19 @@ const assignOfficer = async (req, res) => {
         let targetResult;
 
         if (incidentId) {
-            // Update incident with assigned officer
             targetResult = await query(
                 `UPDATE incidents 
                  SET verified_by = $1, status = 'in_progress', updated_at = NOW()
                  WHERE id = $2
-                 RETURNING id, type, severity, address as location`,
+                 RETURNING id, type, severity, address as location, latitude, longitude`,
                 [officerId, incidentId]
             );
         } else if (emergencyId) {
-            // Update emergency with assigned officer
             targetResult = await query(
                 `UPDATE emergencies 
                  SET assigned_to = $1, status = 'dispatched', updated_at = NOW()
                  WHERE id = $2
-                 RETURNING id, emergency_type as type, severity, location_name as location`,
+                 RETURNING id, emergency_type as type, severity, location_name as location, latitude, longitude`,
                 [officerId, emergencyId]
             );
         }
@@ -212,13 +590,24 @@ const assignOfficer = async (req, res) => {
         // Emit officer assignment event
         socketManager.emitOfficerAssigned(officer, target);
 
+        // Send direct notification to officer
+        socketManager.emitToUser(officerId, 'assignment:new', {
+            type: incidentId ? 'incident' : 'emergency',
+            targetId: target.id,
+            targetType: target.type,
+            severity: target.severity,
+            location: {
+                address: target.location,
+                latitude: target.latitude,
+                longitude: target.longitude
+            },
+            assignedAt: new Date().toISOString()
+        });
+
         res.json({
             success: true,
             message: `Officer ${officer.name} assigned successfully`,
-            data: {
-                officer,
-                target,
-            },
+            data: { officer, target },
         });
     } catch (error) {
         console.error('Assign officer error:', error);
@@ -227,7 +616,7 @@ const assignOfficer = async (req, res) => {
 };
 
 /**
- * Get available officers (not currently deployed)
+ * Get available officers
  */
 const getAvailableOfficers = async (req, res) => {
     try {
@@ -235,24 +624,29 @@ const getAvailableOfficers = async (req, res) => {
             SELECT 
                 u.id, 
                 u.full_name, 
-                u.badge_number, 
-                u.phone, 
-                u.unit,
+                op.badge_number, 
+                op.phone,
+                op.rank,
+                op.is_on_duty,
+                op.current_latitude,
+                op.current_longitude,
+                op.location_updated_at,
                 CASE 
                     WHEN d.id IS NOT NULL THEN 'Deployed'
                     ELSE 'Available'
-                END as status,
+                END as deployment_status,
                 d.unit_name as current_deployment,
                 d.address as deployment_location
             FROM users u
+            LEFT JOIN officer_profiles op ON u.id = op.user_id
             LEFT JOIN (
                 SELECT d_o.officer_id, d.id, d.unit_name, d.address
                 FROM deployment_officers d_o
                 JOIN deployments d ON d_o.deployment_id = d.id
-                WHERE d.status IN ('Active', 'En Route', 'On Scene')
+                WHERE d.status IN ('Active', 'Pending', 'En Route', 'On Scene')
             ) d ON u.id = d.officer_id
             WHERE u.role = 'police'
-            ORDER BY u.full_name
+            ORDER BY d.id NULLS FIRST, u.full_name
         `);
 
         res.json({
@@ -272,10 +666,14 @@ const deleteDeployment = async (req, res) => {
     try {
         const { id } = req.params;
 
+        // Get officers before deletion for notification
+        const officersResult = await query(
+            `SELECT officer_id FROM deployment_officers WHERE deployment_id = $1`,
+            [id]
+        );
+
         await transaction(async (client) => {
-            // Delete officer assignments first
             await client.query('DELETE FROM deployment_officers WHERE deployment_id = $1', [id]);
-            // Delete the deployment
             const result = await client.query('DELETE FROM deployments WHERE id = $1 RETURNING *', [id]);
 
             if (result.rows.length === 0) {
@@ -285,6 +683,14 @@ const deleteDeployment = async (req, res) => {
 
         // Emit socket event
         socketManager.emitDeploymentDelete(id);
+
+        // Notify officers that deployment was cancelled
+        for (const row of officersResult.rows) {
+            socketManager.emitToUser(row.officer_id, 'deployment:cancelled', {
+                deploymentId: parseInt(id),
+                cancelledAt: new Date().toISOString()
+            });
+        }
 
         res.json({
             success: true,
@@ -308,8 +714,14 @@ const getDeploymentStats = async (req, res) => {
             SELECT 
                 COUNT(*) as total_deployments,
                 COUNT(*) FILTER (WHERE status = 'Active') as active_deployments,
+                COUNT(*) FILTER (WHERE status = 'Pending') as pending_deployments,
                 COUNT(*) FILTER (WHERE status = 'Standby') as standby_deployments,
-                (SELECT COUNT(*) FROM deployment_officers) as total_officers_deployed
+                COUNT(*) FILTER (WHERE status = 'Completed' AND DATE(end_time) = CURRENT_DATE) as completed_today,
+                (SELECT COUNT(*) FROM deployment_officers WHERE acknowledged = TRUE) as acknowledged_count,
+                (SELECT COUNT(*) FROM deployment_officers WHERE acknowledged = FALSE 
+                 AND deployment_id IN (SELECT id FROM deployments WHERE status IN ('Active', 'Pending'))) as pending_acknowledgments,
+                (SELECT COUNT(DISTINCT officer_id) FROM deployment_officers 
+                 WHERE deployment_id IN (SELECT id FROM deployments WHERE status IN ('Active', 'Pending'))) as total_officers_deployed
             FROM deployments
         `;
 
@@ -333,6 +745,18 @@ const updateDeploymentOfficers = async (req, res) => {
         const { id } = req.params;
         const { officers } = req.body;
 
+        // Get current officers for comparison
+        const currentOfficers = await query(
+            `SELECT officer_id FROM deployment_officers WHERE deployment_id = $1`,
+            [id]
+        );
+        const currentIds = currentOfficers.rows.map(r => r.officer_id);
+        const newIds = officers || [];
+
+        // Find added and removed officers
+        const addedOfficers = newIds.filter(id => !currentIds.includes(id));
+        const removedOfficers = currentIds.filter(id => !newIds.includes(id));
+
         await transaction(async (client) => {
             // Remove existing officers
             await client.query('DELETE FROM deployment_officers WHERE deployment_id = $1', [id]);
@@ -341,7 +765,9 @@ const updateDeploymentOfficers = async (req, res) => {
             if (officers && officers.length > 0) {
                 for (const officerId of officers) {
                     await client.query(
-                        'INSERT INTO deployment_officers (deployment_id, officer_id) VALUES ($1, $2)',
+                        `INSERT INTO deployment_officers 
+                         (deployment_id, officer_id, acknowledged, status, assigned_at) 
+                         VALUES ($1, $2, FALSE, 'assigned', NOW())`,
                         [id, officerId]
                     );
                 }
@@ -354,11 +780,13 @@ const updateDeploymentOfficers = async (req, res) => {
                    json_agg(json_build_object(
                      'id', u.id,
                      'fullName', u.full_name,
-                     'badgeNumber', u.badge_number
+                     'badgeNumber', op.badge_number,
+                     'acknowledged', d_o.acknowledged
                    )) FILTER (WHERE u.id IS NOT NULL) as officers
             FROM deployments d
             LEFT JOIN deployment_officers d_o ON d.id = d_o.deployment_id
             LEFT JOIN users u ON d_o.officer_id = u.id
+            LEFT JOIN officer_profiles op ON u.id = op.user_id
             WHERE d.id = $1
             GROUP BY d.id
         `, [id]);
@@ -367,6 +795,28 @@ const updateDeploymentOfficers = async (req, res) => {
 
         // Emit socket event
         socketManager.emitDeploymentUpdate(updatedDeployment);
+
+        // Notify newly added officers
+        for (const officerId of addedOfficers) {
+            socketManager.emitToUser(officerId, 'deployment:assigned', {
+                deploymentId: parseInt(id),
+                unitName: updatedDeployment.unit_name,
+                address: updatedDeployment.address,
+                latitude: updatedDeployment.latitude,
+                longitude: updatedDeployment.longitude,
+                status: updatedDeployment.status,
+                assignedAt: new Date().toISOString(),
+                requiresAcknowledgment: true
+            });
+        }
+
+        // Notify removed officers
+        for (const officerId of removedOfficers) {
+            socketManager.emitToUser(officerId, 'deployment:removed', {
+                deploymentId: parseInt(id),
+                removedAt: new Date().toISOString()
+            });
+        }
 
         res.json({
             success: true,
@@ -378,13 +828,68 @@ const updateDeploymentOfficers = async (req, res) => {
     }
 };
 
+/**
+ * Get officer's active deployments
+ */
+const getMyDeployments = async (req, res) => {
+    try {
+        const officerId = req.user.id;
+        const { status } = req.query;
+
+        let queryText = `
+            SELECT d.*, 
+                   d_o.acknowledged,
+                   d_o.acknowledged_at,
+                   d_o.status as officer_status,
+                   d_o.notes as officer_notes,
+                   i.type as incident_type,
+                   i.severity as incident_severity,
+                   i.description as incident_description,
+                   e.type as emergency_type,
+                   e.severity as emergency_severity,
+                   e.description as emergency_description
+            FROM deployments d
+            JOIN deployment_officers d_o ON d.id = d_o.deployment_id
+            LEFT JOIN incidents i ON d.incident_id = i.id
+            LEFT JOIN emergencies e ON d.emergency_id = e.id
+            WHERE d_o.officer_id = $1
+        `;
+
+        const params = [officerId];
+
+        if (status === 'active') {
+            queryText += ` AND d.status IN ('Active', 'Pending', 'En Route', 'On Scene')`;
+        } else if (status === 'pending') {
+            queryText += ` AND d_o.acknowledged = FALSE AND d.status NOT IN ('Completed', 'Cancelled')`;
+        } else if (status === 'completed') {
+            queryText += ` AND d.status IN ('Completed', 'Cancelled')`;
+        }
+
+        queryText += ` ORDER BY d.created_at DESC`;
+
+        const result = await query(queryText, params);
+
+        res.json({
+            success: true,
+            data: result.rows,
+        });
+    } catch (error) {
+        console.error('Get my deployments error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
 module.exports = {
     getDeployments,
+    getDeploymentById,
     createDeployment,
+    acknowledgeDeployment,
+    updateOfficerDeploymentStatus,
     updateDeploymentStatus,
     assignOfficer,
     getAvailableOfficers,
     deleteDeployment,
     getDeploymentStats,
     updateDeploymentOfficers,
+    getMyDeployments,
 };

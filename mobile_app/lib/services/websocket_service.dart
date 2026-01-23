@@ -1,7 +1,10 @@
 import 'dart:async';
+import 'package:flutter/material.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import '../config/app_config.dart';
 import 'notification_service.dart';
+import 'emergency_alert_service.dart';
+import '../main.dart' show navigatorKey;
 
 /// Real-time WebSocket service for instant updates
 /// Connects to backend Socket.IO server and handles all event types
@@ -23,12 +26,19 @@ class WebSocketService {
   final _emergencyStreamController = StreamController<Map<String, dynamic>>.broadcast();
   final _notificationStreamController = StreamController<Map<String, dynamic>>.broadcast();
   final _connectionStatusController = StreamController<bool>.broadcast();
+  final _deploymentStreamController = StreamController<Map<String, dynamic>>.broadcast();
 
   // Public streams for UI consumption
   Stream<Map<String, dynamic>> get incidentStream => _incidentStreamController.stream;
   Stream<Map<String, dynamic>> get emergencyStream => _emergencyStreamController.stream;
   Stream<Map<String, dynamic>> get notificationStream => _notificationStreamController.stream;
   Stream<bool> get connectionStatusStream => _connectionStatusController.stream;
+  Stream<Map<String, dynamic>> get deploymentStream => _deploymentStreamController.stream;
+
+  // Deployment callbacks for DeploymentService
+  Function(Map<String, dynamic>)? onDeploymentAssigned;
+  Function(Map<String, dynamic>)? onDeploymentUpdated;
+  final Map<String, Function(Map<String, dynamic>)> _customEventHandlers = {};
 
   bool get isConnected => _isConnected;
 
@@ -156,6 +166,15 @@ class WebSocketService {
     });
 
     // ============================================
+    // EMERGENCY ALARM (GEO-FENCED CRITICAL ALERTS)
+    // ============================================
+
+    _socket!.on('emergency:alarm', (data) {
+      print('🚨🚨🚨 EMERGENCY ALARM RECEIVED: $data');
+      _handleEmergencyAlarm(data);
+    });
+
+    // ============================================
     // NOTIFICATION EVENTS
     // ============================================
 
@@ -190,6 +209,21 @@ class WebSocketService {
     _socket!.on('deployment:assigned', (data) {
       print('📍 Deployment assigned to me: $data');
       _handleDeploymentAssigned(data);
+    });
+
+    _socket!.on('deployment:cancelled', (data) {
+      print('❌ Deployment cancelled: $data');
+      _handleCustomEvent('deployment:cancelled', data);
+    });
+
+    _socket!.on('deployment:status_changed', (data) {
+      print('🔄 Deployment status changed: $data');
+      _handleCustomEvent('deployment:status_changed', data);
+    });
+
+    _socket!.on('deployment:removed', (data) {
+      print('🚫 Removed from deployment: $data');
+      _handleCustomEvent('deployment:removed', data);
     });
 
     _socket!.on('officer:assigned', (data) {
@@ -335,6 +369,47 @@ class WebSocketService {
     }
   }
 
+  // Stream controller for emergency alarms (full-screen alerts)
+  final _emergencyAlarmController = StreamController<Map<String, dynamic>>.broadcast();
+  Stream<Map<String, dynamic>> get emergencyAlarmStream => _emergencyAlarmController.stream;
+
+  void _handleEmergencyAlarm(dynamic data) {
+    try {
+      final alarmData = _parseData(data);
+      print('🚨🚨🚨 PROCESSING EMERGENCY ALARM: $alarmData');
+      
+      // Emit to the emergency alarm stream (for full-screen UI)
+      _emergencyAlarmController.add(alarmData);
+      
+      // Also add to emergency stream
+      _emergencyStreamController.add({
+        'type': 'alarm',
+        'data': alarmData,
+      });
+
+      // Trigger full-screen emergency alert with siren
+      final emergencyService = EmergencyAlertService();
+      emergencyService.showEmergencyAlert(alarmData);
+      
+      // Navigate to emergency alert screen using global navigator
+      if (navigatorKey.currentState != null) {
+        navigatorKey.currentState!.pushNamed(
+          '/emergency-alert',
+          arguments: alarmData,
+        );
+      }
+
+      // High priority notification with emergency service
+      _notificationService.addNotification(
+        title: '🚨 ${alarmData['title'] ?? 'EMERGENCY ALERT'}',
+        message: alarmData['message'] ?? 'Immediate response required!',
+        type: 'critical',
+      );
+    } catch (e) {
+      print('Error handling emergency:alarm: $e');
+    }
+  }
+
   void _handleNewNotification(dynamic data) {
     try {
       final notificationData = _parseData(data);
@@ -386,6 +461,18 @@ class WebSocketService {
   void _handleDeploymentUpdate(dynamic data) {
     try {
       final updateData = _parseData(data);
+      
+      // Emit to stream for UI updates
+      _deploymentStreamController.add({
+        'type': 'update',
+        'data': updateData,
+      });
+      
+      // Call callback if set (for DeploymentService)
+      if (onDeploymentUpdated != null) {
+        onDeploymentUpdated!(updateData);
+      }
+      
       _notificationService.addNotification(
         title: '🔄 Deployment Update',
         message: 'Deployment status changed to: ${updateData['status'] ?? 'unknown'}',
@@ -399,10 +486,22 @@ class WebSocketService {
   void _handleDeploymentAssigned(dynamic data) {
     try {
       final assignmentData = _parseData(data);
+      
+      // Emit to stream for UI updates
+      _deploymentStreamController.add({
+        'type': 'assigned',
+        'data': assignmentData,
+      });
+      
+      // Call callback if set (for DeploymentService)
+      if (onDeploymentAssigned != null) {
+        onDeploymentAssigned!(assignmentData);
+      }
+      
       // High priority notification for officer being assigned
       _notificationService.addNotification(
         title: '📍 NEW ASSIGNMENT',
-        message: 'You have been assigned to a ${assignmentData['type'] ?? 'incident'} at ${assignmentData['location'] ?? 'unknown location'}',
+        message: 'You have been assigned to ${assignmentData['unitName'] ?? assignmentData['type'] ?? 'a deployment'} at ${assignmentData['address'] ?? 'assigned location'}. Please acknowledge.',
         type: 'critical',
       );
     } catch (e) {
@@ -420,6 +519,19 @@ class WebSocketService {
       );
     } catch (e) {
       print('Error handling officer:assigned: $e');
+    }
+  }
+
+  /// Handle custom event by calling registered callback
+  void _handleCustomEvent(String eventName, dynamic data) {
+    try {
+      final parsedData = _parseData(data);
+      final callback = _customEventHandlers[eventName];
+      if (callback != null) {
+        callback(parsedData);
+      }
+    } catch (e) {
+      print('Error handling custom event $eventName: $e');
     }
   }
 
@@ -457,6 +569,30 @@ class WebSocketService {
     }
   }
 
+  /// Listen to a custom WebSocket event
+  void onCustomEvent(String eventName, Function(Map<String, dynamic>) handler) {
+    _customEventHandlers[eventName] = handler;
+    
+    if (_socket != null) {
+      _socket!.on(eventName, (data) {
+        try {
+          final parsedData = _parseData(data);
+          handler(parsedData);
+        } catch (e) {
+          print('Error handling custom event $eventName: $e');
+        }
+      });
+    }
+  }
+
+  /// Remove custom event listener
+  void offCustomEvent(String eventName) {
+    _customEventHandlers.remove(eventName);
+    if (_socket != null) {
+      _socket!.off(eventName);
+    }
+  }
+
   /// Disconnect WebSocket
   void disconnect() {
     _heartbeatTimer?.cancel();
@@ -474,6 +610,27 @@ class WebSocketService {
     connect(userId: userId, userRole: userRole);
   }
 
+  /// Listen to custom events
+  void onCustomEvent(String eventName, Function(Map<String, dynamic>) callback) {
+    _customEventHandlers[eventName] = callback;
+    
+    // Set up listener if socket is connected
+    if (_socket != null && _socket!.connected) {
+      _socket!.on(eventName, (data) {
+        final parsedData = _parseData(data);
+        callback(parsedData);
+      });
+    }
+  }
+
+  /// Remove custom event listener
+  void offCustomEvent(String eventName) {
+    _customEventHandlers.remove(eventName);
+    if (_socket != null) {
+      _socket!.off(eventName);
+    }
+  }
+
   /// Dispose all resources
   void dispose() {
     disconnect();
@@ -481,5 +638,9 @@ class WebSocketService {
     _emergencyStreamController.close();
     _notificationStreamController.close();
     _connectionStatusController.close();
+    _deploymentStreamController.close();
+    _customEventHandlers.clear();
+    onDeploymentAssigned = null;
+    onDeploymentUpdated = null;
   }
 }

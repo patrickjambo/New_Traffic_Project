@@ -9,7 +9,7 @@ const pool = new Pool({
     port: 5432,
     database: 'trafficguard',
     user: 'trafficguard_user',
-    password: 'process.env.PGPASSWORD || '''
+    password: process.env.PGPASSWORD || ''
 });
 
 async function fixConstraints() {

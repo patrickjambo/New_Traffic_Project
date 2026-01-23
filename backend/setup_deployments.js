@@ -7,7 +7,7 @@ const pool = new Pool({
     port: process.env.DB_PORT || 5432,
     database: process.env.DB_NAME || 'trafficguard',
     user: process.env.DB_USER || 'trafficguard_user',
-    password: process.env.DB_PASSWORD || 'process.env.PGPASSWORD || ''',
+    password: process.env.DB_PASSWORD || '',
 });
 
 async function setup() {

@@ -3,6 +3,9 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'dart:convert';
 import '../config/app_config.dart';
 import 'dart:async';
+import 'fcm_service.dart';
+import 'websocket_service.dart';
+import 'location_tracking_service.dart';
 
 class AuthService {
   static const String _tokenKey = 'auth_token';
@@ -35,6 +38,49 @@ class AuthService {
           data['data']['token'],
           data['data']['user'],
         );
+        
+        // 🔔 Register FCM token for push notifications
+        try {
+          final fcmService = FCMService();
+          fcmService.setAuthToken(data['data']['token']);
+          print('🔔 FCM token registration triggered after login');
+        } catch (e) {
+          print('⚠️ FCM registration error: $e');
+        }
+        
+        // 🔌 Reconnect WebSocket with user info for targeted notifications
+        try {
+          final user = data['data']['user'];
+          final websocketService = WebSocketService();
+          websocketService.connect(
+            userId: user['id']?.toString(),
+            userRole: user['role'],
+          );
+          print('🔌 WebSocket reconnected with userId: ${user['id']}');
+        } catch (e) {
+          print('⚠️ WebSocket reconnection error: $e');
+        }
+        
+        // 📍 Start location tracking for police officers
+        try {
+          final user = data['data']['user'];
+          if (user['role'] == 'police') {
+            final locationService = LocationTrackingService();
+            // Initialize and start tracking in background
+            locationService.initialize().then((initialized) {
+              if (initialized) {
+                locationService.startTracking(
+                  streamIntervalSeconds: 30,
+                  highAccuracy: true,
+                  streamToServer: true,
+                );
+                print('📍 Location tracking started for police officer');
+              }
+            });
+          }
+        } catch (e) {
+          print('⚠️ Location tracking error: $e');
+        }
         
         _authStateController.add(true);
         return {'success': true, 'data': data['data']};

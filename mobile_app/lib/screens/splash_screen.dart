@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
+import '../services/location_tracking_service.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -27,9 +28,32 @@ class _SplashScreenState extends State<SplashScreen> {
     if (!mounted) return;
 
     if (isAuthenticated) {
+      // Start location tracking for police officers on auto-login
+      _startLocationTrackingIfPolice();
       Navigator.of(context).pushReplacementNamed('/home');
     } else {
       Navigator.of(context).pushReplacementNamed('/login');
+    }
+  }
+
+  /// Start location tracking if user is a police officer
+  Future<void> _startLocationTrackingIfPolice() async {
+    try {
+      final userData = await _authService.getUserData();
+      if (userData != null && userData['role'] == 'police') {
+        final locationService = LocationTrackingService();
+        final initialized = await locationService.initialize();
+        if (initialized) {
+          await locationService.startTracking(
+            streamIntervalSeconds: 30,
+            highAccuracy: true,
+            streamToServer: true,
+          );
+          print('📍 Location tracking auto-started for police officer');
+        }
+      }
+    } catch (e) {
+      print('⚠️ Auto location tracking error: $e');
     }
   }
 

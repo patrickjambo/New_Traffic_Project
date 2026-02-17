@@ -141,15 +141,16 @@ class LocationTrackingService {
   /// Get initial location
   Future<void> _getInitialLocation() async {
     try {
+      print('📍 Getting initial location...');
       final locationData = await _location.getLocation().timeout(
         const Duration(seconds: 10),
         onTimeout: () => throw TimeoutException('Location timeout'),
       );
       
       await _updateLocation(locationData);
-      developer.log('Initial location: $_currentLocation', name: 'Location');
+      print('📍 Initial location obtained: ${_currentLocation?.latitude}, ${_currentLocation?.longitude}');
     } catch (e) {
-      developer.log('Error getting initial location: $e', name: 'Location');
+      print('❌ Error getting initial location: $e');
     }
   }
 
@@ -223,13 +224,23 @@ class LocationTrackingService {
         distanceFilter: highAccuracy ? 5 : 20,
       );
 
-      // Enable background mode
-      await _location.enableBackgroundMode(enable: true);
+      // Try to enable background mode (may fail if permission denied)
+      try {
+        await _location.enableBackgroundMode(enable: true);
+        print('📍 Background location mode enabled');
+      } catch (bgError) {
+        print('⚠️ Background location denied, using foreground only: $bgError');
+        // Continue with foreground-only tracking
+      }
 
       // Start listening to location changes
       _locationSubscription = _location.onLocationChanged.listen(
         (LocationData data) async {
           await _updateLocation(data, geocode: false);
+          // Send location update when we get a new position
+          if (streamToServer && _currentLocation != null) {
+            await _sendLocationToServer();
+          }
         },
         onError: (e) {
           developer.log('Location stream error: $e', name: 'Location');
@@ -243,14 +254,24 @@ class LocationTrackingService {
       }
 
       _isTracking = true;
-      developer.log('Location tracking started (interval: ${_streamIntervalSeconds}s)', name: 'Location');
+      print('📍 Location tracking started (interval: ${_streamIntervalSeconds}s)');
       
-      // Immediately send current location
-      if (streamToServer) {
+      // Immediately send current location if we have one
+      if (streamToServer && _currentLocation != null) {
+        print('📍 Sending initial location immediately...');
         await _sendLocationToServer();
+      } else {
+        print('⚠️ No current location to send yet');
       }
     } catch (e) {
-      developer.log('Error starting tracking: $e', name: 'Location');
+      print('❌ Error starting tracking: $e');
+      
+      // Even if tracking setup fails, try to send current location if we have one
+      if (streamToServer && _currentLocation != null) {
+        print('📍 Sending fallback location despite tracking error...');
+        await _sendLocationToServer();
+      }
+      
       onError?.call('Failed to start tracking: $e');
     }
   }
@@ -266,23 +287,59 @@ class LocationTrackingService {
 
   /// Send current location to server
   Future<void> _sendLocationToServer() async {
-    if (_currentLocation == null) return;
+    if (_currentLocation == null) {
+      print('📍 Cannot send location - currentLocation is null');
+      return;
+    }
+
+    final locationData = {
+      'latitude': _currentLocation!.latitude,
+      'longitude': _currentLocation!.longitude,
+      'accuracy': _currentLocation!.accuracy,
+      'speed': _currentLocation!.speed,
+      'heading': _currentLocation!.heading,
+      'address': _currentLocation!.address,
+      'timestamp': _currentLocation!.timestamp.toIso8601String(),
+    };
 
     try {
-      // Send via WebSocket for real-time updates
-      _wsService.socket?.emit('officer:location_update', {
-        'latitude': _currentLocation!.latitude,
-        'longitude': _currentLocation!.longitude,
-        'accuracy': _currentLocation!.accuracy,
-        'speed': _currentLocation!.speed,
-        'heading': _currentLocation!.heading,
-        'address': _currentLocation!.address,
-        'timestamp': _currentLocation!.timestamp.toIso8601String(),
-      });
-
-      developer.log('Location sent to server: ${_currentLocation!.latitude}, ${_currentLocation!.longitude}', name: 'Location');
+      // Try WebSocket first for real-time updates
+      if (_wsService.isConnected) {
+        print('📍 Sending location via WebSocket: ${_currentLocation!.latitude}, ${_currentLocation!.longitude}');
+        _wsService.emit('officer:location_update', locationData);
+        print('✅ Location sent via WebSocket');
+      } else {
+        // Fallback to HTTP API when WebSocket is disconnected
+        print('📍 WebSocket disconnected, sending location via HTTP API');
+        await _sendLocationViaHttp(locationData);
+      }
     } catch (e) {
-      developer.log('Error sending location to server: $e', name: 'Location');
+      print('❌ Error sending location: $e, trying HTTP fallback');
+      // Try HTTP as fallback on any error
+      try {
+        await _sendLocationViaHttp(locationData);
+      } catch (httpError) {
+        developer.log('HTTP fallback also failed: $httpError', name: 'Location');
+      }
+    }
+  }
+
+  /// Send location via HTTP API (fallback for when WebSocket is disconnected)
+  Future<void> _sendLocationViaHttp(Map<String, dynamic> locationData) async {
+    try {
+      final result = await _apiService.updateOfficerLocation(
+        latitude: locationData['latitude'],
+        longitude: locationData['longitude'],
+        address: locationData['address'],
+      );
+      if (result['success'] == true) {
+        developer.log('✅ Location sent via HTTP API', name: 'Location');
+      } else {
+        developer.log('❌ HTTP API location update failed: ${result['message']}', name: 'Location');
+      }
+    } catch (e) {
+      developer.log('❌ HTTP API error: $e', name: 'Location');
+      rethrow;
     }
   }
 

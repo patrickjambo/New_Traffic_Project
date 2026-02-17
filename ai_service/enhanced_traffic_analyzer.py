@@ -360,8 +360,14 @@ class EnhancedTrafficAnalyzer:
                 'incident_type': 'none',
                 'confidence': 0.0,
                 'vehicle_count': 0,
+                'max_vehicle_count': 0,
                 'avg_speed': 0.0,
-                'analysis_time': 0.0,
+                'stationary_count': 0,
+                'frames_analyzed': 0,
+                'total_frames': int(total_frames),
+                'temporal_confirmed': False,
+                'confidence_boost': 0.0,
+                'vehicle_trend': {},
             }
         
         # Calculate average vehicle count
@@ -443,20 +449,22 @@ class EnhancedTrafficAnalyzer:
         # Get vehicle trend analysis
         vehicle_trend = self.temporal_analyzer.get_vehicle_count_trend()
         
+        # Convert all numpy types to native Python types for JSON serialization
         return {
-            'incident_detected': incident_type != 'none',
-            'incident_type': incident_type,
-            'confidence': confidence,
-            'severity': severity,
+            'incident_detected': bool(incident_type != 'none'),
+            'incident_type': str(incident_type),
+            'confidence': float(confidence),
+            'severity': str(severity),
             'vehicle_count': int(avg_vehicle_count),
             'max_vehicle_count': int(max_vehicle_count),
-            'avg_speed': avg_speed,
-            'stationary_count': stationary_count,
-            'frames_analyzed': len(frame_analyses),
-            'total_frames': total_frames,
-            'temporal_confirmed': temporal_confirmed,
-            'confidence_boost': confidence_boost,
-            'vehicle_trend': vehicle_trend if vehicle_trend else {},
+            'avg_speed': float(avg_speed),
+            'stationary_count': int(stationary_count),
+            'frames_analyzed': int(len(frame_analyses)),
+            'total_frames': int(total_frames),
+            'temporal_confirmed': bool(temporal_confirmed),
+            'confidence_boost': float(confidence_boost) if confidence_boost else 0.0,
+            'vehicle_trend': {k: float(v) if isinstance(v, (np.floating, np.integer)) else v 
+                            for k, v in (vehicle_trend or {}).items()},
         }
     
     def _estimate_speed(self, frame_analyses: List[Dict]) -> float:

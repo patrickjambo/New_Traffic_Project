@@ -18,6 +18,7 @@ import Analytics from './pages/Analytics';
 import Settings from './pages/Settings';
 import DeploymentsPage from './pages/DeploymentsPage';
 import GeoFencingPage from './pages/GeoFencingPage';
+import OfficerManagement from './pages/OfficerManagement';
 
 function AppContent() {
   const { isAuthenticated, user } = useAuth();
@@ -33,15 +34,16 @@ function AppContent() {
     '/analytics',
     '/settings',
     '/deployments',
-    '/geofencing'
+    '/geofencing',
+    '/officers'
   ];
 
   const isAdminRoute = dashboardRoutes.some(path =>
     location.pathname === path || location.pathname.startsWith(path + '/')
   );
 
-  // If user is admin/police AND on a dashboard route, show the admin dashboard layout
-  if (isAuthenticated && (user?.role === 'admin' || user?.role === 'police') && isAdminRoute) {
+  // If user is admin/district_admin/police AND on a dashboard route, show the admin dashboard layout
+  if (isAuthenticated && (user?.role === 'admin' || user?.role === 'district_admin' || user?.role === 'police') && isAdminRoute) {
     return (
       <div className="flex h-screen bg-slate-900 relative overflow-hidden">
         {/* Background Watermark */}
@@ -71,8 +73,9 @@ function AppContent() {
                 <Route path="/emergency" element={<Emergency />} />
                 <Route path="/analytics" element={<Analytics />} />
                 <Route path="/settings" element={<Settings />} />
-                <Route path="/deployments" element={<DeploymentsPage />} />
+                <Route path="/deployments" element={<ErrorBoundary><DeploymentsPage /></ErrorBoundary>} />
                 <Route path="/geofencing" element={<GeoFencingPage />} />
+                <Route path="/officers" element={<OfficerManagement />} />
                 <Route path="*" element={<Navigate to="/dashboard" replace />} />
               </Routes>
             </main>

@@ -8,26 +8,30 @@ import {
   BarChart3,
   Settings,
   Home,
-  LogOut,
   Shield,
-  MapPin
+  MapPin,
+  UserCog
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 const Sidebar = ({ isOpen }) => {
   const location = useLocation();
-  const { logout, user } = useAuth();
+  const { user } = useAuth();
+  
+  // Check if district admin
+  const isDistrictAdmin = user?.role === 'district_admin';
 
   const menuItems = [
-    { path: '/', icon: Home, label: 'Home', roles: ['public', 'police', 'admin'] },
-    { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', roles: ['police', 'admin'] },
-    { path: '/incidents', icon: AlertTriangle, label: 'Incidents', roles: ['police', 'admin'] },
-    { path: '/reports', icon: FileText, label: 'Reports', roles: ['police', 'admin'] },
-    { path: '/emergency', icon: Users, label: 'Emergency', roles: ['police', 'admin'] },
-    { path: '/deployments', icon: Shield, label: 'Deployments', roles: ['police', 'admin'] },
-    { path: '/geofencing', icon: MapPin, label: 'Geo-Fencing', roles: ['admin'], badge: 'NEW' },
-    { path: '/analytics', icon: BarChart3, label: 'Analytics', roles: ['admin'] },
-    { path: '/settings', icon: Settings, label: 'Settings', roles: ['admin'] },
+    { path: '/', icon: Home, label: 'Home', roles: ['public', 'police', 'admin', 'district_admin'] },
+    { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', roles: ['police', 'admin', 'district_admin'] },
+    { path: '/incidents', icon: AlertTriangle, label: 'Incidents', roles: ['police', 'admin', 'district_admin'] },
+    { path: '/reports', icon: FileText, label: 'Reports', roles: ['police', 'admin', 'district_admin'] },
+    { path: '/emergency', icon: Users, label: 'Emergency', roles: ['police', 'admin', 'district_admin'] },
+    { path: '/deployments', icon: Shield, label: 'Deployments', roles: ['police', 'admin', 'district_admin'] },
+    { path: '/geofencing', icon: MapPin, label: 'Geo-Fencing', roles: ['admin', 'district_admin'], badge: 'NEW' },
+    { path: '/officers', icon: UserCog, label: 'Officers', roles: ['admin', 'district_admin'] },
+    { path: '/analytics', icon: BarChart3, label: 'Analytics', roles: ['admin', 'district_admin'] },
+    { path: '/settings', icon: Settings, label: 'Settings', roles: ['admin', 'district_admin'] },
   ];
 
   const filteredMenuItems = menuItems.filter(item =>
@@ -53,7 +57,9 @@ const Sidebar = ({ isOpen }) => {
         <div>
           <h1 className="text-white text-sm font-bold leading-tight">Rwanda National</h1>
           <h1 className="text-white text-sm font-bold leading-tight">Police</h1>
-          <p className="text-blue-400 text-xs">TRAFFIC ADMIN</p>
+          <p className="text-blue-400 text-xs">
+            {isDistrictAdmin ? `${user?.districtName?.toUpperCase() || 'DISTRICT'} ADMIN` : 'TRAFFIC ADMIN'}
+          </p>
         </div>
       </div>
 
@@ -85,30 +91,6 @@ const Sidebar = ({ isOpen }) => {
           })}
         </div>
       </nav>
-
-      {/* User Section */}
-      <div className="absolute bottom-0 left-0 right-0 p-4">
-        <div className="bg-slate-800/50 rounded-xl p-3 border border-slate-700/50">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
-              <span className="text-white text-sm font-bold">
-                {user?.full_name?.charAt(0)?.toUpperCase() || 'U'}
-              </span>
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-white text-sm font-medium truncate">{user?.role === 'admin' ? 'Admin' : user?.full_name}</p>
-              <p className="text-gray-500 text-xs capitalize">{user?.role}</p>
-            </div>
-          </div>
-          <button
-            onClick={logout}
-            className="flex items-center gap-2 w-full mt-3 px-3 py-2 text-sm text-gray-400 hover:bg-slate-700/50 hover:text-white rounded-lg transition-colors duration-200"
-          >
-            <LogOut className="w-4 h-4" />
-            Logout
-          </button>
-        </div>
-      </div>
     </div>
   );
 };

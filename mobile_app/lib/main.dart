@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'screens/splash_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/register_screen.dart';
@@ -20,15 +21,18 @@ import 'screens/emergency_alert_screen.dart';
 import 'screens/deployments_screen.dart';
 import 'services/websocket_service.dart';
 import 'services/notification_service.dart';
-import 'services/settings_service.dart';
 import 'services/api_service.dart';
 import 'services/emergency_alert_service.dart';
-import 'services/deployment_service.dart';
+import 'services/deployment_alert_service.dart';
+import 'providers/app_state_provider.dart';
 import 'utils/error_handler.dart';
-import 'widgets/network_banner.dart';
+import 'config/server_config.dart';
 
 // Global navigator key for showing alerts from anywhere
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
+// Global app state manager - singleton for instant theme switching
+final appState = AppStateManager();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -45,6 +49,14 @@ void main() async {
   };
   
   // Initialize services
+  try {
+    // 🔥 Initialize ServerConfig FIRST (loads saved IP from storage)
+    await ServerConfig.init();
+    print('✅ ServerConfig initialized: ${ServerConfig.baseApiUrl}');
+  } catch (e) {
+    print('Failed to initialize ServerConfig: $e');
+  }
+  
   try {
     final apiService = ApiService();
     apiService.initialize();
@@ -68,12 +80,37 @@ void main() async {
     print('Failed to initialize Emergency Alert Service: $e');
   }
   
+  // Initialize Deployment Alert Service
+  try {
+    final deploymentAlertService = DeploymentAlertService();
+    await deploymentAlertService.initialize();
+    print('✅ Deployment Alert Service initialized');
+  } catch (e) {
+    print('Failed to initialize Deployment Alert Service: $e');
+  }
+  
   try {
     final websocketService = WebSocketService();
     websocketService.connect();
   } catch (e) {
     print('Failed to initialize WebSocket Service: $e');
   }
+  
+  // Initialize app state (theme, alerts, connection)
+  await appState.initialize();
+  
+  // Set system UI overlay style
+  SystemChrome.setSystemUIOverlayStyle(
+    appState.theme.isDarkMode
+        ? SystemUiOverlayStyle.light.copyWith(
+            statusBarColor: Colors.transparent,
+            systemNavigationBarColor: const Color(0xFF1E1E1E),
+          )
+        : SystemUiOverlayStyle.dark.copyWith(
+            statusBarColor: Colors.transparent,
+            systemNavigationBarColor: Colors.white,
+          ),
+  );
   
   runApp(const TrafficGuardApp());
 }
@@ -86,34 +123,41 @@ class TrafficGuardApp extends StatefulWidget {
 }
 
 class _TrafficGuardAppState extends State<TrafficGuardApp> {
-  final SettingsService _settingsService = SettingsService();
-  bool _darkModeEnabled = false;
-  bool _isLoading = true;
-
+  
   @override
   void initState() {
     super.initState();
-    _loadSettings();
+    // Listen to theme changes for instant UI updates
+    appState.theme.addListener(_onThemeChanged);
   }
-
-  Future<void> _loadSettings() async {
-    final darkMode = await _settingsService.getDarkModeEnabled();
-    setState(() {
-      _darkModeEnabled = darkMode;
-      _isLoading = false;
-    });
+  
+  @override
+  void dispose() {
+    appState.theme.removeListener(_onThemeChanged);
+    super.dispose();
+  }
+  
+  void _onThemeChanged() {
+    // Force rebuild when theme changes - this is instant!
+    setState(() {});
+    
+    // Update system UI to match theme
+    SystemChrome.setSystemUIOverlayStyle(
+      appState.theme.isDarkMode
+          ? SystemUiOverlayStyle.light.copyWith(
+              statusBarColor: Colors.transparent,
+              systemNavigationBarColor: const Color(0xFF1E1E1E),
+            )
+          : SystemUiOverlayStyle.dark.copyWith(
+              statusBarColor: Colors.transparent,
+              systemNavigationBarColor: Colors.white,
+            ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) {
-      return const MaterialApp(
-        home: Scaffold(
-          body: Center(child: CircularProgressIndicator()),
-        ),
-      );
-    }
-
+    // Use AnimatedTheme for smooth transitions
     return MaterialApp(
       navigatorKey: navigatorKey,
       title: 'TrafficGuard AI',
@@ -166,7 +210,55 @@ class _TrafficGuardAppState extends State<TrafficGuardApp> {
           filled: true,
         ),
       ),
-      themeMode: _darkModeEnabled ? ThemeMode.dark : ThemeMode.light,
+      themeMode: appState.theme.isDarkMode ? ThemeMode.dark : ThemeMode.light,
+      // Wrap home with alert overlay for real-time notifications
+      builder: (context, child) {
+        return Stack(
+          children: [
+            child!,
+            // Connection status banner
+            ListenableBuilder(
+              listenable: appState.connection,
+              builder: (context, _) {
+                if (appState.connection.isOnline) {
+                  return const SizedBox.shrink();
+                }
+                return Positioned(
+                  top: MediaQuery.of(context).padding.top,
+                  left: 0,
+                  right: 0,
+                  child: Material(
+                    color: Colors.orange,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 16),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.wifi_off, color: Colors.white, size: 16),
+                          const SizedBox(width: 8),
+                          const Text(
+                            'No internet connection',
+                            style: TextStyle(color: Colors.white, fontSize: 12),
+                          ),
+                          const Spacer(),
+                          if (appState.connection.isReconnecting)
+                            const SizedBox(
+                              width: 12,
+                              height: 12,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ],
+        );
+      },
       home: const SplashScreen(),
       onGenerateRoute: (settings) {
         switch (settings.name) {

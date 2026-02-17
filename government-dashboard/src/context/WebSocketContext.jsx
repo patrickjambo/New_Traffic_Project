@@ -4,11 +4,11 @@ import toast from 'react-hot-toast';
 
 const WebSocketContext = createContext(null);
 
-// Configuration
+// Configuration - Optimized for real-time performance
 const SOCKET_URL = 'http://localhost:3000';
-const RECONNECT_ATTEMPTS = 10;
-const INITIAL_RECONNECT_DELAY = 1000;
-const MAX_RECONNECT_DELAY = 30000;
+const RECONNECT_ATTEMPTS = 20;
+const INITIAL_RECONNECT_DELAY = 500; // Faster initial reconnect
+const MAX_RECONNECT_DELAY = 10000; // Cap at 10 seconds
 
 export const useWebSocket = () => {
     const context = useContext(WebSocketContext);
@@ -194,7 +194,7 @@ export const WebSocketProvider = ({ children }) => {
 
         const heartbeat = setInterval(() => {
             socket.emit('ping');
-        }, 25000); // Every 25 seconds
+        }, 15000); // Every 15 seconds (faster heartbeat to improve liveness)
 
         return () => clearInterval(heartbeat);
     }, [socket, isConnected]);

@@ -1,0 +1,12 @@
+# Lightweight AI dependencies (~100MB instead of ~5GB PyTorch)
+# Uses OpenCV's built-in detection instead of full YOLO/PyTorch stack
+# Compatible with Python 3.13
+
+opencv-python-headless>=4.8.0
+numpy>=1.26.0
+fastapi>=0.104.0
+uvicorn>=0.24.0
+pillow>=10.0.0
+python-multipart>=0.0.6
+python-dotenv>=1.0.0
+httpx>=0.25.0

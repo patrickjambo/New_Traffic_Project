@@ -1,0 +1,30 @@
+
+> trafficguard-government-portal@1.0.0 dev
+> vite --host 0.0.0.0 --port 3001
+
+Port 3001 is in use, trying another one...
+
+  VITE v5.4.21  ready in 498 ms
+
+  ➜  Local:   http://localhost:3002/
+  ➜  Network: http://192.168.31.170:3002/
+  ➜  Network: http://192.168.31.209:3002/
+  ➜  Network: http://192.168.33.232:3002/
+  ➜  Network: http://172.17.0.1:3002/
+  ➜  Network: http://172.19.0.1:3002/
+  ➜  Network: http://172.21.0.1:3002/
+
+> trafficguard-government-portal@1.0.0 dev
+> vite --host 0.0.0.0 --port 3001
+
+Port 3001 is in use, trying another one...
+
+  VITE v5.4.21  ready in 665 ms
+
+  ➜  Local:   http://localhost:3002/
+  ➜  Network: http://192.168.31.170:3002/
+  ➜  Network: http://192.168.31.209:3002/
+  ➜  Network: http://192.168.33.232:3002/
+  ➜  Network: http://172.17.0.1:3002/
+  ➜  Network: http://172.19.0.1:3002/
+  ➜  Network: http://172.21.0.1:3002/

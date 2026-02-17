@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Menu, Bell, Search, Clock, ChevronDown, User, LogOut, X } from 'lucide-react';
+import { Menu, Bell, Search, Clock, ChevronDown, User, LogOut, X, Wifi, WifiOff, Loader2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
+import { useWebSocket } from '../context/WebSocketContext';
 import { useNavigate } from 'react-router-dom';
 import axios from '../config/axios';
 import toast from 'react-hot-toast';
@@ -9,6 +10,7 @@ import toast from 'react-hot-toast';
 const Header = ({ onMenuClick }) => {
   const { user, logout } = useAuth();
   const { notifications, unreadCount, markNotificationRead } = useData();
+  const { isConnected, connectionStatus } = useWebSocket();
   const navigate = useNavigate();
   const [currentTime, setCurrentTime] = useState(new Date());
 
@@ -121,6 +123,26 @@ const Header = ({ onMenuClick }) => {
         </div>
 
         <div className="flex items-center gap-4 flex-1 justify-end md:justify-center max-w-4xl mx-auto px-4">
+          {/* Connection Status Indicator */}
+          <div className={`hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full border transition-all ${
+            connectionStatus === 'connected' 
+              ? 'bg-green-500/10 border-green-500/30 text-green-400' 
+              : connectionStatus === 'connecting' 
+                ? 'bg-yellow-500/10 border-yellow-500/30 text-yellow-400 animate-pulse' 
+                : 'bg-red-500/10 border-red-500/30 text-red-400'
+          }`} title={`Real-time: ${connectionStatus}`}>
+            {connectionStatus === 'connected' ? (
+              <Wifi className="w-3.5 h-3.5" />
+            ) : connectionStatus === 'connecting' ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <WifiOff className="w-3.5 h-3.5" />
+            )}
+            <span className="text-[10px] font-bold uppercase tracking-wider">
+              {connectionStatus === 'connected' ? 'Live' : connectionStatus === 'connecting' ? 'Connecting' : 'Offline'}
+            </span>
+          </div>
+
           {/* Clock */}
           <div className="hidden md:flex items-center gap-2 bg-gray-800 px-4 py-2 rounded-full border border-gray-700">
             <Clock className="w-4 h-4 text-blue-400" />
@@ -244,10 +266,10 @@ const Header = ({ onMenuClick }) => {
               </div>
               <div className="hidden md:block text-left">
                 <p className="text-sm font-medium text-white leading-none mb-1">
-                  {user?.role === 'admin' ? 'Admin' : user?.full_name}
+                  {user?.role === 'admin' ? 'Admin' : user?.role === 'district_admin' ? user?.districtName || 'District Admin' : user?.fullName || user?.full_name}
                 </p>
                 <div className="flex items-center gap-1 text-xs text-gray-400">
-                  <span className="capitalize">{user?.role}</span>
+                  <span className="capitalize">{user?.role === 'district_admin' ? 'District Admin' : user?.role}</span>
                   <ChevronDown className="w-3 h-3" />
                 </div>
               </div>

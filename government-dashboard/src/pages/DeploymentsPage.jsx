@@ -291,12 +291,15 @@ const DeploymentsPage = () => {
 
     const handleUpdateStatus = async (id, newStatus) => {
         try {
-            await deploymentService.updateStatus(id, newStatus);
+            console.log('Updating deployment', id, 'to status:', newStatus);
+            const response = await deploymentService.updateStatus(id, newStatus);
+            console.log('Update response:', response);
+            toast.success(`Deployment status updated to ${newStatus}`);
             fetchDeployments();
             fetchStats();
         } catch (error) {
             console.error('Error updating status:', error);
-            alert('Failed to update status');
+            toast.error('Failed to update status: ' + (error.response?.data?.message || error.message));
         }
     };
 
@@ -306,11 +309,12 @@ const DeploymentsPage = () => {
         }
         try {
             await deploymentService.delete(id);
+            toast.success('Deployment deleted successfully');
             fetchDeployments();
             fetchStats();
         } catch (error) {
             console.error('Error deleting deployment:', error);
-            alert('Failed to delete deployment');
+            toast.error('Failed to delete deployment: ' + (error.response?.data?.message || error.message));
         }
     };
 
@@ -380,7 +384,7 @@ const DeploymentsPage = () => {
     };
 
     const filteredDeployments = deployments.filter(d => {
-        const matchesSearch = d.unit_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        const matchesSearch = (d.unit_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
             (d.address && d.address.toLowerCase().includes(searchTerm.toLowerCase()));
         const matchesFilter = filterStatus === 'All' || d.status === filterStatus;
         return matchesSearch && matchesFilter;
@@ -498,13 +502,14 @@ const DeploymentsPage = () => {
                             <select
                                 value={filterStatus}
                                 onChange={(e) => setFilterStatus(e.target.value)}
-                                className="bg-transparent border-none text-sm font-bold text-white focus:ring-0 cursor-pointer"
+                                className="bg-slate-800 border-none text-sm font-bold text-white focus:ring-0 cursor-pointer rounded-lg"
+                                style={{ backgroundColor: '#1e293b' }}
                             >
-                                <option value="All">All Status</option>
-                                <option value="Active">Active</option>
-                                <option value="Standby">Standby</option>
-                                <option value="Completed">Completed</option>
-                                <option value="Cancelled">Cancelled</option>
+                                <option value="All" className="bg-slate-800 text-white">All Status</option>
+                                <option value="Active" className="bg-slate-800 text-green-400">Active</option>
+                                <option value="Standby" className="bg-slate-800 text-yellow-400">Standby</option>
+                                <option value="Completed" className="bg-slate-800 text-blue-400">Completed</option>
+                                <option value="Cancelled" className="bg-slate-800 text-red-400">Cancelled</option>
                             </select>
                         </div>
                         <div className="text-sm text-gray-500 font-medium">
@@ -530,7 +535,7 @@ const DeploymentsPage = () => {
                 ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                         {filteredDeployments.map((deployment) => (
-                            <div key={deployment.id} className="bg-slate-800/40 backdrop-blur-md rounded-3xl p-6 border border-white/5 hover:border-blue-500/30 transition-all hover:translate-y-[-4px] group relative overflow-hidden">
+                            <div key={deployment.id} className="bg-slate-800/40 backdrop-blur-md rounded-3xl p-6 border border-white/5 hover:border-blue-500/30 transition-all hover:translate-y-[-4px] group relative">
                                 {/* Status Indicator Line */}
                                 <div className={`absolute top-0 left-0 right-0 h-1 ${deployment.status === 'Active' ? 'bg-green-500' :
                                     deployment.status === 'Standby' ? 'bg-yellow-500' :
@@ -538,18 +543,18 @@ const DeploymentsPage = () => {
                                     } opacity-50`}></div>
 
                                 <div className="flex justify-between items-start mb-6">
-                                    <div className="flex items-center gap-4">
-                                        <div className="w-12 h-12 bg-blue-500/10 rounded-2xl flex items-center justify-center text-blue-400 group-hover:bg-blue-600 group-hover:text-white transition-all">
+                                    <div className="flex items-center gap-4 flex-1 min-w-0">
+                                        <div className="w-12 h-12 bg-blue-500/10 rounded-2xl flex items-center justify-center text-blue-400 group-hover:bg-blue-600 group-hover:text-white transition-all flex-shrink-0">
                                             <Users className="w-6 h-6" />
                                         </div>
-                                        <div>
-                                            <h3 className="font-bold text-xl text-white group-hover:text-blue-400 transition-colors">{deployment.unit_name}</h3>
-                                            <div className={`text-[10px] px-2 py-0.5 rounded-full border font-black uppercase tracking-tighter mt-1 ${getStatusColor(deployment.status)}`}>
+                                        <div className="min-w-0">
+                                            <h3 className="font-bold text-xl text-white group-hover:text-blue-400 transition-colors truncate">{deployment.unit_name || 'Unnamed Unit'}</h3>
+                                            <div className={`text-[10px] px-2 py-0.5 rounded-full border font-black uppercase tracking-tighter mt-1 inline-block ${getStatusColor(deployment.status)}`}>
                                                 {deployment.status}
                                             </div>
                                         </div>
                                     </div>
-                                    <div className="flex items-center gap-2">
+                                    <div className="flex items-center gap-1 flex-shrink-0 ml-2">
                                         <button
                                             onClick={() => {
                                                 setSelectedDeployment(deployment);
@@ -567,16 +572,17 @@ const DeploymentsPage = () => {
                                         <select
                                             onChange={(e) => handleUpdateStatus(deployment.id, e.target.value)}
                                             value={deployment.status}
-                                            className="bg-slate-900/80 border border-white/10 rounded-lg text-[10px] font-bold py-1 pl-2 pr-6 focus:ring-0 cursor-pointer hover:bg-slate-900 transition-colors"
+                                            className="bg-slate-800 border border-white/10 rounded-lg text-[10px] font-bold py-1.5 px-2 focus:ring-0 cursor-pointer hover:bg-slate-700 transition-colors text-white"
+                                            style={{ minWidth: '100px', backgroundColor: '#1e293b' }}
                                         >
-                                            <option value="Active">Set Active</option>
-                                            <option value="Standby">Set Standby</option>
-                                            <option value="Completed">Set Completed</option>
-                                            <option value="Cancelled">Set Cancelled</option>
+                                            <option value="Active" className="bg-slate-800 text-white">Set Active</option>
+                                            <option value="Standby" className="bg-slate-800 text-white">Set Standby</option>
+                                            <option value="Completed" className="bg-slate-800 text-white">Set Completed</option>
+                                            <option value="Cancelled" className="bg-slate-800 text-white">Set Cancelled</option>
                                         </select>
                                         <button
                                             onClick={() => handleDeleteDeployment(deployment.id)}
-                                            className="p-2 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white rounded-lg transition-all"
+                                            className="p-2 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white rounded-lg transition-all flex-shrink-0"
                                             title="Delete Deployment"
                                         >
                                             <Trash2 className="w-4 h-4" />
@@ -912,7 +918,7 @@ const DeploymentsPage = () => {
                                     </div>
                                     <h2 className="text-2xl font-black text-white tracking-tight">Manage Personnel</h2>
                                 </div>
-                                <p className="text-blue-400/60 text-[10px] font-black uppercase tracking-widest ml-11">UNIT: {selectedDeployment.unit_name}</p>
+                                <p className="text-blue-400/60 text-[10px] font-black uppercase tracking-widest ml-11">UNIT: {selectedDeployment?.unit_name || 'Unnamed Unit'}</p>
                             </div>
                             <button onClick={() => setIsManageOfficersOpen(false)} className="p-3 hover:bg-white/5 rounded-2xl transition-all text-gray-500 hover:text-white">
                                 <X className="w-6 h-6" />

@@ -4,6 +4,8 @@ import 'package:socket_io_client/socket_io_client.dart' as IO;
 import '../config/app_config.dart';
 import 'notification_service.dart';
 import 'emergency_alert_service.dart';
+import 'deployment_alert_service.dart';
+import 'navigation_service.dart';
 import '../main.dart' show navigatorKey;
 
 /// Real-time WebSocket service for instant updates
@@ -20,6 +22,10 @@ class WebSocketService {
   int _reconnectAttempts = 0;
   static const int _maxReconnectAttempts = 10;
   static const int _initialReconnectDelay = 1000; // ms
+  
+  // Pending user info for room joining after connection
+  String? _pendingUserId;
+  String? _pendingUserRole;
   
   // Stream controllers for reactive updates
   final _incidentStreamController = StreamController<Map<String, dynamic>>.broadcast();
@@ -45,7 +51,11 @@ class WebSocketService {
   /// Initialize WebSocket connection with auto-reconnect
   void connect({String? userId, String? userRole}) {
     try {
+      // If already connected and we have userId, just join the rooms
       if (_socket != null && _socket!.connected) {
+        if (userId != null) {
+          _joinRooms(userId, userRole);
+        }
         return; // Already connected
       }
 
@@ -54,6 +64,10 @@ class WebSocketService {
       }
 
       _isConnecting = true;
+      
+      // Store userId/userRole for use after connection
+      _pendingUserId = userId;
+      _pendingUserRole = userRole;
 
       _socket = IO.io(
         AppConfig.baseUrl,
@@ -77,12 +91,12 @@ class WebSocketService {
         _reconnectAttempts = 0;
         _connectionStatusController.add(true);
         
-        // Join role-based room
-        if (userId != null || userRole != null) {
-          _socket!.emit('join:role', {
-            'role': userRole ?? 'public',
-            'userId': userId,
-          });
+        // Join rooms with pending or passed user info
+        final effectiveUserId = _pendingUserId ?? userId;
+        final effectiveUserRole = _pendingUserRole ?? userRole;
+        
+        if (effectiveUserId != null || effectiveUserRole != null) {
+          _joinRooms(effectiveUserId, effectiveUserRole);
         }
       });
 
@@ -115,6 +129,30 @@ class WebSocketService {
       print('❌ Failed to initialize WebSocket: $e');
       _isConnected = false;
       _isConnecting = false;
+    }
+  }
+
+  /// Join user and role rooms for targeted notifications
+  void _joinRooms(String? userId, String? userRole) {
+    if (_socket == null || !_socket!.connected) return;
+    
+    // Join role-based room
+    _socket!.emit('join:role', {
+      'role': userRole ?? 'public',
+      'userId': userId,
+    });
+    print('📍 Joined role room: ${userRole ?? 'public'}');
+    
+    // 🔥 Join user-specific room for targeted notifications (deployments, etc.)
+    if (userId != null) {
+      _socket!.emit('join:user', {
+        'userId': userId,
+      });
+      print('📍 Joined user room: user:$userId');
+      
+      // Store for reconnection
+      _pendingUserId = userId;
+      _pendingUserRole = userRole;
     }
   }
 
@@ -306,14 +344,41 @@ class WebSocketService {
   void _handleEmergencyNew(dynamic data) {
     try {
       final emergencyData = _parseData(data);
+      print('🆘🆘🆘 PROCESSING NEW EMERGENCY: $emergencyData');
+      
       _emergencyStreamController.add({
         'type': 'new',
         'data': emergencyData,
       });
 
+      // Check severity - trigger full alarm for critical/high
+      final severity = emergencyData['severity']?.toString().toLowerCase() ?? '';
+      if (severity == 'critical' || severity == 'high') {
+        // 🔥 TRIGGER FULL EMERGENCY ALARM (vibration, sound, flashlight)
+        final emergencyService = EmergencyAlertService();
+        emergencyService.showEmergencyAlert({
+          'title': '🆘 NEW EMERGENCY',
+          'message': emergencyData['description'] ?? 'Emergency reported - Response needed!',
+          'severity': severity,
+          'type': emergencyData['emergency_type'] ?? emergencyData['type'] ?? 'emergency',
+          'location': emergencyData['location_name'] ?? emergencyData['location']?['name'] ?? 'Unknown location',
+          'latitude': emergencyData['latitude'],
+          'longitude': emergencyData['longitude'],
+          ...emergencyData,
+        });
+
+        // Navigate to emergency alert screen
+        if (navigatorKey.currentState != null) {
+          navigatorKey.currentState!.pushNamed(
+            '/emergency-alert',
+            arguments: emergencyData,
+          );
+        }
+      }
+
       _notificationService.addNotification(
         title: '🆘 Emergency Report',
-        message: '${emergencyData['type'] ?? 'Emergency'} reported at ${emergencyData['location']?['name'] ?? 'unknown location'}',
+        message: '${emergencyData['type'] ?? 'Emergency'} reported at ${emergencyData['location']?['name'] ?? emergencyData['location_name'] ?? 'unknown location'}',
         type: 'emergency',
       );
     } catch (e) {
@@ -336,14 +401,37 @@ class WebSocketService {
   void _handleEmergencyAlert(dynamic data) {
     try {
       final alertData = _parseData(data);
+      print('🚨🚨🚨 PROCESSING EMERGENCY ALERT: $alertData');
+      
       _emergencyStreamController.add({
         'type': 'alert',
         'data': alertData,
       });
 
+      // 🔥 TRIGGER FULL EMERGENCY ALARM (vibration, sound, flashlight)
+      final emergencyService = EmergencyAlertService();
+      emergencyService.showEmergencyAlert({
+        'title': alertData['title'] ?? 'EMERGENCY ALERT',
+        'message': alertData['message'] ?? alertData['description'] ?? 'Immediate response required!',
+        'severity': alertData['severity'] ?? 'critical',
+        'type': alertData['emergency_type'] ?? alertData['type'] ?? 'emergency',
+        'location': alertData['location_name'] ?? alertData['locationName'] ?? 'Unknown location',
+        'latitude': alertData['latitude'],
+        'longitude': alertData['longitude'],
+        ...alertData,
+      });
+
+      // Navigate to emergency alert screen
+      if (navigatorKey.currentState != null) {
+        navigatorKey.currentState!.pushNamed(
+          '/emergency-alert',
+          arguments: alertData,
+        );
+      }
+
       _notificationService.addNotification(
         title: '🚨 CRITICAL EMERGENCY',
-        message: 'Immediate attention required!',
+        message: alertData['message'] ?? 'Immediate attention required!',
         type: 'critical',
       );
     } catch (e) {
@@ -487,6 +575,8 @@ class WebSocketService {
     try {
       final assignmentData = _parseData(data);
       
+      print('📋 DEPLOYMENT ASSIGNED: $assignmentData');
+      
       // Emit to stream for UI updates
       _deploymentStreamController.add({
         'type': 'assigned',
@@ -498,11 +588,23 @@ class WebSocketService {
         onDeploymentAssigned!(assignmentData);
       }
       
-      // High priority notification for officer being assigned
+      // 🔔 TRIGGER DEPLOYMENT ALERT with sound & vibration
+      final deploymentAlertService = DeploymentAlertService();
+      final priority = assignmentData['priority']?.toString().toLowerCase() ?? 'normal';
+      
+      if (priority == 'high' || priority == 'urgent' || priority == 'critical') {
+        // High priority - stronger alert
+        deploymentAlertService.showUrgentDeploymentAlert(assignmentData);
+      } else {
+        // Normal priority
+        deploymentAlertService.showDeploymentAlert(assignmentData);
+      }
+      
+      // Also add to notification list
       _notificationService.addNotification(
-        title: '📍 NEW ASSIGNMENT',
-        message: 'You have been assigned to ${assignmentData['unitName'] ?? assignmentData['type'] ?? 'a deployment'} at ${assignmentData['address'] ?? 'assigned location'}. Please acknowledge.',
-        type: 'critical',
+        title: '� NEW DEPLOYMENT',
+        message: 'You have been assigned to ${assignmentData['unit_name'] ?? assignmentData['unitName'] ?? 'a deployment'} at ${assignmentData['address'] ?? 'assigned location'}. Tap to acknowledge.',
+        type: 'deployment',
       );
     } catch (e) {
       print('Error handling deployment:assigned: $e');
@@ -593,6 +695,16 @@ class WebSocketService {
     }
   }
 
+  /// Emit an event to the server
+  void emit(String event, [dynamic data]) {
+    if (_socket != null && _socket!.connected) {
+      _socket!.emit(event, data);
+      print('📤 WebSocket emit: $event');
+    } else {
+      print('⚠️ WebSocket emit failed - not connected: $event');
+    }
+  }
+
   /// Disconnect WebSocket
   void disconnect() {
     _heartbeatTimer?.cancel();
@@ -608,27 +720,6 @@ class WebSocketService {
   void reconnect({String? userId, String? userRole}) {
     disconnect();
     connect(userId: userId, userRole: userRole);
-  }
-
-  /// Listen to custom events
-  void onCustomEvent(String eventName, Function(Map<String, dynamic>) callback) {
-    _customEventHandlers[eventName] = callback;
-    
-    // Set up listener if socket is connected
-    if (_socket != null && _socket!.connected) {
-      _socket!.on(eventName, (data) {
-        final parsedData = _parseData(data);
-        callback(parsedData);
-      });
-    }
-  }
-
-  /// Remove custom event listener
-  void offCustomEvent(String eventName) {
-    _customEventHandlers.remove(eventName);
-    if (_socket != null) {
-      _socket!.off(eventName);
-    }
   }
 
   /// Dispose all resources

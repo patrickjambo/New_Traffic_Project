@@ -1,7 +1,8 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import axios from '../config/axios';
 import toast from 'react-hot-toast';
 import { useWebSocket } from './WebSocketContext';
+import { useAuth } from './AuthContext';
 
 const DataContext = createContext();
 
@@ -24,6 +25,68 @@ export const DataProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   const { subscribe, isConnected } = useWebSocket();
+  const { user } = useAuth();
+  
+  // Check if user is district admin
+  const isDistrictAdmin = user?.role === 'district_admin';
+  const userDistrictId = user?.districtId;
+
+  // Helper function to check if an item belongs to user's district
+  const belongsToUserDistrict = useCallback((item) => {
+    if (!isDistrictAdmin || !userDistrictId) return true; // Super admin sees all
+    
+    // Check district_id on the item
+    if (item.district_id) return item.district_id === userDistrictId;
+    
+    // Check by location (Kigali districts approximate bounds)
+    if (item.latitude && item.longitude) {
+      const lat = parseFloat(item.latitude);
+      const lng = parseFloat(item.longitude);
+      
+      // Approximate district bounds for Kigali
+      const districtBounds = {
+        1: { name: 'Nyarugenge', latMin: -1.98, latMax: -1.93, lngMin: 30.02, lngMax: 30.08 },
+        2: { name: 'Gasabo', latMin: -1.95, latMax: -1.88, lngMin: 30.05, lngMax: 30.15 },
+        3: { name: 'Kicukiro', latMin: -2.02, latMax: -1.96, lngMin: 30.05, lngMax: 30.15 },
+      };
+      
+      const bounds = districtBounds[userDistrictId];
+      if (bounds) {
+        return lat >= bounds.latMin && lat <= bounds.latMax && 
+               lng >= bounds.lngMin && lng <= bounds.lngMax;
+      }
+    }
+    
+    return true; // Default: show if can't determine
+  }, [isDistrictAdmin, userDistrictId]);
+
+  // Filtered data for district admins
+  const filteredIncidents = useMemo(() => {
+    if (!isDistrictAdmin) return incidents;
+    return incidents.filter(belongsToUserDistrict);
+  }, [incidents, isDistrictAdmin, belongsToUserDistrict]);
+
+  const filteredEmergencies = useMemo(() => {
+    if (!isDistrictAdmin) return emergencies;
+    return emergencies.filter(belongsToUserDistrict);
+  }, [emergencies, isDistrictAdmin, belongsToUserDistrict]);
+
+  const filteredDeployments = useMemo(() => {
+    if (!isDistrictAdmin) return deployments;
+    return deployments.filter(d => {
+      if (d.district_id) return d.district_id === userDistrictId;
+      return belongsToUserDistrict(d);
+    });
+  }, [deployments, isDistrictAdmin, userDistrictId, belongsToUserDistrict]);
+
+  const filteredOfficers = useMemo(() => {
+    if (!isDistrictAdmin) return availableOfficers;
+    return availableOfficers.filter(o => {
+      if (o.district_id) return o.district_id === userDistrictId;
+      if (o.assigned_district_id) return o.assigned_district_id === userDistrictId;
+      return belongsToUserDistrict(o);
+    });
+  }, [availableOfficers, isDistrictAdmin, userDistrictId, belongsToUserDistrict]);
 
   // ============================================
   // Real-time Event Handlers
@@ -62,10 +125,37 @@ export const DataProvider = ({ children }) => {
   // Handle new emergency
   const handleNewEmergency = useCallback((emergency) => {
     console.log('🚨 New emergency received:', emergency);
-    setEmergencies(prev => [emergency, ...prev]);
+    
+    // Normalize the emergency data to match database format
+    // WebSocket sends: { type, location: { name, lat, lng }, ... }
+    // Database has: { emergency_type, location_name, latitude, longitude, ... }
+    const normalizedEmergency = {
+      id: emergency.id,
+      emergency_type: emergency.type || emergency.emergency_type,
+      severity: emergency.severity,
+      status: emergency.status || 'pending',
+      location_name: emergency.location?.name || emergency.location_name || 'Unknown',
+      latitude: emergency.location?.latitude || emergency.latitude,
+      longitude: emergency.location?.longitude || emergency.longitude,
+      description: emergency.description,
+      services_needed: emergency.servicesNeeded || emergency.services_needed,
+      contact_phone: emergency.contactPhone || emergency.contact_phone,
+      created_at: emergency.createdAt || emergency.created_at || new Date().toISOString(),
+      source: emergency.source || 'manual',
+      ...emergency, // Keep any extra fields
+    };
+    
+    setEmergencies(prev => {
+      // Check if emergency already exists (avoid duplicates)
+      const exists = prev.some(e => e.id === normalizedEmergency.id);
+      if (exists) {
+        return prev.map(e => e.id === normalizedEmergency.id ? { ...e, ...normalizedEmergency } : e);
+      }
+      return [normalizedEmergency, ...prev];
+    });
 
     // Critical alert
-    toast.error(`EMERGENCY: ${emergency.type} - ${emergency.severity}`, {
+    toast.error(`🚨 EMERGENCY: ${normalizedEmergency.emergency_type} - ${normalizedEmergency.severity}`, {
       icon: '🚨',
       duration: 10000,
     });
@@ -244,52 +334,119 @@ export const DataProvider = ({ children }) => {
     }
   };
 
-  // Report new incident
+  // Report new incident with optimistic update and rollback
   const reportIncident = async (incidentData) => {
+    // Create optimistic incident with temp ID
+    const tempId = `temp_${Date.now()}`;
+    const optimisticIncident = {
+      id: tempId,
+      ...incidentData,
+      status: 'pending',
+      created_at: new Date().toISOString(),
+      _isOptimistic: true,
+    };
+
+    // Optimistically add to UI immediately
+    setIncidents(prev => [optimisticIncident, ...prev]);
+
     try {
       const response = await axios.post('/api/incidents/report', incidentData);
       if (response.data.success) {
+        const newIncident = response.data.data;
+        // Replace optimistic entry with real data
+        setIncidents(prev => prev.map(inc => 
+          inc.id === tempId ? newIncident : inc
+        ));
         toast.success('Incident reported successfully!');
-        return { success: true, data: response.data.data };
+        return { success: true, data: newIncident };
       }
+      // Server returned failure - rollback
+      setIncidents(prev => prev.filter(inc => inc.id !== tempId));
+      toast.error('Failed to report incident');
       return { success: false, message: 'Failed to report incident' };
     } catch (error) {
+      // Network/server error - rollback optimistic update
+      setIncidents(prev => prev.filter(inc => inc.id !== tempId));
       console.error('Error reporting incident:', error);
       toast.error('Failed to report incident');
       return { success: false, message: error.message };
     }
   };
 
-  // Report new emergency
+  // Report new emergency with optimistic update and rollback
   const reportEmergency = async (emergencyData) => {
+    // Create optimistic emergency with temp ID
+    const tempId = `temp_${Date.now()}`;
+    const optimisticEmergency = {
+      id: tempId,
+      emergency_type: emergencyData.emergencyType,
+      severity: emergencyData.severity,
+      location_name: emergencyData.locationName,
+      latitude: emergencyData.latitude,
+      longitude: emergencyData.longitude,
+      description: emergencyData.description,
+      status: 'pending',
+      created_at: new Date().toISOString(),
+      _isOptimistic: true,
+    };
+
+    // Optimistically add to UI immediately
+    setEmergencies(prev => [optimisticEmergency, ...prev]);
+
     try {
       const response = await axios.post('/api/emergency', emergencyData);
       if (response.data.success) {
+        const newEmergency = response.data.data;
+        // Replace optimistic entry with real data
+        setEmergencies(prev => prev.map(em => 
+          em.id === tempId ? newEmergency : em
+        ));
         toast.success('Emergency reported successfully! Help is on the way.', {
           icon: '🚨',
           duration: 6000
         });
-        return { success: true, data: response.data.data };
+        return { success: true, data: newEmergency };
       }
+      // Server returned failure - rollback
+      setEmergencies(prev => prev.filter(em => em.id !== tempId));
+      toast.error('Failed to report emergency');
       return { success: false, message: 'Failed to report emergency' };
     } catch (error) {
+      // Network/server error - rollback optimistic update
+      setEmergencies(prev => prev.filter(em => em.id !== tempId));
       console.error('Error reporting emergency:', error);
       toast.error('Failed to report emergency');
       return { success: false, message: error.message };
     }
   };
 
-  // Update incident status
+  // Update incident status with optimistic update and rollback
   const updateIncidentStatus = async (incidentId, status) => {
+    // Store previous state for rollback
+    const previousIncidents = [...incidents];
+    
+    // Optimistically update status
+    setIncidents(prev => prev.map(inc => 
+      inc.id === incidentId ? { ...inc, status, _pendingUpdate: true } : inc
+    ));
+
     try {
       const response = await axios.patch(`/api/incidents/${incidentId}/status`, { status });
       if (response.data.success) {
-        // Optimistic update - update will also come via WebSocket
+        // Remove pending flag
+        setIncidents(prev => prev.map(inc => 
+          inc.id === incidentId ? { ...inc, status, _pendingUpdate: false } : inc
+        ));
         toast.success('Status updated!');
         return { success: true };
       }
+      // Server returned failure - rollback
+      setIncidents(previousIncidents);
+      toast.error('Failed to update status');
       return { success: false };
     } catch (error) {
+      // Network/server error - rollback
+      setIncidents(previousIncidents);
       console.error('Error updating status:', error);
       toast.error('Failed to update status');
       return { success: false };
@@ -348,16 +505,45 @@ export const DataProvider = ({ children }) => {
     }
   };
 
-  // Create deployment
+  // Create deployment with optimistic update and rollback
   const createDeployment = async (deploymentData) => {
+    // Create optimistic deployment with temp ID
+    const tempId = `temp_${Date.now()}`;
+    const optimisticDeployment = {
+      id: tempId,
+      unit_name: deploymentData.unitName,
+      address: deploymentData.location?.address,
+      latitude: deploymentData.location?.latitude,
+      longitude: deploymentData.location?.longitude,
+      status: 'Pending',
+      created_at: new Date().toISOString(),
+      officers: [],
+      _isOptimistic: true,
+    };
+
+    // Optimistically add to UI immediately
+    setDeployments(prev => [optimisticDeployment, ...prev]);
+
     try {
       const response = await axios.post('/api/deployments', deploymentData);
       if (response.data.success) {
+        const newDeployment = response.data.data;
+        // Replace optimistic entry with real data
+        setDeployments(prev => prev.map(dep => 
+          dep.id === tempId ? newDeployment : dep
+        ));
+        // Refresh available officers in background to reflect assignment
+        fetchAvailableOfficers();
         toast.success('Deployment created successfully!');
-        return { success: true, data: response.data.data };
+        return { success: true, data: newDeployment };
       }
+      // Server returned failure - rollback
+      setDeployments(prev => prev.filter(dep => dep.id !== tempId));
+      toast.error('Failed to create deployment');
       return { success: false, message: 'Failed to create deployment' };
     } catch (error) {
+      // Network/server error - rollback optimistic update
+      setDeployments(prev => prev.filter(dep => dep.id !== tempId));
       console.error('Error creating deployment:', error);
       toast.error('Failed to create deployment');
       return { success: false, message: error.message };
@@ -373,6 +559,9 @@ export const DataProvider = ({ children }) => {
         emergencyId,
       });
       if (response.data.success) {
+        // Optimistic update: refresh deployments and available officers immediately
+        fetchDeployments();
+        fetchAvailableOfficers();
         toast.success(response.data.message);
         return { success: true, data: response.data.data };
       }
@@ -384,18 +573,65 @@ export const DataProvider = ({ children }) => {
     }
   };
 
-  // Update deployment status
+  // Update deployment status with optimistic update and rollback
   const updateDeploymentStatus = async (deploymentId, status) => {
+    // Store previous state for rollback
+    const previousDeployments = [...deployments];
+    
+    // Optimistically update status
+    setDeployments(prev => prev.map(d => 
+      d.id === deploymentId ? { ...d, status, _pendingUpdate: true } : d
+    ));
+
     try {
       const response = await axios.put(`/api/deployments/${deploymentId}/status`, { status });
       if (response.data.success) {
+        // Remove pending flag, confirm update
+        setDeployments(prev => prev.map(d => 
+          d.id === deploymentId ? { ...d, status, _pendingUpdate: false } : d
+        ));
         toast.success('Deployment status updated!');
         return { success: true };
       }
+      // Server returned failure - rollback
+      setDeployments(previousDeployments);
+      toast.error('Failed to update deployment status');
       return { success: false };
     } catch (error) {
+      // Network/server error - rollback
+      setDeployments(previousDeployments);
       console.error('Error updating deployment status:', error);
       toast.error('Failed to update deployment status');
+      return { success: false };
+    }
+  };
+
+  // Delete deployment with optimistic update and rollback
+  const deleteDeployment = async (deploymentId) => {
+    // Store the deployment for potential rollback
+    const deletedDeployment = deployments.find(d => d.id === deploymentId);
+    const previousDeployments = [...deployments];
+    
+    // Optimistically remove from UI immediately
+    setDeployments(prev => prev.filter(d => d.id !== deploymentId));
+
+    try {
+      const response = await axios.delete(`/api/deployments/${deploymentId}`);
+      if (response.data.success) {
+        // Refresh available officers since they may now be free
+        fetchAvailableOfficers();
+        toast.success('Deployment deleted successfully');
+        return { success: true };
+      }
+      // Server returned failure - rollback
+      setDeployments(previousDeployments);
+      toast.error('Failed to delete deployment');
+      return { success: false };
+    } catch (error) {
+      // Network/server error - rollback
+      setDeployments(previousDeployments);
+      console.error('Error deleting deployment:', error);
+      toast.error('Failed to delete deployment');
       return { success: false };
     }
   };
@@ -407,6 +643,7 @@ export const DataProvider = ({ children }) => {
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
+      // Load all data in parallel for faster startup
       await Promise.all([
         fetchIncidents(),
         fetchEmergencies(),
@@ -420,25 +657,53 @@ export const DataProvider = ({ children }) => {
 
     loadData();
 
-    // Refresh data periodically (as backup to WebSocket)
-    const interval = setInterval(() => {
+    // Refresh critical data periodically (backup to WebSocket)
+    const quickRefresh = setInterval(() => {
+      // Refresh statistics every 30 seconds for real-time feel
       fetchStatistics();
-    }, 60000); // Every minute
+    }, 30000);
 
-    return () => clearInterval(interval);
+    // Full data refresh every 2 minutes as fallback
+    const fullRefresh = setInterval(() => {
+      fetchIncidents();
+      fetchEmergencies();
+      fetchDeployments();
+      fetchAvailableOfficers();
+    }, 120000);
+
+    return () => {
+      clearInterval(quickRefresh);
+      clearInterval(fullRefresh);
+    };
   }, []);
 
+  // Refresh data when WebSocket reconnects
+  useEffect(() => {
+    if (isConnected) {
+      console.log('🔄 WebSocket connected - refreshing data');
+      fetchIncidents();
+      fetchEmergencies();
+      fetchDeployments();
+      fetchStatistics();
+    }
+  }, [isConnected]);
+
   const value = {
-    // Data
-    incidents,
-    emergencies,
-    deployments,
-    availableOfficers,
+    // Data (filtered for district admins, full for super admin)
+    incidents: filteredIncidents,
+    emergencies: filteredEmergencies,
+    deployments: filteredDeployments,
+    availableOfficers: filteredOfficers,
     statistics,
     notifications,
     unreadCount,
     loading,
     isConnected,
+    
+    // District info for UI
+    isDistrictAdmin,
+    userDistrictId,
+    userDistrictName: user?.districtName,
 
     // Actions
     fetchIncidents,
@@ -456,6 +721,7 @@ export const DataProvider = ({ children }) => {
     createDeployment,
     assignOfficer,
     updateDeploymentStatus,
+    deleteDeployment,
   };
 
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;

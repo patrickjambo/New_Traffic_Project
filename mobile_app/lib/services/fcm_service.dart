@@ -4,6 +4,8 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter/material.dart';  // 🔥 ADD THIS LINE for Color class
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import '../config/server_config.dart';
+import 'emergency_alert_service.dart';
 
 /**
  * Firebase Cloud Messaging Service
@@ -109,16 +111,37 @@ class FCMService {
     });
   }
 
+  // Store auth token for API calls
+  String? _authToken;
+  
+  /// Set auth token for authenticated API calls
+  void setAuthToken(String token) {
+    _authToken = token;
+    print('🔐 FCM Service: Auth token set');
+    // Re-send FCM token with authentication if we have one
+    if (_fcmToken != null) {
+      _sendTokenToBackend(_fcmToken!);
+    }
+  }
+
   /// Send FCM token to backend for targeting
   Future<void> _sendTokenToBackend(String token) async {
     try {
-      // Backend URL - Update with your computer's IP address
-      // For Kigali testing, use your local network IP
-      const backendUrl = 'http://192.168.1.100:3000/api/fcm/register';  // UPDATE THIS!
+      // Use dynamic server URL from ServerConfig
+      final backendUrl = '${ServerConfig.baseApiUrl}/api/geofencing/fcm-token';
+      
+      final headers = {
+        'Content-Type': 'application/json',
+      };
+      
+      // Add auth token if available
+      if (_authToken != null) {
+        headers['Authorization'] = 'Bearer $_authToken';
+      }
       
       final response = await http.post(
         Uri.parse(backendUrl),
-        headers: {'Content-Type': 'application/json'},
+        headers: headers,
         body: jsonEncode({
           'fcmToken': token,
           'deviceType': 'mobile',
@@ -131,7 +154,7 @@ class FCMService {
       if (response.statusCode == 200) {
         print('✅ FCM token registered with backend (Kigali)');
       } else {
-        print('⚠️  Failed to register FCM token: ${response.statusCode}');
+        print('⚠️  Failed to register FCM token: ${response.statusCode} - ${response.body}');
       }
     } catch (e) {
       print('❌ Error sending FCM token to backend: $e');
@@ -208,8 +231,31 @@ class FCMService {
 
     // Determine priority based on message data
     final severity = message.data['severity'] ?? 'medium';
+    final isEmergency = message.data['isEmergency'] == 'true' || severity == 'critical';
     final priority = severity == 'critical' ? Priority.max : Priority.high;
     final importance = severity == 'critical' ? Importance.max : Importance.high;
+
+    // 🚨 TRIGGER EMERGENCY ALARM for critical/emergency notifications
+    if (isEmergency || severity == 'critical' || severity == 'high') {
+      print('🚨 FCM: Triggering emergency alarm for ${message.data['type']}');
+      
+      try {
+        final alertService = EmergencyAlertService();
+        alertService.showEmergencyAlert({
+          'title': notification.title ?? '🚨 EMERGENCY ALERT',
+          'message': notification.body ?? 'Emergency response required!',
+          'id': message.data['emergencyId'] ?? message.data['alertId'] ?? '',
+          'type': message.data['type'] ?? 'emergency',
+          'severity': severity,
+          'latitude': double.tryParse(message.data['latitude'] ?? '') ?? 0.0,
+          'longitude': double.tryParse(message.data['longitude'] ?? '') ?? 0.0,
+          'address': message.data['address'] ?? '',
+        });
+        print('✅ Emergency alarm triggered from FCM');
+      } catch (e) {
+        print('❌ Failed to trigger emergency alarm: $e');
+      }
+    }
 
     final androidDetails = AndroidNotificationDetails(
       'emergency_channel',

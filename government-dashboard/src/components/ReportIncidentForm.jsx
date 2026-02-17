@@ -89,8 +89,26 @@ function ReportIncidentForm(props) {
   };
 
   const handleUseMyLocation = () => {
+    // Check if we're on HTTPS or localhost (required for geolocation)
+    const isSecure = window.location.protocol === 'https:' || 
+                     window.location.hostname === 'localhost' || 
+                     window.location.hostname === '127.0.0.1';
+    
     if (!navigator.geolocation) {
-      toast.error('Geolocation is not supported by your browser');
+      toast.error('Geolocation is not supported by your browser. Please type your location manually.');
+      return;
+    }
+
+    if (!isSecure) {
+      // Show helpful message and set default Kigali location
+      toast('📍 Location access requires HTTPS. Using Kigali City Center as default - please type your specific location.', {
+        icon: 'ℹ️',
+        duration: 5000,
+      });
+      // Set default to Kigali City Center
+      setLatitude(-1.9536);
+      setLongitude(30.0606);
+      setLocation('Kigali City Center (please specify exact location)');
       return;
     }
 
@@ -108,8 +126,20 @@ function ReportIncidentForm(props) {
       },
       (error) => {
         console.error('Error getting location:', error);
-        toast.error('Unable to retrieve your location');
+        // Provide helpful fallback
+        toast('📍 Could not get your location. Please type your location manually or select from suggestions.', {
+          icon: 'ℹ️',
+          duration: 4000,
+        });
+        // Set default Kigali location
+        setLatitude(-1.9536);
+        setLongitude(30.0606);
         setLocationLoading(false);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 60000
       }
     );
   };

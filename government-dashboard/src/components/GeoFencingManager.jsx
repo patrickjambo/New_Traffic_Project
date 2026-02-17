@@ -1,7 +1,41 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import axios from '../config/axios';
 import { useWebSocket } from '../context/WebSocketContext';
+import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
+
+const CACHE_KEYS = {
+  OFFICERS: 'geofencing_officers_cache',
+  DISTRICTS: 'geofencing_districts_cache'
+};
+
+// Load cached data instantly
+const loadFromCache = (key) => {
+  try {
+    const cached = localStorage.getItem(key);
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      // Ensure we return an array
+      return Array.isArray(parsed) ? parsed : [];
+    }
+  } catch (e) {
+    console.error('Cache load error:', e);
+    // Clear corrupted cache
+    localStorage.removeItem(key);
+  }
+  return [];
+};
+
+// Save to cache
+const saveToCache = (key, data) => {
+  try {
+    if (Array.isArray(data)) {
+      localStorage.setItem(key, JSON.stringify(data));
+    }
+  } catch (e) {
+    console.error('Cache save error:', e);
+  }
+};
 
 /**
  * GeoFencing Management Component
@@ -12,12 +46,23 @@ import toast from 'react-hot-toast';
  * - Alert targeting
  */
 const GeoFencingManager = () => {
-  // State
-  const [districts, setDistricts] = useState([]);
-  const [officers, setOfficers] = useState([]);
+  // Auth context for district filtering
+  const { user } = useAuth();
+  const isDistrictAdmin = user?.role === 'district_admin';
+  const userDistrictId = user?.districtId;
+  
+  // State - initialize from cache for instant display (with safe fallbacks)
+  const [districts, setDistricts] = useState(() => {
+    try { return loadFromCache(CACHE_KEYS.DISTRICTS); } catch { return []; }
+  });
+  const [officers, setOfficers] = useState(() => {
+    try { return loadFromCache(CACHE_KEYS.OFFICERS); } catch { return []; }
+  });
+  const [recentAlerts, setRecentAlerts] = useState([]);
   const [selectedDistrict, setSelectedDistrict] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showAlertModal, setShowAlertModal] = useState(false);
+  const [, setTick] = useState(0); // Force re-render for time updates
   const [alertForm, setAlertForm] = useState({
     type: 'general',
     severity: 'medium',
@@ -30,12 +75,44 @@ const GeoFencingManager = () => {
 
   const { subscribe, isConnected } = useWebSocket();
 
+  // Filter districts for district admin (show only their district)
+  const filteredDistricts = useMemo(() => {
+    if (!isDistrictAdmin || !userDistrictId) return districts;
+    return districts.filter(d => d.id === userDistrictId);
+  }, [districts, isDistrictAdmin, userDistrictId]);
+
+  // Filter officers for district admin
+  const filteredOfficers = useMemo(() => {
+    if (!isDistrictAdmin || !userDistrictId) return officers;
+    return officers.filter(o => 
+      o.assigned_district_id === userDistrictId || 
+      o.current_district_id === userDistrictId
+    );
+  }, [officers, isDistrictAdmin, userDistrictId]);
+
+  // Refresh time display every second
+  useEffect(() => {
+    const interval = setInterval(() => setTick(t => t + 1), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Auto-select district for district admin
+  useEffect(() => {
+    if (isDistrictAdmin && userDistrictId && filteredDistricts.length > 0) {
+      const userDistrict = filteredDistricts.find(d => d.id === userDistrictId);
+      if (userDistrict && !selectedDistrict) {
+        setSelectedDistrict(userDistrict);
+      }
+    }
+  }, [isDistrictAdmin, userDistrictId, filteredDistricts, selectedDistrict]);
+
   // Fetch districts with stats
   const fetchDistricts = useCallback(async () => {
     try {
       const response = await axios.get('/api/geofencing/districts');
       if (response.data.success) {
         setDistricts(response.data.data);
+        saveToCache(CACHE_KEYS.DISTRICTS, response.data.data);
       }
     } catch (error) {
       console.error('Error fetching districts:', error);
@@ -48,6 +125,7 @@ const GeoFencingManager = () => {
       const response = await axios.get('/api/geofencing/officers');
       if (response.data.success) {
         setOfficers(response.data.data);
+        saveToCache(CACHE_KEYS.OFFICERS, response.data.data);
       }
     } catch (error) {
       console.error('Error fetching officers:', error);
@@ -57,16 +135,17 @@ const GeoFencingManager = () => {
   // Initial data load
   useEffect(() => {
     const loadData = async () => {
-      setLoading(true);
+      if (officers.length === 0) setLoading(true);
       await Promise.all([fetchDistricts(), fetchOfficers()]);
       setLoading(false);
     };
     loadData();
 
-    // Refresh every 30 seconds
+    // Refresh every 10 seconds for real-time feel
     const interval = setInterval(() => {
       fetchOfficers();
-    }, 30000);
+      fetchDistricts();
+    }, 10000);
 
     return () => clearInterval(interval);
   }, [fetchDistricts, fetchOfficers]);
@@ -75,16 +154,119 @@ const GeoFencingManager = () => {
   useEffect(() => {
     if (!isConnected) return;
 
-    const unsubscribe = subscribe('officer:location', (data) => {
-      setOfficers(prev => prev.map(officer => 
-        officer.user_id === data.officerId 
-          ? { ...officer, latitude: data.latitude, longitude: data.longitude, last_location_update: data.timestamp }
-          : officer
+    const unsubLocation = subscribe('officer:location', (data) => {
+      console.log('📍 GeoFencing: Officer location update:', data);
+      setOfficers(prev => {
+        const updated = prev.map(officer => 
+          officer.user_id === data.officerId 
+            ? { 
+                ...officer, 
+                latitude: data.latitude, 
+                longitude: data.longitude, 
+                last_location_update: data.timestamp || new Date().toISOString(),
+                duty_status: 'on_duty' // If sending location, they're on duty
+              }
+            : officer
+        );
+        saveToCache(CACHE_KEYS.OFFICERS, updated);
+        return updated;
+      });
+    });
+
+    // Subscribe to officer status changes
+    const unsubStatus = subscribe('officer:status_changed', (data) => {
+      console.log('👮 GeoFencing: Officer status change:', data);
+      setOfficers(prev => {
+        const updated = prev.map(officer => 
+          officer.user_id === data.officerId 
+            ? { ...officer, duty_status: data.isOnDuty ? 'on_duty' : 'off_duty', is_on_duty: data.isOnDuty }
+            : officer
+        );
+        saveToCache(CACHE_KEYS.OFFICERS, updated);
+        return updated;
+      });
+    });
+
+    // Subscribe to incident alerts (auto-dispatched from geo-fencing)
+    const unsubIncidentAlert = subscribe('incident:alert', (data) => {
+      console.log('📢 GeoFencing: New incident alert:', data);
+      toast.success(`📢 Incident Alert: ${data.type || 'New incident'} - ${data.targetedOfficers || 0} officers notified`, {
+        duration: 5000,
+        icon: '📢'
+      });
+      // Add to recent alerts feed
+      setRecentAlerts(prev => [{
+        id: data.alertId || Date.now(),
+        type: 'incident',
+        title: data.title || `${data.type} Alert`,
+        message: data.message || data.description,
+        location: data.location?.address || 'Unknown',
+        officers: data.targetedOfficers || 0,
+        timestamp: new Date().toISOString(),
+        isEmergency: false
+      }, ...prev].slice(0, 10)); // Keep last 10 alerts
+      // Refresh districts to update incident counts
+      fetchDistricts();
+    });
+
+    // Subscribe to emergency alarms (auto-dispatched from geo-fencing)
+    const unsubEmergencyAlarm = subscribe('emergency:alarm', (data) => {
+      console.log('🚨 GeoFencing: Emergency alarm:', data);
+      toast.error(`🚨 EMERGENCY: ${data.type || 'Critical'} at ${data.location?.address || 'Unknown'}`, {
+        duration: 8000,
+        icon: '🚨'
+      });
+      // Add to recent alerts feed
+      setRecentAlerts(prev => [{
+        id: data.alertId || Date.now(),
+        type: 'emergency',
+        title: data.title || `🚨 EMERGENCY: ${data.type}`,
+        message: data.message || data.description,
+        location: data.location?.address || 'Unknown',
+        officers: data.targetedOfficers || 0,
+        timestamp: new Date().toISOString(),
+        isEmergency: true
+      }, ...prev].slice(0, 10)); // Keep last 10 alerts
+      // Refresh districts to update incident counts
+      fetchDistricts();
+    });
+
+    // Subscribe to alert acknowledgments
+    const unsubAck = subscribe('alert:acknowledged', (data) => {
+      console.log('✅ GeoFencing: Alert acknowledged:', data);
+      toast.success(`Officer acknowledged alert`, {
+        duration: 3000,
+        icon: '✅'
+      });
+      // Update the alert in recent alerts
+      setRecentAlerts(prev => prev.map(alert => 
+        alert.id === data.alertId 
+          ? { ...alert, acknowledged: true, acknowledgedAt: data.timestamp }
+          : alert
       ));
     });
 
-    return unsubscribe;
-  }, [isConnected, subscribe]);
+    // Subscribe to new incidents/emergencies for district stats update
+    const unsubIncidentNew = subscribe('incident:new', () => {
+      console.log('📊 GeoFencing: New incident - refreshing stats');
+      fetchDistricts();
+    });
+
+    const unsubEmergencyNew = subscribe('emergency:new', () => {
+      console.log('📊 GeoFencing: New emergency - refreshing stats');
+      fetchDistricts();
+    });
+
+    return () => {
+      unsubLocation();
+      unsubStatus();
+      unsubIncidentAlert();
+      unsubEmergencyAlarm();
+      unsubAck();
+      unsubIncidentNew();
+      unsubEmergencyNew();
+    };
+  }, [isConnected, subscribe, fetchDistricts]);
 
   // Send targeted alert
   const sendAlert = async (isEmergency = false) => {
@@ -192,8 +374,8 @@ const GeoFencingManager = () => {
             <div>
               <p className="text-gray-400 text-sm">Officers Online</p>
               <p className="text-2xl font-bold text-white">
-                {officers.filter(o => o.duty_status === 'on_duty').length}
-                <span className="text-sm text-gray-400 ml-1">/ {officers.length}</span>
+                {filteredOfficers.filter(o => o.duty_status === 'on_duty').length}
+                <span className="text-sm text-gray-400 ml-1">/ {filteredOfficers.length}</span>
               </p>
             </div>
           </div>
@@ -207,7 +389,7 @@ const GeoFencingManager = () => {
             <div>
               <p className="text-gray-400 text-sm">With GPS</p>
               <p className="text-2xl font-bold text-white">
-                {officers.filter(o => o.latitude && o.longitude).length}
+                {filteredOfficers.filter(o => o.latitude && o.longitude).length}
               </p>
             </div>
           </div>
@@ -221,24 +403,65 @@ const GeoFencingManager = () => {
             <div>
               <p className="text-gray-400 text-sm">Responding</p>
               <p className="text-2xl font-bold text-white">
-                {officers.filter(o => o.duty_status === 'responding').length}
+                {filteredOfficers.filter(o => o.duty_status === 'responding').length}
               </p>
             </div>
           </div>
         </div>
       </div>
 
+      {/* Recent Alerts Feed */}
+      {recentAlerts.length > 0 && (
+        <div className="bg-gray-800/50 backdrop-blur rounded-xl border border-gray-700 overflow-hidden">
+          <div className="p-4 border-b border-gray-700 flex items-center justify-between">
+            <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+              <span className="animate-pulse">🔔</span> Live Alert Feed
+            </h3>
+            <span className="text-xs text-gray-400">Last {recentAlerts.length} alerts</span>
+          </div>
+          <div className="divide-y divide-gray-700 max-h-64 overflow-y-auto">
+            {recentAlerts.map((alert) => (
+              <div 
+                key={alert.id} 
+                className={`p-3 flex items-start gap-3 ${alert.isEmergency ? 'bg-red-900/20' : ''}`}
+              >
+                <span className={`text-xl ${alert.isEmergency ? 'animate-pulse' : ''}`}>
+                  {alert.isEmergency ? '🚨' : '📢'}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <p className={`font-medium truncate ${alert.isEmergency ? 'text-red-400' : 'text-white'}`}>
+                      {alert.title}
+                    </p>
+                    {alert.acknowledged && (
+                      <span className="text-xs text-green-400">✅ Acknowledged</span>
+                    )}
+                  </div>
+                  <p className="text-sm text-gray-400 truncate">{alert.location}</p>
+                  <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
+                    <span>👮 {alert.officers} officers</span>
+                    <span>🕐 {timeAgo(alert.timestamp)}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Districts Grid */}
       <div className="bg-gray-800/50 backdrop-blur rounded-xl border border-gray-700 overflow-hidden">
         <div className="p-4 border-b border-gray-700">
-          <h3 className="text-lg font-semibold text-white">Kigali Districts</h3>
+          <h3 className="text-lg font-semibold text-white">
+            {isDistrictAdmin ? `${user?.districtName || 'Your'} District` : 'Kigali Districts'}
+          </h3>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4">
-          {districts.map((district) => (
+        <div className={`grid grid-cols-1 ${isDistrictAdmin ? '' : 'md:grid-cols-3'} gap-4 p-4`}>
+          {filteredDistricts.map((district) => (
             <div
               key={district.id}
-              onClick={() => setSelectedDistrict(district)}
-              className={`p-4 rounded-lg border cursor-pointer transition-all ${
+              onClick={() => !isDistrictAdmin && setSelectedDistrict(district)}
+              className={`p-4 rounded-lg border ${isDistrictAdmin ? 'cursor-default' : 'cursor-pointer'} transition-all ${
                 selectedDistrict?.id === district.id
                   ? 'bg-blue-600/20 border-blue-500'
                   : 'bg-gray-700/50 border-gray-600 hover:border-gray-500'
@@ -271,9 +494,13 @@ const GeoFencingManager = () => {
       <div className="bg-gray-800/50 backdrop-blur rounded-xl border border-gray-700 overflow-hidden">
         <div className="p-4 border-b border-gray-700 flex items-center justify-between">
           <h3 className="text-lg font-semibold text-white">
-            Officers {selectedDistrict ? `in ${selectedDistrict.name}` : '(All Districts)'}
+            Officers {isDistrictAdmin 
+              ? `(${user?.districtName || 'Your District'})` 
+              : selectedDistrict 
+                ? `in ${selectedDistrict.name}` 
+                : '(All Districts)'}
           </h3>
-          {selectedDistrict && (
+          {selectedDistrict && !isDistrictAdmin && (
             <button
               onClick={() => setSelectedDistrict(null)}
               className="text-sm text-blue-400 hover:text-blue-300"
@@ -295,7 +522,7 @@ const GeoFencingManager = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-700">
-              {officers
+              {filteredOfficers
                 .filter(o => !selectedDistrict || o.assigned_district_id === selectedDistrict.id)
                 .map((officer) => (
                   <tr key={officer.id} className="hover:bg-gray-700/30">
@@ -331,9 +558,9 @@ const GeoFencingManager = () => {
                 ))}
             </tbody>
           </table>
-          {officers.length === 0 && (
+          {filteredOfficers.length === 0 && (
             <div className="text-center py-8 text-gray-400">
-              No officers found
+              No officers found {isDistrictAdmin ? 'in your district' : ''}
             </div>
           )}
         </div>

@@ -56,7 +56,7 @@ const SimpleIncidentMap = ({ incidents }) => {
                       )}
                       <div className="flex items-center gap-2 mt-2">
                         <span className="text-xs text-gray-400">
-                          {incident.latitude?.toFixed(4)}, {incident.longitude?.toFixed(4)}
+                          {parseFloat(incident.latitude)?.toFixed(4)}, {parseFloat(incident.longitude)?.toFixed(4)}
                         </span>
                       </div>
                     </div>

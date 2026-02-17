@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/settings_service.dart';
+import '../main.dart' show appState;
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -12,7 +13,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final SettingsService _settingsService = SettingsService();
   
   bool _notificationsEnabled = true;
-  bool _darkModeEnabled = false;
   bool _locationEnabled = true;
   bool _isLoading = true;
 
@@ -24,12 +24,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _loadSettings() async {
     final notifications = await _settingsService.getNotificationsEnabled();
-    final darkMode = await _settingsService.getDarkModeEnabled();
     final location = await _settingsService.getLocationEnabled();
     
     setState(() {
       _notificationsEnabled = notifications;
-      _darkModeEnabled = darkMode;
       _locationEnabled = location;
       _isLoading = false;
     });
@@ -40,15 +38,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() => _notificationsEnabled = value);
   }
 
-  Future<void> _updateDarkMode(bool value) async {
-    await _settingsService.setDarkModeEnabled(value);
-    setState(() => _darkModeEnabled = value);
+  /// INSTANT theme switching - no restart needed!
+  void _toggleDarkMode(bool value) {
+    // This instantly updates the entire app theme
+    appState.theme.toggleDarkMode(value);
+    setState(() {}); // Rebuild this screen to reflect switch state
     
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('🌙 Dark mode will be applied on app restart'),
-          duration: Duration(seconds: 2),
+        SnackBar(
+          content: Row(
+            children: [
+              Icon(
+                value ? Icons.dark_mode : Icons.light_mode,
+                color: Colors.white,
+              ),
+              const SizedBox(width: 8),
+              Text(value ? '🌙 Dark mode enabled' : '☀️ Light mode enabled'),
+            ],
+          ),
+          duration: const Duration(seconds: 1),
+          behavior: SnackBarBehavior.floating,
         ),
       );
     }
@@ -67,54 +77,80 @@ class _SettingsScreenState extends State<SettingsScreen> {
       );
     }
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Settings'),
-      ),
-      body: ListView(
-        children: [
-          _buildSectionHeader('General'),
-          SwitchListTile(
-            title: const Text('Push Notifications'),
-            subtitle: const Text('Receive alerts about nearby incidents'),
-            value: _notificationsEnabled,
-            onChanged: _updateNotifications,
+    // Listen to theme changes for instant UI updates
+    return ListenableBuilder(
+      listenable: appState.theme,
+      builder: (context, _) {
+        return Scaffold(
+          appBar: AppBar(
+            title: const Text('Settings'),
           ),
-          SwitchListTile(
-            title: const Text('Dark Mode'),
-            subtitle: const Text('Use dark theme (requires restart)'),
-            value: _darkModeEnabled,
-            onChanged: _updateDarkMode,
+          body: ListView(
+            children: [
+              _buildSectionHeader('Appearance'),
+              SwitchListTile(
+                title: const Text('Dark Mode'),
+                subtitle: const Text('Switch theme instantly ✨'),
+                value: appState.theme.isDarkMode,
+                onChanged: _toggleDarkMode,
+                secondary: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 300),
+                  transitionBuilder: (child, animation) {
+                    return RotationTransition(
+                      turns: animation,
+                      child: ScaleTransition(scale: animation, child: child),
+                    );
+                  },
+                  child: Icon(
+                    appState.theme.isDarkMode ? Icons.dark_mode : Icons.light_mode,
+                    key: ValueKey(appState.theme.isDarkMode),
+                    color: appState.theme.isDarkMode ? Colors.amber : Colors.orange,
+                  ),
+                ),
+              ),
+              
+              _buildSectionHeader('Notifications'),
+              SwitchListTile(
+                title: const Text('Push Notifications'),
+                subtitle: const Text('Receive alerts about nearby incidents'),
+                value: _notificationsEnabled,
+                onChanged: _updateNotifications,
+                secondary: const Icon(Icons.notifications_outlined),
+              ),
+              
+              _buildSectionHeader('Privacy & Location'),
+              SwitchListTile(
+                title: const Text('Location Services'),
+                subtitle: const Text('Allow app to access your location'),
+                value: _locationEnabled,
+                onChanged: _updateLocation,
+                secondary: const Icon(Icons.location_on_outlined),
+              ),
+              
+              _buildSectionHeader('Account'),
+              ListTile(
+                leading: const Icon(Icons.lock_outline),
+                title: const Text('Change Password'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Feature coming soon')),
+                  );
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.delete_outline, color: Colors.red),
+                title: const Text('Delete Account'),
+                textColor: Colors.red,
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () {
+                  _showDeleteAccountDialog();
+                },
+              ),
+            ],
           ),
-          
-          _buildSectionHeader('Privacy & Location'),
-          SwitchListTile(
-            title: const Text('Location Services'),
-            subtitle: const Text('Allow app to access your location'),
-            value: _locationEnabled,
-            onChanged: _updateLocation,
-          ),
-          
-          _buildSectionHeader('Account'),
-          ListTile(
-            title: const Text('Change Password'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Feature coming soon')),
-              );
-            },
-          ),
-          ListTile(
-            title: const Text('Delete Account'),
-            textColor: Colors.red,
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () {
-              _showDeleteAccountDialog();
-            },
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 

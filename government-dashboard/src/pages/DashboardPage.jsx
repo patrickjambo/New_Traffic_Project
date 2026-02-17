@@ -12,14 +12,20 @@ import {
   ChevronRight,
   Wifi,
   WifiOff,
-  Download
+  Download,
+  Building2
 } from 'lucide-react';
 
 const DashboardPage = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { incidents, emergencies, statistics, loading, isConnected: dataConnected, downloadEmergencyReport } = useData();
+  const { incidents, emergencies, deployments: realDeployments, statistics, loading, isConnected: dataConnected, downloadEmergencyReport } = useData();
   const { isConnected: wsConnected, connectionStatus } = useWebSocket();
+  
+  // Check if user is district admin
+  const isDistrictAdmin = user?.role === 'district_admin';
+  const userDistrictId = user?.districtId;
+  const userDistrictName = user?.districtName;
 
   // Calculate real-time stats from actual data
   const realTimeStats = useMemo(() => {
@@ -129,19 +135,70 @@ const DashboardPage = () => {
     }
   ];
 
-  const regions = [
-    { name: 'Kigali City', load: 67, incidents: incidents.filter(i => i.location?.toLowerCase().includes('kigali')).length || 0, officers: 89, color: 'bg-blue-500' },
-    { name: 'Northern Province', load: 45, incidents: 0, officers: 45, color: 'bg-purple-500' },
-    { name: 'Southern Province', load: 38, incidents: 0, officers: 52, color: 'bg-indigo-500' },
-    { name: 'Eastern Province', load: 52, incidents: 0, officers: 61, color: 'bg-cyan-500' },
-    { name: 'Western Province', load: 41, incidents: 0, officers: 48, color: 'bg-teal-500' },
-  ];
+  // District mapping for Kigali
+  const kigaliDistricts = {
+    1: { name: 'Nyarugenge', color: 'bg-blue-500' },
+    2: { name: 'Gasabo', color: 'bg-green-500' },
+    3: { name: 'Kicukiro', color: 'bg-purple-500' },
+  };
 
-  const deployments = [
-    { name: 'Unit Alpha', location: 'Kigali CBD', officers: 12, time: '3h 20m', status: 'Active', statusColor: 'bg-green-500/20 text-green-400' },
-    { name: 'Unit Bravo', location: 'Nyabugogo', officers: 8, time: '2h 45m', status: 'Active', statusColor: 'bg-green-500/20 text-green-400' },
-    { name: 'Unit Charlie', location: 'Remera', officers: 6, time: '1h 15m', status: 'Standby', statusColor: 'bg-yellow-500/20 text-yellow-400' },
-  ];
+  // Regions - show only user's district for district admins, all regions for super admin
+  const regions = useMemo(() => {
+    if (isDistrictAdmin && userDistrictId) {
+      // District admin sees only their district
+      const district = kigaliDistricts[userDistrictId] || { name: userDistrictName, color: 'bg-blue-500' };
+      const districtIncidents = incidents.length;
+      // Count officers - handle both array and number formats
+      const officerCount = realDeployments.reduce((sum, d) => {
+        const officers = d.officers;
+        if (Array.isArray(officers)) {
+          return sum + officers.length;
+        }
+        return sum + (d.officer_count || officers || 0);
+      }, 0);
+      return [
+        { 
+          name: district.name + ' District', 
+          load: Math.min(100, Math.round((districtIncidents / 10) * 100)), 
+          incidents: districtIncidents, 
+          officers: officerCount,
+          color: district.color 
+        }
+      ];
+    }
+    
+    // Super admin sees all regions
+    return [
+      { name: 'Kigali City', load: 67, incidents: incidents.filter(i => i.location?.toLowerCase().includes('kigali')).length || 0, officers: 89, color: 'bg-blue-500' },
+      { name: 'Northern Province', load: 45, incidents: 0, officers: 45, color: 'bg-purple-500' },
+      { name: 'Southern Province', load: 38, incidents: 0, officers: 52, color: 'bg-indigo-500' },
+      { name: 'Eastern Province', load: 52, incidents: 0, officers: 61, color: 'bg-cyan-500' },
+      { name: 'Western Province', load: 41, incidents: 0, officers: 48, color: 'bg-teal-500' },
+    ];
+  }, [isDistrictAdmin, userDistrictId, userDistrictName, incidents, realDeployments]);
+
+  // Use real deployments from DataContext (already filtered for district admins)
+  const deployments = useMemo(() => {
+    if (realDeployments && realDeployments.length > 0) {
+      return realDeployments.map(d => ({
+        name: d.title || d.name || d.unit_name || `Deployment #${d.id}`,
+        location: d.location || d.area || d.address || 'Unknown',
+        officers: Array.isArray(d.officers) ? d.officers.length : (d.officer_count || d.officers || 0),
+        time: formatTimeAgo(d.created_at),
+        status: d.status === 'Active' || d.status === 'active' ? 'Active' : 
+                d.status === 'Completed' || d.status === 'completed' ? 'Completed' : 'Standby',
+        statusColor: d.status === 'Active' || d.status === 'active' ? 'bg-green-500/20 text-green-400' : 
+                     d.status === 'Completed' || d.status === 'completed' ? 'bg-gray-500/20 text-gray-400' : 
+                     'bg-yellow-500/20 text-yellow-400'
+      }));
+    }
+    // Fallback to default if no deployments
+    return [
+      { name: 'Unit Alpha', location: 'Kigali CBD', officers: 12, time: '3h 20m', status: 'Active', statusColor: 'bg-green-500/20 text-green-400' },
+      { name: 'Unit Bravo', location: 'Nyabugogo', officers: 8, time: '2h 45m', status: 'Active', statusColor: 'bg-green-500/20 text-green-400' },
+      { name: 'Unit Charlie', location: 'Remera', officers: 6, time: '1h 15m', status: 'Standby', statusColor: 'bg-yellow-500/20 text-yellow-400' },
+    ];
+  }, [realDeployments]);
 
   return (
     <div className="p-6 relative z-10">
@@ -150,6 +207,20 @@ const DashboardPage = () => {
         <img src="/rnp-logo.png" className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] object-contain" alt="" />
       </div>
 
+      {/* District Admin Banner */}
+      {isDistrictAdmin && (
+        <div className="mb-6 bg-gradient-to-r from-blue-600/20 to-purple-600/20 border border-blue-500/30 rounded-2xl p-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-blue-500 rounded-lg">
+              <Building2 className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h1 className="text-xl font-bold text-white">{userDistrictName} District Dashboard</h1>
+              <p className="text-sm text-gray-400">Managing traffic operations for {userDistrictName} district only</p>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Real-time Connection Indicator */}
       <div className="mb-4 flex items-center gap-2">
         <div className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-green-500 animate-pulse' : 'bg-yellow-500'}`}></div>
@@ -267,18 +338,22 @@ const DashboardPage = () => {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
         {/* Regional Overview */}
-        <div className="lg:col-span-2 bg-slate-800/50 backdrop-blur-md border border-white/5 rounded-2xl p-6">
+        <div className={`${isDistrictAdmin ? 'lg:col-span-1' : 'lg:col-span-2'} bg-slate-800/50 backdrop-blur-md border border-white/5 rounded-2xl p-6`}>
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-2">
               <MapPin className="w-5 h-5 text-blue-400" />
-              <h2 className="text-lg font-bold text-white">Regional Overview</h2>
+              <h2 className="text-lg font-bold text-white">
+                {isDistrictAdmin ? `${userDistrictName} Overview` : 'Regional Overview'}
+              </h2>
             </div>
-            <button className="text-sm text-blue-400 hover:text-blue-300 flex items-center gap-1">
-              View All <ChevronRight className="w-4 h-4" />
-            </button>
+            {!isDistrictAdmin && (
+              <button className="text-sm text-blue-400 hover:text-blue-300 flex items-center gap-1">
+                View All <ChevronRight className="w-4 h-4" />
+              </button>
+            )}
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className={`grid ${isDistrictAdmin ? 'grid-cols-1' : 'grid-cols-1 md:grid-cols-2'} gap-6`}>
             {regions.map((region, idx) => (
               <div key={idx} className="bg-slate-900/50 rounded-xl p-4 border border-white/5">
                 <div className="flex justify-between items-center mb-3">
@@ -301,17 +376,19 @@ const DashboardPage = () => {
         </div>
 
         {/* Active Deployments */}
-        <div className="bg-slate-800/50 backdrop-blur-md border border-white/5 rounded-2xl p-6">
+        <div className={`${isDistrictAdmin ? 'lg:col-span-2' : ''} bg-slate-800/50 backdrop-blur-md border border-white/5 rounded-2xl p-6`}>
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-2">
               <Shield className="w-5 h-5 text-green-400" />
-              <h2 className="text-lg font-bold text-white">Active Deployments</h2>
+              <h2 className="text-lg font-bold text-white">
+                {isDistrictAdmin ? `${userDistrictName} Deployments` : 'Active Deployments'}
+              </h2>
             </div>
           </div>
 
           <div className="max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
-            <div className="space-y-4">
-              {deployments.map((dept, idx) => (
+            <div className={`${isDistrictAdmin ? 'grid grid-cols-1 md:grid-cols-2 gap-4' : 'space-y-4'}`}>
+              {deployments.length > 0 ? deployments.map((dept, idx) => (
                 <div key={idx} className="bg-slate-900/50 p-4 rounded-xl border border-white/5">
                   <div className="flex justify-between items-start mb-2">
                     <div>
@@ -329,7 +406,12 @@ const DashboardPage = () => {
                     </span>
                   </div>
                 </div>
-              ))}
+              )) : (
+                <div className="text-center text-gray-500 py-8">
+                  <Shield className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                  <p>No active deployments {isDistrictAdmin ? `in ${userDistrictName}` : ''}</p>
+                </div>
+              )}
             </div>
           </div>
 

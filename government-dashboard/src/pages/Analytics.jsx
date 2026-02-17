@@ -55,7 +55,8 @@ const Analytics = () => {
     }
   };
 
-  if (!isAuthenticated || user?.role !== 'admin') {
+  // Allow both admin and district_admin roles
+  if (!isAuthenticated || (user?.role !== 'admin' && user?.role !== 'district_admin')) {
     return <Navigate to="/login" />;
   }
 

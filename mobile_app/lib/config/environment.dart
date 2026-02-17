@@ -1,3 +1,5 @@
+import 'server_config.dart';
+
 enum Environment {
   development,
   staging,
@@ -13,13 +15,12 @@ class EnvironmentConfig {
     _currentEnvironment = env;
   }
   
-  /// Base API URL
+  /// Base API URL - Uses dynamic ServerConfig in development
   static String get baseApiUrl {
     switch (_currentEnvironment) {
       case Environment.development:
-        // 🔥 UPDATED: Using your computer's IP for mobile device
-        // Computer IP: 192.168.31.115
-        return 'http://192.168.31.115:3000';
+        // 🔥 DYNAMIC: Uses ServerConfig which persists user's IP setting
+        return ServerConfig.baseApiUrl;
       case Environment.staging:
         return 'https://staging.trafficguard.ai';
       case Environment.production:
@@ -27,12 +28,12 @@ class EnvironmentConfig {
     }
   }
   
-  /// AI Service URL
+  /// AI Service URL - Uses dynamic ServerConfig in development
   static String get aiServiceUrl {
     switch (_currentEnvironment) {
       case Environment.development:
-        // 🔥 UPDATED: Using your computer's IP for mobile device
-        return 'http://192.168.31.115:8000';
+        // 🔥 DYNAMIC: Uses ServerConfig which persists user's IP setting
+        return ServerConfig.aiServiceUrl;
       case Environment.staging:
         return 'https://staging-ai.trafficguard.ai';
       case Environment.production:
@@ -40,12 +41,12 @@ class EnvironmentConfig {
     }
   }
   
-  /// WebSocket URL
+  /// WebSocket URL - Uses dynamic ServerConfig in development
   static String get webSocketUrl {
     switch (_currentEnvironment) {
       case Environment.development:
-        // 🔥 UPDATED: Using your computer's IP for mobile device
-        return 'http://192.168.31.115:3000';
+        // 🔥 DYNAMIC: Uses ServerConfig which persists user's IP setting
+        return ServerConfig.webSocketUrl;
       case Environment.staging:
         return 'https://staging.trafficguard.ai';
       case Environment.production:

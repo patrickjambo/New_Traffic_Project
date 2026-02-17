@@ -30,7 +30,7 @@ class FastUploadService {
   // Configuration
   static const int maxConcurrentUploads = 3;
   static const int maxRetries = 3;
-  static const Duration uploadTimeout = Duration(seconds: 30);
+  static const Duration uploadTimeout = Duration(seconds: 60);  // Increased to 60s
   
   // Statistics
   int totalQueued = 0;

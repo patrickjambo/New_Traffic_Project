@@ -9,7 +9,7 @@
       "client_info": {
         "mobilesdk_app_id": "1:967349560399:android:5d120ee2f0977daeb0f63a",
         "android_client_info": {
-          "package_name": "ai.trafficguard.trafficguard_mobile"
+          "package_name": "com.example.trafficguard_mobile"
         }
       },
       "oauth_client": [],

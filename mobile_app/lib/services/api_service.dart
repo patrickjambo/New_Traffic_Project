@@ -154,4 +154,32 @@ class ApiService {
       onSendProgress: onProgress,
     );
   }
+
+  /// Update officer's current location (for background tracking)
+  Future<Map<String, dynamic>> updateOfficerLocation({
+    required double latitude,
+    required double longitude,
+    String? address,
+  }) async {
+    try {
+      final response = await _dio.post(
+        '/api/police/location',
+        data: {
+          'latitude': latitude,
+          'longitude': longitude,
+          'address': address,
+        },
+      );
+      return {'success': true, 'data': response.data};
+    } on DioException catch (e) {
+      developer.log('Officer location update error: ${e.message}', name: 'API');
+      return {
+        'success': false,
+        'message': e.response?.data?['message'] ?? 'Failed to update location',
+      };
+    } catch (e) {
+      developer.log('Officer location update error: $e', name: 'API');
+      return {'success': false, 'message': 'Network error'};
+    }
+  }
 }

@@ -7,7 +7,7 @@ class AppConfig {
   static String get aiServiceUrl => EnvironmentConfig.aiServiceUrl;
   
   // Google Maps API Key
-  static const String googleMapsApiKey = 'YOUR_GOOGLE_MAPS_API_KEY_HERE';
+  static const String googleMapsApiKey = 'AIzaSyDF_uxx281M_FLL27eBa-JosIUPCxc8NMI';
   
   // App Configuration
   static const String appName = 'TrafficGuard AI';

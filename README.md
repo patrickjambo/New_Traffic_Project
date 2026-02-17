@@ -158,3 +158,58 @@ TrafficGuard AI - Smart Traffic Management for Kigali
 ## 📞 Support
 
 For support, email support@trafficguard.ai or open an issue.
+
+---
+
+## 🚀 Lightweight Local Setup (No Docker!)
+
+### Quick Start
+
+```bash
+# Start all services
+./start_local.sh
+
+# Check status  
+./status.sh
+
+# Stop all services
+./stop_local.sh
+```
+
+### Service Ports
+
+| Service | Port | URL |
+|---------|------|-----|
+| PostgreSQL | 5432 | localhost |
+| Backend API | 3000 | http://localhost:3000 |
+| AI Service | 8000 | http://localhost:8000 |
+| Dashboard | 5176 | http://localhost:5176 |
+
+### Manual Setup
+
+**Backend:**
+```bash
+cd backend && npm install && npm run dev
+```
+
+**AI Service:**
+```bash
+cd ai_service
+python3 -m venv venv && source venv/bin/activate
+pip install -r requirements-light.txt
+uvicorn main_light:app --port 8000 --reload
+```
+
+**Frontend:**
+```bash
+cd government-dashboard && npm install && npm run dev
+```
+
+### Database Setup
+
+```bash
+sudo systemctl start postgresql
+sudo -u postgres psql -c "CREATE USER trafficguard_user WITH PASSWORD 'trafficguard_pass_123';"
+sudo -u postgres psql -c "CREATE DATABASE trafficguard OWNER trafficguard_user;"
+sudo -u postgres psql -d trafficguard -f database/schema.pgsql
+```

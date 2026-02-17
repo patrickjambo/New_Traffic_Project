@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
+import '../config/server_config.dart';
+import '../components/server_settings_dialog.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -53,6 +55,28 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        actions: [
+          // ⚙️ Server Settings Button
+          IconButton(
+            icon: const Icon(Icons.settings, color: Colors.grey),
+            tooltip: 'Server Settings',
+            onPressed: () async {
+              final result = await ServerSettingsDialog.show(context);
+              if (result == true && mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Server IP updated to: ${ServerConfig.serverIp}'),
+                    backgroundColor: Colors.green,
+                  ),
+                );
+              }
+            },
+          ),
+        ],
+      ),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
@@ -61,7 +85,7 @@ class _LoginScreenState extends State<LoginScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const SizedBox(height: 48),
+                const SizedBox(height: 24),
                 Icon(
                   Icons.traffic,
                   size: 80,

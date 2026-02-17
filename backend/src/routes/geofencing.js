@@ -120,9 +120,11 @@ router.post('/alert', authenticate, authorize(['admin', 'police']), async (req, 
             address,
             description,
             isEmergency,
-            mediaUrls
+            mediaUrls,
+            radiusKm
         } = req.body;
 
+        // Validate required fields
         if (!latitude || !longitude) {
             return res.status(400).json({
                 success: false,
@@ -130,14 +132,51 @@ router.post('/alert', authenticate, authorize(['admin', 'police']), async (req, 
             });
         }
 
+        // Validate coordinate ranges
+        const lat = parseFloat(latitude);
+        const lng = parseFloat(longitude);
+        if (isNaN(lat) || isNaN(lng)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid coordinate values'
+            });
+        }
+        if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+            return res.status(400).json({
+                success: false,
+                message: 'Coordinates out of valid range (lat: -90 to 90, lng: -180 to 180)'
+            });
+        }
+
+        // Validate radius if provided
+        if (radiusKm !== undefined && (parseFloat(radiusKm) < 0 || isNaN(parseFloat(radiusKm)))) {
+            return res.status(400).json({
+                success: false,
+                message: 'Radius must be a positive number'
+            });
+        }
+
+        // Validate description length (max 5000 chars to prevent abuse)
+        if (description && description.length > 5000) {
+            return res.status(400).json({
+                success: false,
+                message: 'Description too long (max 5000 characters)'
+            });
+        }
+
+        // Sanitize description - remove potential SQL/XSS but allow unicode
+        const sanitizedDescription = description 
+            ? description.substring(0, 5000).replace(/[<>]/g, '')
+            : '';
+
         const result = await geoFencingService.createTargetedAlert({
             id: incidentId,
             type: type || 'general',
             severity: severity || 'medium',
-            latitude,
-            longitude,
+            latitude: lat,
+            longitude: lng,
             address,
-            description,
+            description: sanitizedDescription,
             media_urls: mediaUrls,
             reported_by: req.user.id
         }, isEmergency || false, {

@@ -39,6 +39,7 @@ const upload = multer({
 /**
  * POST /api/detect
  * Receive video from mobile app and analyze for incidents
+ * OPTIMIZED: Accepts upload immediately, processes async
  */
 router.post('/detect', upload.single('video'), async (req, res) => {
     try {
@@ -56,81 +57,21 @@ router.post('/detect', upload.single('video'), async (req, res) => {
         console.log(`   Size: ${(req.file.size / 1024 / 1024).toFixed(2)} MB`);
         console.log(`   Saved as: ${videoPath}`);
 
-        // Send to AI service for analysis
-        const aiServiceUrl = process.env.AI_SERVICE_URL || 'http://localhost:8000';
+        // Return success immediately - process async
+        res.json({
+            success: true,
+            status: 'queued',
+            message: 'Video uploaded successfully, processing in background',
+            videoId: videoId
+        });
 
-        try {
-            // Forward video to Python AI service
-            const formData = new FormData();
-            const fileBuffer = await fs.readFile(videoPath);
-            const blob = new Blob([fileBuffer], { type: 'video/mp4' });
-            formData.append('video', blob, req.file.originalname);
-            formData.append('test_mode', 'true');
-
-            console.log(`🤖 Sending to AI service: ${aiServiceUrl}/ai/analyze-traffic`);
-
-            const aiResponse = await axios.post(`${aiServiceUrl}/ai/analyze-traffic`, formData, {
-                headers: {
-                    'Content-Type': 'multipart/form-data'
-                },
-                timeout: 120000 // 2 minute timeout
-            });
-
-            const incidents = aiResponse.data.incidents || [];
-
-            console.log(`✅ AI analysis complete: ${incidents.length} detection(s)`);
-
-            // Store incidents in database and emit via socketManager
-            if (incidents.length > 0) {
-                const storedIncidents = await storeIncidents(incidents, videoId, videoPath);
-
-                // Send real-time notifications via socketManager for each incident
-                for (const incident of storedIncidents) {
-                    socketManager.emitIncidentNew({
-                        id: incident.id,
-                        type: incident.type,
-                        severity: incident.severity || 'medium',
-                        location: {
-                            latitude: incident.location_lat,
-                            longitude: incident.location_lng,
-                        },
-                        address: incident.description,
-                        description: incident.description,
-                        status: 'pending',
-                        source: 'ai', // Mark as AI-detected
-                        created_at: incident.created_at,
-                    });
-                }
-
-                console.log(`📢 Notifications sent for ${storedIncidents.length} AI-detected incidents`);
-            }
-
-            return res.json({
-                success: true,
-                status: incidents.length > 0 ? 'incident_detected' : 'no_incident',
-                count: incidents.length,
-                incidents: incidents,
-                videoId: videoId,
-                message: incidents.length > 0
-                    ? `${incidents.length} incident(s) detected`
-                    : 'No incidents detected'
-            });
-
-        } catch (aiError) {
-            console.error('❌ AI service error:', aiError.message);
-
-            // Fallback: Return success but note AI service unavailable
-            return res.json({
-                success: true,
-                status: 'ai_unavailable',
-                message: 'Video uploaded but AI analysis is currently unavailable',
-                videoId: videoId,
-                error: aiError.message
-            });
-        }
+        // Process video asynchronously (don't await)
+        processVideoAsync(videoPath, videoId, req.file.originalname).catch(err => {
+            console.error(`❌ Async processing error for ${videoId}:`, err.message);
+        });
 
     } catch (error) {
-        console.error('❌ Error processing video:', error);
+        console.error('❌ Error receiving video:', error);
 
         // Clean up uploaded file on error
         if (req.file) {
@@ -141,6 +82,95 @@ router.post('/detect', upload.single('video'), async (req, res) => {
             }
         }
 
+        return res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+/**
+ * Async video processing function
+ */
+async function processVideoAsync(videoPath, videoId, originalName) {
+    const aiServiceUrl = process.env.AI_SERVICE_URL || 'http://localhost:8000';
+    
+    try {
+        // Forward video to Python AI service
+        const formData = new FormData();
+        const fileBuffer = await fs.readFile(videoPath);
+        const blob = new Blob([fileBuffer], { type: 'video/mp4' });
+        formData.append('video', blob, originalName);
+        formData.append('test_mode', 'true');
+
+        console.log(`🤖 [${videoId}] Sending to AI service...`);
+
+        const aiResponse = await axios.post(`${aiServiceUrl}/ai/analyze-traffic`, formData, {
+            headers: {
+                'Content-Type': 'multipart/form-data'
+            },
+            timeout: 180000 // 3 minute timeout
+        });
+
+        const incidents = aiResponse.data.incidents || [];
+        console.log(`✅ [${videoId}] AI analysis complete: ${incidents.length} detection(s)`);
+
+        // Store incidents in database and emit via socketManager
+        if (incidents.length > 0) {
+            const storedIncidents = await storeIncidents(incidents, videoId, videoPath);
+
+            // Send real-time notifications via socketManager for each incident
+            for (const incident of storedIncidents) {
+                socketManager.emitIncidentNew({
+                    id: incident.id,
+                    type: incident.type,
+                    severity: incident.severity || 'medium',
+                    location: {
+                        latitude: incident.location_lat,
+                        longitude: incident.location_lng,
+                    },
+                    address: incident.description,
+                    description: incident.description,
+                    status: 'pending',
+                    source: 'ai',
+                    created_at: incident.created_at,
+                });
+            }
+            console.log(`📢 [${videoId}] Notifications sent for ${storedIncidents.length} incidents`);
+        }
+
+    } catch (aiError) {
+        console.error(`❌ [${videoId}] AI service error:`, aiError.message);
+    }
+}
+
+/**
+ * POST /api/detect/quick
+ * Ultra-fast upload endpoint - just stores video, no AI processing
+ */
+router.post('/detect/quick', upload.single('video'), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({
+                success: false,
+                error: 'No video file provided'
+            });
+        }
+
+        const videoId = path.basename(req.file.path, path.extname(req.file.path));
+        
+        console.log(`⚡ Quick upload: ${req.file.originalname} (${(req.file.size / 1024 / 1024).toFixed(2)} MB)`);
+
+        // Return success immediately
+        res.json({
+            success: true,
+            status: 'uploaded',
+            message: 'Video uploaded successfully',
+            videoId: videoId
+        });
+
+    } catch (error) {
+        console.error('❌ Quick upload error:', error);
         return res.status(500).json({
             success: false,
             error: error.message

@@ -29,6 +29,7 @@ const authenticate = (req, res, next) => {
 
 /**
  * Middleware to check user role
+ * district_admin is treated as admin for authorization purposes but with district filtering
  */
 const authorize = (...roles) => {
     // Flatten array if passed as authorize(['admin', 'police'])
@@ -42,7 +43,10 @@ const authorize = (...roles) => {
             });
         }
 
-        if (!allowedRoles.includes(req.user.role)) {
+        // district_admin has same access as admin but filtered by district
+        const effectiveRole = req.user.role === 'district_admin' ? 'admin' : req.user.role;
+        
+        if (!allowedRoles.includes(req.user.role) && !allowedRoles.includes(effectiveRole)) {
             return res.status(403).json({
                 success: false,
                 message: 'Insufficient permissions'

@@ -82,7 +82,7 @@ const getDeploymentById = async (req, res) => {
                      'id', u.id,
                      'fullName', u.full_name,
                      'badgeNumber', op.badge_number,
-                     'phone', op.phone,
+                     'phone', u.phone,
                      'acknowledged', d_o.acknowledged,
                      'acknowledgedAt', d_o.acknowledged_at,
                      'status', d_o.status,
@@ -480,14 +480,17 @@ const updateDeploymentStatus = async (req, res) => {
         const { id } = req.params;
         const { status, notes } = req.body;
 
+        // Determine if we should set end_time
+        const shouldSetEndTime = status === 'Completed' || status === 'Cancelled';
+        
         const result = await query(
             `UPDATE deployments 
              SET status = $1, 
                  updated_at = NOW(),
-                 end_time = CASE WHEN $1 IN ('Completed', 'Cancelled') THEN NOW() ELSE end_time END
+                 end_time = CASE WHEN $3 THEN NOW() ELSE end_time END
              WHERE id = $2
              RETURNING *`,
-            [status, id]
+            [status, id, shouldSetEndTime]
         );
 
         if (result.rows.length === 0) {
@@ -625,8 +628,9 @@ const getAvailableOfficers = async (req, res) => {
                 u.id, 
                 u.full_name, 
                 op.badge_number, 
-                op.phone,
                 op.rank,
+                op.unit,
+                CASE WHEN op.is_on_duty THEN 'on_duty' ELSE 'off_duty' END as availability_status,
                 op.is_on_duty,
                 op.current_latitude,
                 op.current_longitude,

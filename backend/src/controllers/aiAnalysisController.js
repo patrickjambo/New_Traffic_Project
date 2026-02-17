@@ -10,6 +10,7 @@ const AI_SERVICE_URL = process.env.AI_SERVICE_URL || 'http://localhost:8000';
  * @desc    Upload video, analyze with AI, and create incident if detected
  * @route   POST /api/incidents/analyze-video
  * @access  Public (with optional auth)
+ * @note    OPTIMIZED: Returns immediately, processes video asynchronously
  */
 const analyzeVideoAndCreateIncident = async (req, res) => {
     try {
@@ -40,21 +41,58 @@ const analyzeVideoAndCreateIncident = async (req, res) => {
         }
 
         const fileStats = fs.statSync(req.file.path);
+        const videoId = `video_${Date.now()}`;
 
         console.log('📹 Received video:', {
+            videoId: videoId,
             filename: req.file.originalname,
             size: `${(fileStats.size / 1024).toFixed(2)} KB`,
             mimetype: req.file.mimetype,
             path: req.file.path
         });
 
-        console.log('📹 Analyzing video with AI service (Enhanced Mode for Screen Videos)...');
+        // Return success immediately - process in background
+        res.json({
+            success: true,
+            message: 'Video uploaded successfully, processing in background',
+            data: {
+                videoId: videoId,
+                status: 'processing',
+                incident_detected: false
+            }
+        });
 
+        // Process video asynchronously (don't await)
+        processVideoAsync(req.file, videoId, userId, latitude, longitude).catch(err => {
+            console.error(`❌ Async video processing error for ${videoId}:`, err.message);
+        });
+
+    } catch (error) {
+        console.error('❌ Error receiving video:', error);
+        
+        // Only send response if not already sent
+        if (!res.headersSent) {
+            return res.status(500).json({
+                success: false,
+                message: 'Error uploading video',
+                error: error.message
+            });
+        }
+    }
+};
+
+/**
+ * Process video asynchronously
+ */
+async function processVideoAsync(file, videoId, userId, latitude, longitude) {
+    console.log(`🤖 [${videoId}] Starting async AI analysis...`);
+
+    try {
         // Step 1: Send video to AI service using file stream
         const formData = new FormData();
-        formData.append('video', fs.createReadStream(req.file.path), {
-            filename: req.file.originalname,
-            contentType: req.file.mimetype,
+        formData.append('video', fs.createReadStream(file.path), {
+            filename: file.originalname,
+            contentType: file.mimetype,
         });
         // Enable test_mode (enhanced analyzer) for better screen video detection
         formData.append('test_mode', 'true');
@@ -64,7 +102,7 @@ const analyzeVideoAndCreateIncident = async (req, res) => {
             formData,
             {
                 headers: formData.getHeaders(),
-                timeout: 120000, // 120 seconds timeout (2 minutes)
+                timeout: 180000, // 180 seconds timeout (3 minutes)
                 maxContentLength: Infinity,
                 maxBodyLength: Infinity
             }
@@ -76,7 +114,7 @@ const analyzeVideoAndCreateIncident = async (req, res) => {
 
         const aiResults = aiResponse.data.data;
 
-        console.log('🤖 AI Analysis Results:', {
+        console.log(`🤖 [${videoId}] AI Analysis Results:`, {
             incident_detected: aiResults.incident_detected,
             type: aiResults.incident_type,
             confidence: aiResults.confidence,
@@ -119,7 +157,7 @@ const analyzeVideoAndCreateIncident = async (req, res) => {
 
             incident = incidentResult.rows[0];
 
-            console.log('✅ Incident created in database:', incident.id);
+            console.log(`✅ [${videoId}] Incident created in database:`, incident.id);
 
             // Step 3: Broadcast real-time notification via WebSocket
             socketManager.emitIncidentNew({
@@ -145,46 +183,25 @@ const analyzeVideoAndCreateIncident = async (req, res) => {
                 await createAutomaticEmergency(incident, aiResults, latitude, longitude);
             }
         } else {
-            // Even if no incident detected, notify about analysis completion if requested
+            // Even if no incident detected, notify about analysis completion
             socketManager.emitAnalysisComplete({
                 result: 'No incident detected',
+                confidence: aiResults.confidence || 0,
                 incident_detected: false,
             });
+            console.log(`✅ [${videoId}] Analysis complete - no incident detected`);
         }
-
-        // Return results
-        res.json({
-            success: true,
-            data: {
-                ...aiResults,
-                incident_created: incident !== null,
-                incident_id: incident?.id,
-                severity: incident?.severity,
-            },
-            message: aiResults.incident_detected
-                ? `${aiResults.incident_type} detected with ${Math.round(aiResults.confidence * 100)}% confidence`
-                : 'No incident detected',
-        });
 
     } catch (error) {
-        console.error('❌ Video analysis error:', error);
-
-        // Check if it's an AI service connection error
-        if (error.code === 'ECONNREFUSED') {
-            return res.status(503).json({
-                success: false,
-                message: 'AI service is not available. Please try again later.',
-                error: 'AI_SERVICE_UNAVAILABLE',
-            });
-        }
-
-        res.status(500).json({
-            success: false,
-            message: 'Failed to analyze video',
+        console.error(`❌ [${videoId}] AI analysis error:`, error.message);
+        // Emit error event
+        socketManager.emitAnalysisComplete({
+            result: 'Analysis failed',
             error: error.message,
+            incident_detected: false,
         });
     }
-};
+}
 
 /**
  * Helper: Determine severity based on incident type and AI confidence
@@ -418,20 +435,18 @@ const testIncidentDetection = async (req, res) => {
 
         const { latitude, longitude, location_name } = location;
 
-        // Step 1: Create incident in database using PostGIS geography
+        // Step 1: Create incident in database
         const incidentResult = await db.query(
             `INSERT INTO incidents 
-            (reported_by, type, severity, location, address, description, status, created_at) 
-            VALUES ($1, $2, $3, ST_SetSRID(ST_MakePoint($4, $5), 4326)::geography, $6, $7, $8, NOW()) 
-            RETURNING id, type, severity, address, status, created_at, 
-                      ST_Y(location::geometry) as latitude, 
-                      ST_X(location::geometry) as longitude`,
+            (reported_by, type, severity, latitude, longitude, address, description, status, created_at) 
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW()) 
+            RETURNING id, type, severity, address, status, created_at, latitude, longitude`,
             [
                 null, // Test incident (no user)
                 type,
                 severity,
-                longitude, // Note: PostGIS uses (lon, lat) order
                 latitude,
+                longitude,
                 location_name,
                 `TEST: ${type} detected - ${vehicle_count} vehicles, ${stationary_count} stationary, avg speed: ${avg_speed} km/h`,
                 'reported'

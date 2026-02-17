@@ -73,9 +73,12 @@ const login = async (req, res) => {
     try {
         const { email, password } = req.validatedBody;
 
-        // Find user by email
+        // Find user by email (include district info for district admins)
         const result = await query(
-            'SELECT id, email, password_hash, full_name, role, is_active FROM users WHERE email = $1',
+            `SELECT u.id, u.email, u.password_hash, u.full_name, u.role, u.is_active, u.district_id, d.name as district_name
+             FROM users u
+             LEFT JOIN districts d ON u.district_id = d.id
+             WHERE u.email = $1`,
             [email]
         );
 
@@ -106,8 +109,8 @@ const login = async (req, res) => {
             });
         }
 
-        // Generate token
-        const token = generateToken(user.id, user.email, user.role);
+        // Generate token (include district_id for district admins)
+        const token = generateToken(user.id, user.email, user.role, user.district_id);
 
         res.json({
             success: true,
@@ -118,6 +121,8 @@ const login = async (req, res) => {
                     email: user.email,
                     fullName: user.full_name,
                     role: user.role,
+                    districtId: user.district_id,
+                    districtName: user.district_name,
                 },
                 token,
             },

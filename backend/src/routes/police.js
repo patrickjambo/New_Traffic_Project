@@ -5,6 +5,7 @@ const {
     assignIncident,
     broadcastAlert,
     getPoliceStats,
+    updateOfficerLocation,
 } = require('../controllers/policeController');
 
 const router = express.Router();
@@ -12,6 +13,13 @@ const router = express.Router();
 // All routes require police authentication
 router.use(authenticate);
 router.use(authorize('police', 'admin'));
+
+/**
+ * @route   POST /api/police/location
+ * @desc    Update officer's current location (for background tracking)
+ * @access  Private (Police)
+ */
+router.post('/location', updateOfficerLocation);
 
 /**
  * @route   GET /api/police/incidents

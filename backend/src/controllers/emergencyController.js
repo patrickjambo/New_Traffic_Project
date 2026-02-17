@@ -2,6 +2,8 @@ const db = require('../config/database');
 const { validationResult } = require('express-validator');
 const smsService = require('../services/sms_service');
 const socketManager = require('../services/socketManager');
+const fcmService = require('../services/fcmService');
+const geoFencingService = require('../services/geoFencingService');
 
 /**
  * @desc    Create new emergency request
@@ -55,13 +57,14 @@ const createEmergency = async (req, res) => {
         // Insert emergency into database
         const result = await db.query(
             `INSERT INTO emergencies (
-                user_id, emergency_type, severity, location_name, location_description,
+                user_id, type, emergency_type, severity, location_name, location_description,
                 latitude, longitude, description, casualties_count, vehicles_involved,
                 services_needed, contact_name, contact_phone, images, status, source
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
             RETURNING *`,
             [
                 userId,
+                finalEmergencyType,
                 finalEmergencyType,
                 severity,
                 locationName,
@@ -97,6 +100,81 @@ const createEmergency = async (req, res) => {
             } else {
                 console.warn(`⚠️  SMS alert failed: ${smsResult.error}`);
             }
+        }
+
+        // 🔔 Send FCM Push Notifications to all police officers
+        try {
+            // Get all police officers with FCM tokens
+            const officersResult = await db.query(`
+                SELECT u.id, u.full_name, op.fcm_token, op.emergency_alert_enabled
+                FROM users u
+                LEFT JOIN officer_profiles op ON u.id = op.user_id
+                WHERE u.role IN ('police', 'admin')
+                AND op.fcm_token IS NOT NULL
+                AND op.emergency_alert_enabled = true
+            `);
+            
+            const officers = officersResult.rows;
+            
+            if (officers.length > 0) {
+                console.log(`📱 Sending FCM push to ${officers.length} officers for emergency #${emergency.id}`);
+                
+                const fcmResult = await fcmService.sendEmergencyAlarm(officers, {
+                    alertId: emergency.id,
+                    emergencyId: emergency.id,
+                    title: `🚨 ${severity.toUpperCase()} EMERGENCY: ${finalEmergencyType}`,
+                    message: `${description}\n📍 ${locationName}`,
+                    type: finalEmergencyType,
+                    location: {
+                        latitude: latitude,
+                        longitude: longitude,
+                        address: locationName
+                    }
+                });
+                
+                if (fcmResult.success) {
+                    console.log(`✅ FCM push sent: ${fcmResult.successCount} success, ${fcmResult.failureCount} failed`);
+                } else {
+                    console.warn(`⚠️ FCM push failed: ${fcmResult.error || 'Unknown error'}`);
+                }
+            } else {
+                console.log('ℹ️ No officers with FCM tokens found for push notification');
+            }
+        } catch (fcmError) {
+            console.error('❌ FCM push error:', fcmError.message);
+        }
+
+        // 🎯 AUTOMATIC GEO-FENCED ALERT TO NEARBY OFFICERS
+        try {
+            // Determine if this is critical/high severity (triggers emergency alarm)
+            const isEmergencyAlert = severity === 'critical' || severity === 'high';
+
+            // Create targeted geo-fenced alert to nearby officers
+            const alertResult = await geoFencingService.createTargetedAlert({
+                id: emergency.id,
+                emergency_id: emergency.id,
+                type: finalEmergencyType,
+                severity: severity,
+                latitude: parseFloat(latitude),
+                longitude: parseFloat(longitude),
+                address: locationName,
+                location_name: locationName,
+                description: description,
+                media_urls: images || [],
+                reported_by: userId
+            }, isEmergencyAlert, {
+                source: 'manual',
+                confidence: 1.0,
+                detectedObject: finalEmergencyType,
+                detectionMethod: 'Manual Report',
+                casualties: casualtiesCount || 0,
+                vehiclesInvolved: vehiclesInvolved || 0
+            });
+
+            console.log(`🎯 GEO-FENCED ALERT sent to ${alertResult.targetedOfficers} officers in ${alertResult.district || 'area'}`);
+        } catch (geoError) {
+            console.error('⚠️ Geo-fencing alert failed (non-critical):', geoError?.message || geoError);
+            // Continue even if geo-fencing fails - the emergency was still created
         }
 
         res.status(201).json({
@@ -141,11 +219,8 @@ const getEmergencies = async (req, res) => {
                 assigned.full_name as assigned_to_name,
                 e.source,
                 CASE 
-                    WHEN $1::decimal IS NOT NULL AND $2::decimal IS NOT NULL 
-                    THEN (ST_Distance(
-                        e.location::geography,
-                        ST_SetSRID(ST_MakePoint($2, $1), 4326)::geography
-                    ) / 1000)
+                    WHEN $1::decimal IS NOT NULL AND $2::decimal IS NOT NULL AND e.latitude IS NOT NULL AND e.longitude IS NOT NULL
+                    THEN (6371 * acos(cos(radians($1::decimal)) * cos(radians(e.latitude)) * cos(radians(e.longitude) - radians($2::decimal)) + sin(radians($1::decimal)) * sin(radians(e.latitude))))
                     ELSE NULL
                 END AS distance_km
             FROM emergencies e
@@ -184,11 +259,8 @@ const getEmergencies = async (req, res) => {
 
         // Add distance filter if coordinates provided
         if (latitude && longitude) {
-            query += ` AND ST_DWithin(
-                e.location::geography,
-                ST_SetSRID(ST_MakePoint($2, $1), 4326)::geography,
-                $${paramIndex} * 1000
-            )`;
+            query += ` AND e.latitude IS NOT NULL AND e.longitude IS NOT NULL
+                AND (6371 * acos(cos(radians($1::decimal)) * cos(radians(e.latitude)) * cos(radians(e.longitude) - radians($2::decimal)) + sin(radians($1::decimal)) * sin(radians(e.latitude)))) < $${paramIndex}`;
             params.push(radius);
             paramIndex++;
         }

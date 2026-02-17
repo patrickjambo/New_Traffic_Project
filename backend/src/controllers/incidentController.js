@@ -4,6 +4,7 @@ const path = require('path');
 const fs = require('fs').promises;
 const axios = require('axios');
 const socketManager = require('../services/socketManager');
+const geoFencingService = require('../services/geoFencingService');
 
 // Configure multer for video uploads
 const storage = multer.diskStorage({
@@ -55,10 +56,10 @@ const reportIncident = async (req, res) => {
         // Insert incident into database
         const result = await query(
             `INSERT INTO incidents 
-       (type, severity, location, address, description, video_url, reported_by, is_anonymous) 
-       VALUES ($1, $2, ST_SetSRID(ST_MakePoint($3, $4), 4326)::geography, $5, $6, $7, $8, $9) 
-       RETURNING id, type, severity, ST_AsText(location::geometry) as location, created_at`,
-            [type, severity, longitude, latitude, address || null, description || null,
+       (type, severity, latitude, longitude, address, description, video_url, reported_by, is_anonymous) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) 
+       RETURNING id, type, severity, latitude, longitude, created_at`,
+            [type, severity, latitude, longitude, address || null, description || null,
                 videoFile ? `/uploads/${videoFile.filename}` : null, reportedBy, isAnonymous]
         );
 
@@ -100,6 +101,38 @@ const reportIncident = async (req, res) => {
         // Emit real-time update via Socket Manager
         socketManager.emitIncidentNew(incident);
 
+        // 🎯 AUTOMATIC GEO-FENCED ALERT TO NEARBY OFFICERS
+        try {
+            // Critical/high severity incidents trigger emergency alarm on officer devices
+            const isEmergencyAlert = severity === 'critical' || severity === 'high' ||
+                                     type === 'accident' || type === 'fire';
+
+            // Create targeted geo-fenced alert to nearby officers
+            const alertResult = await geoFencingService.createTargetedAlert({
+                id: incident.id,
+                incident_id: incident.id,
+                type: type,
+                severity: severity,
+                latitude: parseFloat(latitude),
+                longitude: parseFloat(longitude),
+                address: address || 'Unknown location',
+                location_name: address || 'Reported Location',
+                description: description || `${type} incident reported`,
+                media_urls: videoFile ? [`/uploads/${videoFile.filename}`] : [],
+                reported_by: reportedBy
+            }, isEmergencyAlert, {
+                source: isAnonymous ? 'anonymous' : 'manual',
+                confidence: 1.0,
+                detectedObject: type,
+                detectionMethod: 'User Report'
+            });
+
+            console.log(`🎯 GEO-FENCED ALERT sent to ${alertResult.targetedOfficers} officers in ${alertResult.district || 'area'}`);
+        } catch (geoError) {
+            console.error('⚠️ Geo-fencing alert failed (non-critical):', geoError?.message || geoError);
+            // Continue even if geo-fencing fails - the incident was still created
+        }
+
         res.status(201).json({
             success: true,
             message: 'Incident reported successfully',
@@ -136,16 +169,16 @@ const getNearbyIncidents = async (req, res) => {
         let paramCount;
 
         if (hasLocation) {
-            // Location-based query
+            // Location-based query using Haversine formula (no PostGIS needed)
             queryText = `
               SELECT 
                 i.id, 
                 i.type as incident_type, 
                 i.severity, 
                 i.status,
-                ST_AsText(i.location::geometry) as location,
-                ST_Y(i.location::geometry) as latitude,
-                ST_X(i.location::geometry) as longitude,
+                i.address as location,
+                i.latitude,
+                i.longitude,
                 i.address,
                 i.description,
                 i.video_url,
@@ -154,19 +187,13 @@ const getNearbyIncidents = async (req, res) => {
                 COALESCE(i.is_anonymous, false) as is_anonymous,
                 'manual' as source,
                 u.full_name as reported_by_name,
-                ST_Distance(
-                  i.location,
-                  ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography
-                ) / 1000 as distance_km
+                (6371 * acos(cos(radians($1)) * cos(radians(i.latitude)) * cos(radians(i.longitude) - radians($2)) + sin(radians($1)) * sin(radians(i.latitude)))) as distance_km
               FROM incidents i
               LEFT JOIN users u ON i.reported_by = u.id
-              WHERE ST_DWithin(
-                i.location,
-                ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography,
-                $3 * 1000
-              )
+              WHERE i.latitude IS NOT NULL AND i.longitude IS NOT NULL
+                AND (6371 * acos(cos(radians($1)) * cos(radians(i.latitude)) * cos(radians(i.longitude) - radians($2)) + sin(radians($1)) * sin(radians(i.latitude)))) < $3
             `;
-            params = [parseFloat(longitude), parseFloat(latitude), parseFloat(radius || 5)];
+            params = [parseFloat(latitude), parseFloat(longitude), parseFloat(radius || 5)];
             paramCount = 3;
         } else {
             // No location - return all incidents (for dashboard)
@@ -177,8 +204,8 @@ const getNearbyIncidents = async (req, res) => {
                 i.severity, 
                 i.status,
                 i.address as location,
-                ST_Y(i.location::geometry) as latitude,
-                ST_X(i.location::geometry) as longitude,
+                i.latitude,
+                i.longitude,
                 i.address,
                 i.description,
                 i.video_url,
@@ -244,8 +271,8 @@ const getIncidentById = async (req, res) => {
         const result = await query(
             `SELECT 
         i.*,
-        ST_Y(i.location::geometry) as latitude,
-        ST_X(i.location::geometry) as longitude,
+        i.latitude,
+        i.longitude,
         u.full_name as reported_by_name,
         v.full_name as verified_by_name,
         a.vehicle_count,
@@ -343,7 +370,7 @@ const getUserIncidents = async (req, res) => {
         i.type, 
         i.severity, 
         i.status,
-        ST_AsText(i.location::geometry) as location,
+        i.address as location,
         i.address,
         i.description,
         i.video_url,

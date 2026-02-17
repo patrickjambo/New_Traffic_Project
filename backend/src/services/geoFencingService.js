@@ -636,17 +636,23 @@ class GeoFencingService {
                     op.id,
                     op.user_id,
                     op.badge_number,
-                    op.full_name,
+                    u.full_name,
+                    op.rank,
                     op.current_latitude as latitude,
                     op.current_longitude as longitude,
                     op.is_on_duty,
-                    op.location_updated_at,
+                    CASE 
+                        WHEN op.is_on_duty = TRUE THEN 'on_duty'
+                        ELSE 'off_duty'
+                    END as duty_status,
+                    op.location_updated_at as last_location_update,
                     op.assigned_district_id,
                     d.name as district_name
                 FROM officer_profiles op
+                JOIN users u ON op.user_id = u.id
                 LEFT JOIN districts d ON op.assigned_district_id = d.id
-                WHERE op.current_latitude IS NOT NULL
-                ORDER BY op.location_updated_at DESC
+                WHERE u.role = 'police'
+                ORDER BY op.is_on_duty DESC, op.location_updated_at DESC NULLS LAST
             `);
 
             return result.rows;
@@ -657,7 +663,7 @@ class GeoFencingService {
     }
 
     /**
-     * Get districts with officer counts
+     * Get districts with officer counts and active incidents
      */
     async getDistrictsWithStats() {
         try {
@@ -669,8 +675,32 @@ class GeoFencingService {
                     d.center_lat,
                     d.center_lng,
                     d.radius_km,
-                    COUNT(op.id) FILTER (WHERE op.is_on_duty = TRUE) as officers_on_duty,
-                    COUNT(op.id) as total_officers
+                    COUNT(DISTINCT op.id) FILTER (WHERE op.is_on_duty = TRUE) as officers_on_duty,
+                    COUNT(DISTINCT op.id) as total_officers,
+                    (
+                        SELECT COUNT(*) 
+                        FROM incidents i 
+                        WHERE i.status IN ('pending', 'assigned', 'in_progress')
+                        AND (6371 * acos(
+                            LEAST(1, GREATEST(-1,
+                                cos(radians(d.center_lat)) * cos(radians(i.latitude)) *
+                                cos(radians(i.longitude) - radians(d.center_lng)) +
+                                sin(radians(d.center_lat)) * sin(radians(i.latitude))
+                            ))
+                        )) <= d.radius_km
+                    ) as active_incidents,
+                    (
+                        SELECT COUNT(*) 
+                        FROM emergencies e 
+                        WHERE e.status IN ('pending', 'dispatched', 'en_route')
+                        AND (6371 * acos(
+                            LEAST(1, GREATEST(-1,
+                                cos(radians(d.center_lat)) * cos(radians(e.latitude)) *
+                                cos(radians(e.longitude) - radians(d.center_lng)) +
+                                sin(radians(d.center_lat)) * sin(radians(e.latitude))
+                            ))
+                        )) <= d.radius_km
+                    ) as active_emergencies
                 FROM districts d
                 LEFT JOIN officer_profiles op ON op.assigned_district_id = d.id OR op.current_district_id = d.id
                 WHERE d.is_active = TRUE
@@ -678,7 +708,11 @@ class GeoFencingService {
                 ORDER BY d.name
             `);
 
-            return result.rows;
+            // Combine incidents + emergencies for total active
+            return result.rows.map(row => ({
+                ...row,
+                active_incidents: parseInt(row.active_incidents || 0) + parseInt(row.active_emergencies || 0)
+            }));
         } catch (error) {
             console.error('Error getting districts:', error);
             return [];

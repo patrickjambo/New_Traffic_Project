@@ -7,6 +7,11 @@ const {
     getSystemLogs,
     generateReport,
     createOfficer,
+    getOfficers,
+    updateOfficer,
+    resetOfficerPassword,
+    toggleOfficerStatus,
+    deleteOfficer,
 } = require('../controllers/adminController');
 
 const router = express.Router();
@@ -15,12 +20,55 @@ const router = express.Router();
 router.use(authenticate);
 router.use(authorize('admin'));
 
+// ============================================
+// OFFICER MANAGEMENT ROUTES
+// ============================================
+
+/**
+ * @route   GET /api/admin/officers
+ * @desc    Get all police officers
+ * @access  Private (Admin only)
+ */
+router.get('/officers', getOfficers);
+
 /**
  * @route   POST /api/admin/officers
  * @desc    Create a new police officer
  * @access  Private (Admin only)
  */
 router.post('/officers', createOfficer);
+
+/**
+ * @route   PUT /api/admin/officers/:id
+ * @desc    Update officer details
+ * @access  Private (Admin only)
+ */
+router.put('/officers/:id', updateOfficer);
+
+/**
+ * @route   PUT /api/admin/officers/:id/reset-password
+ * @desc    Reset officer password
+ * @access  Private (Admin only)
+ */
+router.put('/officers/:id/reset-password', resetOfficerPassword);
+
+/**
+ * @route   PUT /api/admin/officers/:id/toggle-status
+ * @desc    Block/Unblock officer
+ * @access  Private (Admin only)
+ */
+router.put('/officers/:id/toggle-status', toggleOfficerStatus);
+
+/**
+ * @route   DELETE /api/admin/officers/:id
+ * @desc    Delete (soft) officer
+ * @access  Private (Admin only)
+ */
+router.delete('/officers/:id', deleteOfficer);
+
+// ============================================
+// SYSTEM ROUTES
+// ============================================
 
 /**
  * @route   GET /api/admin/metrics

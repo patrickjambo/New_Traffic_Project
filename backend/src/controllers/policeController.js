@@ -15,8 +15,8 @@ const getPoliceIncidents = async (req, res) => {
                 i.type,
                 i.severity,
                 i.status,
-                ST_Y(i.location::geometry) as latitude,
-                ST_X(i.location::geometry) as longitude,
+                i.latitude,
+                i.longitude,
                 i.address as location,
                 i.description,
                 i.created_at,
@@ -218,9 +218,66 @@ const getPoliceStats = async (req, res) => {
     }
 };
 
+/**
+ * Update officer's current location
+ * Called from mobile app for background location tracking
+ */
+const updateOfficerLocation = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const { latitude, longitude, address } = req.body;
+
+        if (!latitude || !longitude) {
+            return res.status(400).json({
+                success: false,
+                message: 'Latitude and longitude are required',
+            });
+        }
+
+        // Update officer profile with new location
+        await query(`
+            UPDATE officer_profiles 
+            SET 
+                current_latitude = $1,
+                current_longitude = $2,
+                current_address = $3,
+                location_updated_at = NOW(),
+                status = 'available'
+            WHERE user_id = $4
+        `, [latitude, longitude, address, userId]);
+
+        // Also broadcast to admin dashboard via WebSocket
+        const socketManager = require('../services/socketManager');
+        if (socketManager.io) {
+            socketManager.io.to('role:admin').emit('officer:location', {
+                officerId: userId,
+                latitude,
+                longitude,
+                address,
+                timestamp: new Date().toISOString(),
+            });
+        }
+
+        console.log(`📍 Officer ${userId} location updated via HTTP: ${latitude}, ${longitude}`);
+
+        res.json({
+            success: true,
+            message: 'Location updated successfully',
+        });
+    } catch (error) {
+        console.error('Update officer location error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to update location',
+            error: error.message,
+        });
+    }
+};
+
 module.exports = {
     getPoliceIncidents,
     assignIncident,
     broadcastAlert,
     getPoliceStats,
+    updateOfficerLocation,
 };

@@ -146,18 +146,16 @@ async function processClipAsync(req, videoFile, latitude, longitude) {
         const incident = incidents[0]; // Take first incident
         const result = await query(
             `INSERT INTO incidents 
-            (type, severity, location, video_url, reported_by, auto_captured, ai_confidence, status) 
-            VALUES ($1, $2, ST_SetSRID(ST_MakePoint($3, $4), 4326)::geography, $5, $6, $7, $8, $9) 
-            RETURNING id, type, severity, ST_AsText(location::geometry) as location, created_at`,
+            (type, severity, latitude, longitude, video_url, reported_by, status) 
+            VALUES ($1, $2, $3, $4, $5, $6, $7) 
+            RETURNING id, type, severity, latitude, longitude, created_at`,
             [
                 incident.type || 'unknown',
                 determineSeverity(incident.confidence || 0.5),
-                parseFloat(longitude),
                 parseFloat(latitude),
+                parseFloat(longitude),
                 `/uploads/${videoFile.filename}`,
                 userId,
-                true, // auto_captured
-                incident.confidence || 0.5,
                 'pending' // Auto-captured incidents start as pending
             ]
         );

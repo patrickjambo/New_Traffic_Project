@@ -48,6 +48,7 @@ class SocketManager {
                     // Also join user-specific room for targeted notifications
                     if (userId) {
                         socket.join(`user:${userId}`);
+                        console.log(`👤 Client ${socket.id} joined user room: user:${userId}`);
                     }
 
                     // Store user info
@@ -59,6 +60,23 @@ class SocketManager {
 
                     this.updateClientRoom(socket.id, roomName);
                     console.log(`👮 Client ${socket.id} joined room: ${roomName}`);
+                }
+            });
+
+            // Join user-specific room (for targeted deployment notifications)
+            socket.on('join:user', (data) => {
+                const { userId } = data;
+                if (userId) {
+                    const roomName = `user:${userId}`;
+                    socket.join(roomName);
+                    
+                    // Store user info
+                    const clientData = this.connectedClients.get(socket.id);
+                    if (clientData) {
+                        clientData.userId = userId;
+                    }
+                    
+                    console.log(`👤 Client ${socket.id} joined user room: ${roomName}`);
                 }
             });
 
@@ -99,6 +117,10 @@ class SocketManager {
                 };
 
                 // Broadcast to admin for real-time tracking dashboard
+                const adminRoom = this.io.sockets.adapter.rooms.get('role:admin');
+                const adminCount = adminRoom ? adminRoom.size : 0;
+                console.log(`📡 Broadcasting to ${adminCount} admin clients`);
+                
                 this.io.to('role:admin').emit('officer:location', {
                     officerId: clientData.userId,
                     socketId: socket.id,
@@ -132,18 +154,18 @@ class SocketManager {
      * Update officer location in database (async helper)
      */
     async _updateOfficerLocationInDB(officerId, location) {
-        // This will be called asynchronously to update the database
-        // We use a try-catch to prevent socket disruption
         try {
             const { query } = require('../config/database');
             await query(`
                 UPDATE officer_profiles 
                 SET current_latitude = $1, 
                     current_longitude = $2, 
-                    current_address = $3,
-                    last_location_update = NOW()
-                WHERE user_id = $4
-            `, [location.latitude, location.longitude, location.address || null, officerId]);
+                    status = 'available',
+                    is_on_duty = true,
+                    location_updated_at = NOW()
+                WHERE user_id = $3
+            `, [location.latitude, location.longitude, officerId]);
+            console.log(`✅ DB updated for officer ${officerId}: ${location.latitude}, ${location.longitude}`);
         } catch (error) {
             console.error('Error updating officer location in DB:', error.message);
         }

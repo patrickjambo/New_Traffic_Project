@@ -6,10 +6,16 @@ const helmet = require('helmet');
 const compression = require('compression');
 const rateLimit = require('express-rate-limit');
 const morgan = require('morgan');
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 // Services
 const socketManager = require('./services/socketManager');
+const { authenticate } = require('./middleware/auth');
+const fcmService = require('./services/fcmService');
+
+// Initialize FCM Service
+fcmService.initialize();
 
 // Routes
 const authRoutes = require('./routes/auth');
@@ -38,6 +44,7 @@ socketManager.initialize(io);
 // Make io and socketManager accessible in routes
 app.set('io', io);
 app.set('socketManager', socketManager);
+app.set('fcmService', fcmService);
 
 // Middleware
 app.use(helmet({
@@ -60,19 +67,22 @@ app.use(express.json({ limit: '100mb' })); // Increased limit for video uploads
 app.use(express.urlencoded({ extended: true, limit: '100mb' })); // Increased limit
 app.use(morgan('dev')); // Logging
 
-// Rate limiting
-const limiter = rateLimit({
-    windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
-    max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
-    message: 'Too many requests from this IP, please try again later.',
-});
-app.use('/api/', limiter);
+// Rate limiting - DISABLED per user request
+// const limiter = rateLimit({
+//     windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 1 * 60 * 1000, // 1 minute window
+//     max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 1000, // 1000 requests per minute
+//     message: 'Too many requests from this IP, please try again later.',
+//     skip: (req) => {
+//         // Skip rate limiting for health checks and websocket
+//         return req.path === '/api/health' || req.path.includes('socket');
+//     }
+// });
+// app.use('/api/', limiter);
 
 // Serve uploaded files
 app.use('/uploads', express.static(process.env.UPLOAD_DIR || './uploads'));
 
 // Serve frontend static files
-const path = require('path');
 app.use(express.static(path.join(__dirname, '../../frontend')));
 
 // API Routes
@@ -87,6 +97,132 @@ app.use('/api/dashboard', require('./routes/dashboard'));
 app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/deployments', deploymentRoutes);
 app.use('/api/geofencing', require('./routes/geofencing'));  // Geo-fencing & alerts
+
+// Add convenience routes for mobile app compatibility
+// /api/alerts route
+app.get('/api/alerts', authenticate, async (req, res) => {
+    try {
+        const { Pool } = require('pg');
+        const pool = new Pool({
+            host: process.env.DB_HOST || 'localhost',
+            port: parseInt(process.env.DB_PORT) || 5432,
+            database: process.env.DB_NAME || 'trafficguard',
+            user: process.env.DB_USER || 'trafficguard_user',
+            password: process.env.DB_PASSWORD || 's_123'
+        });
+        
+        const result = await pool.query(`
+            SELECT * FROM incident_alerts 
+            ORDER BY created_at DESC 
+            LIMIT 50
+        `);
+        await pool.end();
+        
+        res.json({
+            success: true,
+            data: result.rows
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// /api/users/profile - alias for /api/auth/profile
+app.get('/api/users/profile', authenticate, async (req, res) => {
+    try {
+        const { Pool } = require('pg');
+        const pool = new Pool({
+            host: process.env.DB_HOST || 'localhost',
+            port: parseInt(process.env.DB_PORT) || 5432,
+            database: process.env.DB_NAME || 'trafficguard',
+            user: process.env.DB_USER || 'trafficguard_user',
+            password: process.env.DB_PASSWORD || 's_123'
+        });
+        
+        const result = await pool.query(
+            'SELECT id, email, full_name, role, created_at FROM users WHERE id = $1',
+            [req.user.id]
+        );
+        await pool.end();
+        
+        if (result.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'User not found' });
+        }
+        
+        res.json({
+            success: true,
+            data: result.rows[0]
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// /api/districts route
+app.get('/api/districts', async (req, res) => {
+    try {
+        const { Pool } = require('pg');
+        const pool = new Pool({
+            host: process.env.DB_HOST || 'localhost',
+            port: parseInt(process.env.DB_PORT) || 5432,
+            database: process.env.DB_NAME || 'trafficguard',
+            user: process.env.DB_USER || 'trafficguard_user',
+            password: process.env.DB_PASSWORD || 's_123'
+        });
+        
+        const result = await pool.query('SELECT * FROM districts WHERE is_active = true ORDER BY name');
+        await pool.end();
+        
+        res.json({
+            success: true,
+            data: result.rows
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// /api/stats route
+app.get('/api/stats', async (req, res) => {
+    try {
+        const { Pool } = require('pg');
+        const pool = new Pool({
+            host: process.env.DB_HOST || 'localhost',
+            port: parseInt(process.env.DB_PORT) || 5432,
+            database: process.env.DB_NAME || 'trafficguard',
+            user: process.env.DB_USER || 'trafficguard_user',
+            password: process.env.DB_PASSWORD || 's_123'
+        });
+        
+        const [incidents, alerts, officers] = await Promise.all([
+            pool.query('SELECT COUNT(*) as count FROM incidents'),
+            pool.query('SELECT COUNT(*) as count FROM incident_alerts'),
+            pool.query("SELECT COUNT(*) as count FROM users WHERE role = 'police'")
+        ]);
+        await pool.end();
+        
+        res.json({
+            success: true,
+            data: {
+                totalIncidents: parseInt(incidents.rows[0].count),
+                totalAlerts: parseInt(alerts.rows[0].count),
+                totalOfficers: parseInt(officers.rows[0].count)
+            }
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// /api/health route (alias for /health)
+app.get('/api/health', (req, res) => {
+    res.json({
+        success: true,
+        message: 'TrafficGuard API is running',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime()
+    });
+});
 
 // Webhook endpoint for AI service analysis callbacks
 app.post('/webhook/analysis-complete', async (req, res) => {

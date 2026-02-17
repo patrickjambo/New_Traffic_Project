@@ -25,14 +25,14 @@ router.get('/stats', authorize('admin'), getDeploymentStats);
 // Get officer's own deployments (police only)
 router.get('/my-deployments', authorize('police'), getMyDeployments);
 
+// Get available officers (admin only) - MUST be before /:id route!
+router.get('/officers/available', authorize('admin'), getAvailableOfficers);
+
 // Get deployments (police and admin)
 router.get('/', getDeployments);
 
-// Get single deployment by ID
+// Get single deployment by ID - This must be AFTER specific routes
 router.get('/:id', getDeploymentById);
-
-// Get available officers (admin only)
-router.get('/officers/available', authorize('admin'), getAvailableOfficers);
 
 // Create deployment (admin only)
 router.post('/', authorize('admin'), createDeployment);

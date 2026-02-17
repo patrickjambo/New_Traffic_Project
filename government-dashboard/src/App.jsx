@@ -16,6 +16,7 @@ import Reports from './pages/Reports';
 import Emergency from './pages/Emergency';
 import Analytics from './pages/Analytics';
 import Settings from './pages/Settings';
+import Profile from './pages/Profile';
 import DeploymentsPage from './pages/DeploymentsPage';
 import GeoFencingPage from './pages/GeoFencingPage';
 import OfficerManagement from './pages/OfficerManagement';
@@ -33,6 +34,7 @@ function AppContent() {
     '/emergency',
     '/analytics',
     '/settings',
+    '/profile',
     '/deployments',
     '/geofencing',
     '/officers'
@@ -73,6 +75,7 @@ function AppContent() {
                 <Route path="/emergency" element={<Emergency />} />
                 <Route path="/analytics" element={<Analytics />} />
                 <Route path="/settings" element={<Settings />} />
+                <Route path="/profile" element={<Profile />} />
                 <Route path="/deployments" element={<ErrorBoundary><DeploymentsPage /></ErrorBoundary>} />
                 <Route path="/geofencing" element={<GeoFencingPage />} />
                 <Route path="/officers" element={<OfficerManagement />} />

@@ -143,7 +143,11 @@ const login = async (req, res) => {
 const getProfile = async (req, res) => {
     try {
         const result = await query(
-            'SELECT id, email, full_name, phone, role, created_at FROM users WHERE id = $1',
+            `SELECT u.id, u.email, u.full_name, u.phone, u.role, u.profile_picture, u.created_at,
+                    d.name as district_name
+             FROM users u
+             LEFT JOIN districts d ON u.district_id = d.id
+             WHERE u.id = $1`,
             [req.user.id]
         );
 
@@ -164,6 +168,8 @@ const getProfile = async (req, res) => {
                 fullName: user.full_name,
                 phone: user.phone,
                 role: user.role,
+                profile_picture: user.profile_picture,
+                districtName: user.district_name,
                 createdAt: user.created_at,
             },
         });
@@ -177,8 +183,160 @@ const getProfile = async (req, res) => {
     }
 };
 
+/**
+ * Update user profile
+ */
+const updateProfile = async (req, res) => {
+    try {
+        const { full_name, phone } = req.body;
+        const userId = req.user.id;
+        
+        let profilePicturePath = null;
+        
+        // Handle file upload if present
+        if (req.file) {
+            profilePicturePath = `/uploads/profiles/${req.file.filename}`;
+        }
+        
+        // Build update query dynamically
+        const updates = [];
+        const values = [];
+        let paramIndex = 1;
+        
+        if (full_name) {
+            updates.push(`full_name = $${paramIndex++}`);
+            values.push(full_name);
+        }
+        
+        if (phone !== undefined) {
+            updates.push(`phone = $${paramIndex++}`);
+            values.push(phone);
+        }
+        
+        if (profilePicturePath) {
+            updates.push(`profile_picture = $${paramIndex++}`);
+            values.push(profilePicturePath);
+        }
+        
+        if (updates.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'No fields to update',
+            });
+        }
+        
+        updates.push(`updated_at = NOW()`);
+        values.push(userId);
+        
+        const result = await query(
+            `UPDATE users SET ${updates.join(', ')} WHERE id = $${paramIndex} RETURNING id, email, full_name, phone, role, profile_picture`,
+            values
+        );
+        
+        if (result.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'User not found',
+            });
+        }
+        
+        const user = result.rows[0];
+        
+        res.json({
+            success: true,
+            message: 'Profile updated successfully',
+            data: {
+                id: user.id,
+                email: user.email,
+                fullName: user.full_name,
+                phone: user.phone,
+                role: user.role,
+                profile_picture: user.profile_picture,
+            },
+        });
+    } catch (error) {
+        console.error('Update profile error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to update profile',
+            error: error.message,
+        });
+    }
+};
+
+/**
+ * Change user password
+ */
+const changePassword = async (req, res) => {
+    try {
+        const { currentPassword, newPassword } = req.body;
+        const userId = req.user.id;
+        
+        if (!currentPassword || !newPassword) {
+            return res.status(400).json({
+                success: false,
+                message: 'Current password and new password are required',
+            });
+        }
+        
+        if (newPassword.length < 6) {
+            return res.status(400).json({
+                success: false,
+                message: 'New password must be at least 6 characters',
+            });
+        }
+        
+        // Get current user
+        const userResult = await query(
+            'SELECT password FROM users WHERE id = $1',
+            [userId]
+        );
+        
+        if (userResult.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'User not found',
+            });
+        }
+        
+        // Verify current password
+        const bcrypt = require('bcryptjs');
+        const isValidPassword = await bcrypt.compare(currentPassword, userResult.rows[0].password);
+        
+        if (!isValidPassword) {
+            return res.status(400).json({
+                success: false,
+                message: 'Current password is incorrect',
+            });
+        }
+        
+        // Hash new password
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+        
+        // Update password
+        await query(
+            'UPDATE users SET password = $1, updated_at = NOW() WHERE id = $2',
+            [hashedPassword, userId]
+        );
+        
+        res.json({
+            success: true,
+            message: 'Password changed successfully',
+        });
+    } catch (error) {
+        console.error('Change password error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to change password',
+            error: error.message,
+        });
+    }
+};
+
 module.exports = {
     register,
     login,
     getProfile,
+    updateProfile,
+    changePassword,
 };

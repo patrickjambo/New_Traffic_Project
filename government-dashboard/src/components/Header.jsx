@@ -261,8 +261,18 @@ const Header = ({ onMenuClick }) => {
               className="flex items-center gap-3 pl-4 border-l border-white/10 hover:opacity-80 transition-opacity"
               onClick={() => setShowProfileMenu(!showProfileMenu)}
             >
-              <div className="w-9 h-9 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-sm">
-                {user?.full_name?.charAt(0)?.toUpperCase() || 'U'}
+              <div className="w-9 h-9 rounded-lg flex items-center justify-center text-white font-bold text-sm overflow-hidden">
+                {user?.profile_picture ? (
+                  <img 
+                    src={`http://localhost:3000${user.profile_picture}`} 
+                    alt="Profile" 
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="w-full h-full bg-blue-600 flex items-center justify-center">
+                    {user?.full_name?.charAt(0)?.toUpperCase() || user?.fullName?.charAt(0)?.toUpperCase() || 'U'}
+                  </div>
+                )}
               </div>
               <div className="hidden md:block text-left">
                 <p className="text-sm font-medium text-white leading-none mb-1">
@@ -280,10 +290,18 @@ const Header = ({ onMenuClick }) => {
               <div className="absolute right-0 mt-2 w-48 bg-slate-800 border border-slate-700 rounded-xl shadow-xl overflow-hidden z-50">
                 <div className="p-2">
                   <button
-                    onClick={() => navigate('/settings')}
+                    onClick={() => { navigate('/profile'); setShowProfileMenu(false); }}
                     className="w-full text-left px-3 py-2 text-sm text-gray-300 hover:bg-slate-700 rounded-lg flex items-center gap-2 transition-colors"
                   >
-                    <User className="w-4 h-4" />
+                    {user?.profile_picture ? (
+                      <img 
+                        src={`http://localhost:3000${user.profile_picture}`} 
+                        alt="Profile" 
+                        className="w-5 h-5 rounded-full object-cover"
+                      />
+                    ) : (
+                      <User className="w-4 h-4" />
+                    )}
                     Profile
                   </button>
                   <div className="h-px bg-slate-700 my-1"></div>

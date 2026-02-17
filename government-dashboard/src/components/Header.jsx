@@ -184,7 +184,7 @@ const Header = ({ onMenuClick }) => {
                         <p className="text-sm font-medium text-white">{result.type}</p>
                         <p className="text-xs text-gray-400 truncate w-64">{result.location}</p>
                       </div>
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded border ${result.isCategory ? 'border-purple-500 text-purple-400' :
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded border ${result.isCategory ? 'border-cyan-500 text-cyan-400' :
                         result.severity === 'critical' ? 'border-red-500 text-red-400' :
                           result.severity === 'high' ? 'border-orange-500 text-orange-400' :
                             'border-blue-500 text-blue-400'

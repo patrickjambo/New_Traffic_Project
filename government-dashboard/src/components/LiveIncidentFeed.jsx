@@ -67,7 +67,7 @@ const LiveIncidentFeed = ({ incidents, loading }) => {
                       {incident.status || 'Pending'}
                     </span>
                     {incident.auto_captured && (
-                      <span className="px-2 py-1 rounded-full text-xs font-semibold bg-purple-100 text-purple-800">
+                      <span className="px-2 py-1 rounded-full text-xs font-semibold bg-cyan-100 text-cyan-800">
                         📱 Auto
                       </span>
                     )}

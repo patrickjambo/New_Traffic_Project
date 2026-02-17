@@ -124,8 +124,8 @@ const Reports = () => {
 
         <div className="bg-slate-800/50 backdrop-blur-md border border-white/5 rounded-xl p-6">
           <div className="flex items-center gap-4 mb-4">
-            <div className="p-3 bg-purple-500/20 rounded-lg">
-              <BarChart2 className="w-6 h-6 text-purple-400" />
+            <div className="p-3 bg-cyan-500/20 rounded-lg">
+              <BarChart2 className="w-6 h-6 text-cyan-400" />
             </div>
             <div>
               <h3 className="text-lg font-bold text-white">Data Points</h3>
@@ -149,7 +149,7 @@ const Reports = () => {
                   <div>
                     <div className="flex items-center gap-2">
                       <h4 className="font-medium text-white">{report.title}</h4>
-                      <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${report.source === 'AI' ? 'bg-purple-500/20 text-purple-300' :
+                      <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${report.source === 'AI' ? 'bg-cyan-500/20 text-cyan-300' :
                           report.source === 'Manual' ? 'bg-blue-500/20 text-blue-300' : 'bg-slate-500/20 text-slate-300'
                         }`}>
                         {report.source}

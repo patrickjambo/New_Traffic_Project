@@ -174,7 +174,7 @@ const Profile = () => {
   const getRoleBadge = () => {
     const role = user?.role;
     if (role === 'admin') {
-      return { label: 'Super Admin', color: 'bg-purple-500/20 text-purple-400 border-purple-500/50' };
+      return { label: 'Super Admin', color: 'bg-red-500/20 text-red-400 border-red-500/50' };
     } else if (role === 'district_admin') {
       return { label: 'District Admin', color: 'bg-orange-500/20 text-orange-400 border-orange-500/50' };
     } else if (role === 'police') {
@@ -213,7 +213,7 @@ const Profile = () => {
               <div className="flex flex-col items-center">
                 {/* Profile Picture */}
                 <div className="relative group">
-                  <div className="w-32 h-32 rounded-full overflow-hidden bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
+                  <div className="w-32 h-32 rounded-full overflow-hidden bg-gradient-to-br from-blue-500 to-cyan-600 flex items-center justify-center">
                     {previewUrl ? (
                       <img
                         src={previewUrl}

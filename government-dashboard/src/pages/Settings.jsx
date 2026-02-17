@@ -238,10 +238,10 @@ const Settings = () => {
               </div>
             </div>
           </div>
-          <div className="bg-gradient-to-br from-purple-600/20 to-purple-800/20 border border-purple-500/30 rounded-xl p-4">
+          <div className="bg-gradient-to-br from-cyan-600/20 to-cyan-800/20 border border-cyan-500/30 rounded-xl p-4">
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-purple-500/20 rounded-lg">
-                <Server className="w-6 h-6 text-purple-400" />
+              <div className="p-2 bg-cyan-500/20 rounded-lg">
+                <Server className="w-6 h-6 text-cyan-400" />
               </div>
               <div>
                 <p className="text-2xl font-bold text-white">{Math.floor((metrics.system?.uptime || 0) / 3600)}h</p>
@@ -337,7 +337,7 @@ const Settings = () => {
                         <td className="px-4 py-4">
                           <div className="flex items-center gap-3">
                             <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold ${
-                              u.role === 'admin' ? 'bg-gradient-to-br from-purple-500 to-pink-600' :
+                              u.role === 'admin' ? 'bg-gradient-to-br from-red-500 to-rose-600' :
                               u.role === 'district_admin' ? 'bg-gradient-to-br from-orange-500 to-amber-600' :
                               u.role === 'police' ? 'bg-gradient-to-br from-blue-500 to-cyan-600' :
                               'bg-gradient-to-br from-gray-500 to-gray-600'
@@ -355,7 +355,7 @@ const Settings = () => {
                           {/* Display role as badge - not editable for super admin and district_admin */}
                           {(u.role === 'admin' || u.role === 'district_admin') ? (
                             <span className={`px-3 py-1 rounded text-xs font-bold uppercase ${
-                              u.role === 'admin' ? 'bg-purple-500/20 text-purple-400 border border-purple-500/50' :
+                              u.role === 'admin' ? 'bg-red-500/20 text-red-400 border border-red-500/50' :
                               'bg-orange-500/20 text-orange-400 border border-orange-500/50'
                             }`}>
                               {u.role === 'admin' ? 'SUPER ADMIN' : 'DISTRICT ADMIN'}

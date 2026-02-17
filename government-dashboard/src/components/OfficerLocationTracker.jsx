@@ -145,7 +145,7 @@ const OfficerLocationTracker = ({ officers = [], deployments = [], onOfficerClic
     return (
         <div className="bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden">
             {/* Header */}
-            <div className="px-6 py-4 bg-gradient-to-r from-indigo-600 to-purple-600 text-white">
+            <div className="px-6 py-4 bg-gradient-to-r from-blue-600 to-cyan-600 text-white">
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
                         <Radio className="h-5 w-5" />
@@ -305,7 +305,7 @@ const OfficerLocationTracker = ({ officers = [], deployments = [], onOfficerClic
             {showMapModal && (
                 <div className="border-t bg-white">
                     {/* Map Header */}
-                    <div className="flex items-center justify-between px-4 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white">
+                    <div className="flex items-center justify-between px-4 py-3 bg-gradient-to-r from-blue-600 to-cyan-600 text-white">
                         <div className="flex items-center gap-2">
                             <MapPin className="h-5 w-5" />
                             <div>

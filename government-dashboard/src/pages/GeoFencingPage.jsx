@@ -27,7 +27,7 @@ const GeoFencingPage = () => {
       </div>
 
       {/* Connection Status Banner */}
-      <div className="mb-6 p-4 bg-gradient-to-r from-blue-900/50 to-purple-900/50 rounded-xl border border-blue-700/50">
+      <div className="mb-6 p-4 bg-gradient-to-r from-blue-900/50 to-cyan-900/50 rounded-xl border border-blue-700/50">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>

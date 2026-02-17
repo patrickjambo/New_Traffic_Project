@@ -139,7 +139,7 @@ const DashboardPage = () => {
   const kigaliDistricts = {
     1: { name: 'Nyarugenge', color: 'bg-blue-500' },
     2: { name: 'Gasabo', color: 'bg-green-500' },
-    3: { name: 'Kicukiro', color: 'bg-purple-500' },
+    3: { name: 'Kicukiro', color: 'bg-cyan-500' },
   };
 
   // Regions - show only user's district for district admins, all regions for super admin
@@ -170,10 +170,10 @@ const DashboardPage = () => {
     // Super admin sees all regions
     return [
       { name: 'Kigali City', load: 67, incidents: incidents.filter(i => i.location?.toLowerCase().includes('kigali')).length || 0, officers: 89, color: 'bg-blue-500' },
-      { name: 'Northern Province', load: 45, incidents: 0, officers: 45, color: 'bg-purple-500' },
+      { name: 'Northern Province', load: 45, incidents: 0, officers: 45, color: 'bg-teal-500' },
       { name: 'Southern Province', load: 38, incidents: 0, officers: 52, color: 'bg-indigo-500' },
       { name: 'Eastern Province', load: 52, incidents: 0, officers: 61, color: 'bg-cyan-500' },
-      { name: 'Western Province', load: 41, incidents: 0, officers: 48, color: 'bg-teal-500' },
+      { name: 'Western Province', load: 41, incidents: 0, officers: 48, color: 'bg-emerald-500' },
     ];
   }, [isDistrictAdmin, userDistrictId, userDistrictName, incidents, realDeployments]);
 
@@ -209,7 +209,7 @@ const DashboardPage = () => {
 
       {/* District Admin Banner */}
       {isDistrictAdmin && (
-        <div className="mb-6 bg-gradient-to-r from-blue-600/20 to-purple-600/20 border border-blue-500/30 rounded-2xl p-4">
+        <div className="mb-6 bg-gradient-to-r from-blue-600/20 to-cyan-600/20 border border-blue-500/30 rounded-2xl p-4">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-blue-500 rounded-lg">
               <Building2 className="w-5 h-5 text-white" />
@@ -268,7 +268,7 @@ const DashboardPage = () => {
                             <MapPin className="w-3 h-3" /> {emergency.location_name}
                           </p>
                           {emergency.source === 'ai' ? (
-                            <span className="bg-purple-500/20 text-purple-400 border border-purple-500/30 px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider">
+                            <span className="bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider">
                               AI
                             </span>
                           ) : (
@@ -470,7 +470,7 @@ const DashboardPage = () => {
                             <span className="text-[10px] bg-red-600 text-white px-2 py-0.5 rounded font-bold">EMERGENCY</span>
                           )}
                           {report.source === 'ai' && (
-                            <span className="text-xs bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded">🤖 AI</span>
+                            <span className="text-xs bg-cyan-500/20 text-cyan-300 px-2 py-0.5 rounded">🤖 AI</span>
                           )}
                           {report.source === 'mobile_app' && (
                             <span className="text-xs bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded">📱 Mobile</span>
@@ -497,7 +497,7 @@ const DashboardPage = () => {
           )}
         </div>
 
-        <div className="bg-gradient-to-br from-blue-600 to-purple-600 rounded-2xl p-6 text-white relative overflow-hidden">
+        <div className="bg-gradient-to-br from-blue-600 to-cyan-600 rounded-2xl p-6 text-white relative overflow-hidden">
           <div className="relative z-10">
             <h2 className="text-lg font-bold mb-6">System Status</h2>
             <div className="space-y-4">

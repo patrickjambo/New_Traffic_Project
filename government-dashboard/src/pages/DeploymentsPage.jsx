@@ -404,7 +404,7 @@ const DeploymentsPage = () => {
         { label: 'Total Units', value: stats.total_deployments, icon: Shield, color: 'text-blue-400', bg: 'bg-blue-500/10' },
         { label: 'Active Now', value: stats.active_deployments, icon: Activity, color: 'text-green-400', bg: 'bg-green-500/10' },
         { label: 'Pending Ack', value: stats.pending_acknowledgments || 0, icon: Bell, color: 'text-orange-400', bg: 'bg-orange-500/10' },
-        { label: 'Total Officers', value: stats.total_officers_deployed, icon: Users, color: 'text-purple-400', bg: 'bg-purple-500/10' },
+        { label: 'Total Officers', value: stats.total_officers_deployed, icon: Users, color: 'text-cyan-400', bg: 'bg-cyan-500/10' },
     ];
 
     return (
@@ -668,7 +668,7 @@ const DeploymentsPage = () => {
                     <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-xl" onClick={() => setIsModalOpen(false)} />
                     <div className="relative w-full max-w-4xl bg-slate-900 border border-white/10 rounded-[32px] shadow-2xl shadow-blue-500/10 overflow-hidden animate-in fade-in zoom-in duration-300">
                         {/* Premium Modal Header */}
-                        <div className="relative p-8 bg-gradient-to-br from-blue-600/20 via-transparent to-purple-600/10 border-b border-white/5">
+                        <div className="relative p-8 bg-gradient-to-br from-blue-600/20 via-transparent to-cyan-600/10 border-b border-white/5">
                             <div className="flex justify-between items-start">
                                 <div>
                                     <div className="flex items-center gap-3 mb-2">
@@ -910,7 +910,7 @@ const DeploymentsPage = () => {
                 <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
                     <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-xl" onClick={() => setIsManageOfficersOpen(false)} />
                     <div className="relative w-full max-w-2xl bg-slate-900 border border-white/10 rounded-[32px] shadow-2xl shadow-blue-500/10 overflow-hidden animate-in fade-in zoom-in duration-300">
-                        <div className="p-8 border-b border-white/5 bg-gradient-to-br from-blue-600/20 via-transparent to-purple-600/10 flex justify-between items-center">
+                        <div className="p-8 border-b border-white/5 bg-gradient-to-br from-blue-600/20 via-transparent to-cyan-600/10 flex justify-between items-center">
                             <div>
                                 <div className="flex items-center gap-3 mb-1">
                                     <div className="w-8 h-8 bg-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-600/40">

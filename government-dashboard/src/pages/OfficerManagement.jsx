@@ -431,7 +431,7 @@ const OfficerManagement = () => {
                     <td className="px-4 py-4">
                       <div className="flex items-center gap-3">
                         <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold ${
-                          officer.is_active ? 'bg-gradient-to-br from-blue-500 to-purple-600' : 'bg-gray-600'
+                          officer.is_active ? 'bg-gradient-to-br from-blue-500 to-cyan-600' : 'bg-gray-600'
                         }`}>
                           {officer.full_name?.charAt(0)?.toUpperCase() || 'O'}
                         </div>
@@ -808,7 +808,7 @@ const OfficerManagement = () => {
               <div className="bg-slate-900/50 rounded-lg p-3">
                 <div className="flex items-center gap-3">
                   <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold ${
-                    selectedOfficer.is_active ? 'bg-gradient-to-br from-blue-500 to-purple-600' : 'bg-gray-600'
+                    selectedOfficer.is_active ? 'bg-gradient-to-br from-blue-500 to-cyan-600' : 'bg-gray-600'
                   }`}>
                     {selectedOfficer.full_name?.charAt(0)?.toUpperCase() || 'O'}
                   </div>

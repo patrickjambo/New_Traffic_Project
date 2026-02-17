@@ -65,7 +65,7 @@ const Analytics = () => {
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-            <Activity className="w-8 h-8 text-purple-500" />
+            <Activity className="w-8 h-8 text-cyan-500" />
             System Analytics
           </h1>
           <p className="text-gray-400 mt-1">Real-time insights and performance metrics</p>
@@ -74,7 +74,7 @@ const Analytics = () => {
 
       {loading ? (
         <div className="flex justify-center py-12">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500"></div>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-500"></div>
         </div>
       ) : (
         <>
@@ -116,7 +116,7 @@ const Analytics = () => {
             <div className="bg-slate-800/50 backdrop-blur-md border border-white/5 rounded-xl p-6">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-gray-400 text-sm font-medium">Resolution Rate</h3>
-                <TrendingUp className="w-5 h-5 text-purple-400" />
+                <TrendingUp className="w-5 h-5 text-cyan-400" />
               </div>
               <p className="text-3xl font-bold text-white">94%</p>
               <p className="text-xs text-green-400 flex items-center gap-1 mt-2">

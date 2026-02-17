@@ -66,8 +66,8 @@ const TrafficDashboard = () => {
       value: '99%',
       subtitle: 'All Systems Operational',
       icon: Activity,
-      color: 'from-purple-500 to-pink-500',
-      bgColor: 'bg-purple-500/10',
+      color: 'from-cyan-500 to-teal-500',
+      bgColor: 'bg-cyan-500/10',
       trend: '+2%',
       trendUp: true
     }
@@ -110,11 +110,11 @@ const TrafficDashboard = () => {
         <div className="flex justify-between items-center">
           {/* Logo and Brand */}
           <div className="flex items-center gap-4">
-            <div className="bg-gradient-to-br from-blue-500 to-purple-600 p-2 rounded-xl">
+            <div className="bg-gradient-to-br from-blue-500 to-cyan-600 p-2 rounded-xl">
               <Shield className="w-6 h-6" />
             </div>
             <div>
-              <h1 className="text-xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
+              <h1 className="text-xl font-bold bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent">
                 RNP TRAFFIC
               </h1>
               <p className="text-xs text-blue-300">Traffic Management System</p>
@@ -219,7 +219,7 @@ const TrafficDashboard = () => {
                 onClick={() => setShowUserMenu(!showUserMenu)}
                 className="flex items-center gap-3 bg-white/10 px-4 py-2 rounded-lg hover:bg-white/20 transition-colors"
               >
-                <div className="bg-gradient-to-br from-blue-500 to-purple-600 p-2 rounded-lg">
+                <div className="bg-gradient-to-br from-blue-500 to-cyan-600 p-2 rounded-lg">
                   <User className="w-4 h-4" />
                 </div>
                 <div className="text-left">
@@ -303,7 +303,7 @@ const TrafficDashboard = () => {
           </div>
 
           <div className="bg-slate-800/50 rounded-xl h-80 flex items-center justify-center relative overflow-hidden">
-            <div className="absolute inset-0 bg-gradient-to-br from-blue-500/10 to-purple-500/10"></div>
+            <div className="absolute inset-0 bg-gradient-to-br from-blue-500/10 to-cyan-500/10"></div>
             <MapPin className="w-16 h-16 text-blue-400 opacity-50" />
             <div className="absolute top-4 right-4 bg-slate-900/80 backdrop-blur-sm px-3 py-2 rounded-lg text-xs">
               <div className="flex items-center gap-2 mb-2">

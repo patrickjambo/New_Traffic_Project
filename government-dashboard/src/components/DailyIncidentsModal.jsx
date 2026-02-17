@@ -78,7 +78,7 @@ const DailyIncidentsModal = ({ isOpen, onClose }) => {
                                         <h4 className="font-bold text-gray-900 flex items-center gap-2">
                                             {item.incident_type || item.type || 'Traffic Incident'}
                                             {item.source === 'mobile_app' && (
-                                                <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-full flex items-center gap-1">
+                                                <span className="text-[10px] bg-cyan-100 text-cyan-700 px-1.5 py-0.5 rounded-full flex items-center gap-1">
                                                     <Camera className="w-3 h-3" /> AI
                                                 </span>
                                             )}

@@ -45,7 +45,7 @@ const SimpleIncidentMap = ({ incidents }) => {
                       <p className="font-semibold text-sm text-gray-800 flex items-center">
                         {incident.incident_type}
                         {incident.source === 'mobile_app' && (
-                          <span className="ml-2 text-xs bg-purple-100 text-purple-800 px-2 py-0.5 rounded">📱 Auto</span>
+                          <span className="ml-2 text-xs bg-cyan-100 text-cyan-800 px-2 py-0.5 rounded">📱 Auto</span>
                         )}
                       </p>
                       <p className="text-xs text-gray-600 mt-1 flex items-center">
@@ -478,7 +478,7 @@ const SimpleLiveIncidentFeed = ({ incidents, loading }) => {
                       {incident.status?.replace('_', ' ') || 'Pending'}
                     </span>
                     {incident.source === 'mobile_app' && (
-                      <span className="text-xs bg-purple-100 text-purple-800 px-2 py-1 rounded flex items-center gap-1">
+                      <span className="text-xs bg-cyan-100 text-cyan-800 px-2 py-1 rounded flex items-center gap-1">
                         <span>📱</span> Auto
                       </span>
                     )}

@@ -560,30 +560,31 @@ const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
     };
 
     return (
-        <div className="bg-white rounded-xl shadow-lg overflow-hidden">
-            {/* Header */}
-            <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-4">
-                <h2 className="text-xl font-bold text-white flex items-center">
-                    <Navigation className="w-6 h-6 mr-2" />
+        <div className="bg-slate-800 rounded-xl shadow-lg overflow-hidden border border-cyan-400/20">
+            {/* Header - Secondary cyan color matching navigation */}
+            <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 px-6 py-4 relative overflow-hidden">
+                <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-cyan-400 to-transparent opacity-60" />
+                <h2 className="text-xl font-bold text-cyan-50 flex items-center relative z-10">
+                    <Navigation className="w-6 h-6 mr-2 text-cyan-400" />
                     Route Planner
                 </h2>
-                <p className="text-blue-100 text-sm mt-1">
+                <p className="text-cyan-300/70 text-sm mt-1 relative z-10">
                     Find the safest route with real-time incident alerts
                 </p>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-0">
                 {/* Left Panel - Input & Route Options */}
-                <div className="lg:col-span-1 h-[600px] flex flex-col border-r border-gray-200 bg-gray-50">
-                    <div className="p-5 flex-shrink-0 border-b border-gray-100">
+                <div className="lg:col-span-1 h-[600px] flex flex-col border-r border-cyan-400/10 bg-slate-800/50">
+                    <div className="p-5 flex-shrink-0 border-b border-cyan-400/10">
                         {/* Start Location */}
                         <div className="mb-4">
-                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                            <label className="block text-sm font-semibold text-cyan-100 mb-2">
                                 Starting Point
                             </label>
                             <div className="flex gap-2">
                                 <div className="relative flex-1">
-                                    <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-green-600" />
+                                    <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-green-400" />
                                     <input
                                         type="text"
                                         value={start}
@@ -591,18 +592,18 @@ const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
                                         onFocus={() => start && setShowStartSuggestions(true)}
                                         onBlur={() => setTimeout(() => setShowStartSuggestions(false), 200)}
                                         placeholder="e.g., Kigali Airport..."
-                                        className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                                        className="w-full pl-10 pr-4 py-2.5 bg-slate-700/50 border border-cyan-400/20 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-sm text-white placeholder-slate-400"
                                     />
                                     {showStartSuggestions && startSuggestions.length > 0 && (
-                                        <div className="absolute z-30 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-48 overflow-y-auto">
+                                        <div className="absolute z-30 w-full mt-1 bg-slate-700 border border-cyan-400/30 rounded-lg shadow-xl max-h-48 overflow-y-auto">
                                             {startSuggestions.map((loc, idx) => (
                                                 <div
                                                     key={idx}
                                                     onClick={() => selectStart(loc)}
-                                                    className="px-3 py-2.5 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-b-0"
+                                                    className="px-3 py-2.5 hover:bg-cyan-500/20 cursor-pointer border-b border-slate-600 last:border-b-0"
                                                 >
-                                                    <span className="text-sm font-medium text-gray-800">{loc.name}</span>
-                                                    <span className="text-xs text-gray-500 block">{loc.type}</span>
+                                                    <span className="text-sm font-medium text-white">{loc.name}</span>
+                                                    <span className="text-xs text-slate-400 block">{loc.type}</span>
                                                 </div>
                                             ))}
                                         </div>
@@ -611,7 +612,7 @@ const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
                                 <button
                                     onClick={handleUseMyLocation}
                                     disabled={loadingLocation}
-                                    className="px-3 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors"
+                                    className="px-3 py-2 bg-cyan-500/20 text-cyan-400 rounded-lg hover:bg-cyan-500/30 border border-cyan-400/30 transition-colors"
                                     title="Use my location"
                                 >
                                     {loadingLocation ? <Loader2 className="w-5 h-5 animate-spin" /> : <Navigation className="w-5 h-5" />}
@@ -621,11 +622,11 @@ const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
 
                         {/* Destination */}
                         <div className="mb-4">
-                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                            <label className="block text-sm font-semibold text-cyan-100 mb-2">
                                 Destination
                             </label>
                             <div className="relative">
-                                <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-red-600" />
+                                <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-red-400" />
                                 <input
                                     type="text"
                                     value={destination}
@@ -633,18 +634,18 @@ const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
                                     onFocus={() => destination && setShowDestSuggestions(true)}
                                     onBlur={() => setTimeout(() => setShowDestSuggestions(false), 200)}
                                     placeholder="e.g., Nyabugogo..."
-                                    className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                                    className="w-full pl-10 pr-4 py-2.5 bg-slate-700/50 border border-cyan-400/20 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-sm text-white placeholder-slate-400"
                                 />
                                 {showDestSuggestions && destSuggestions.length > 0 && (
-                                    <div className="absolute z-30 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-48 overflow-y-auto">
+                                    <div className="absolute z-30 w-full mt-1 bg-slate-700 border border-cyan-400/30 rounded-lg shadow-xl max-h-48 overflow-y-auto">
                                         {destSuggestions.map((loc, idx) => (
                                             <div
                                                 key={idx}
                                                 onClick={() => selectDest(loc)}
-                                                className="px-3 py-2.5 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-b-0"
+                                                className="px-3 py-2.5 hover:bg-cyan-500/20 cursor-pointer border-b border-slate-600 last:border-b-0"
                                             >
-                                                <span className="text-sm font-medium text-gray-800">{loc.name}</span>
-                                                <span className="text-xs text-gray-500 block">{loc.type}</span>
+                                                <span className="text-sm font-medium text-white">{loc.name}</span>
+                                                <span className="text-xs text-slate-400 block">{loc.type}</span>
                                             </div>
                                         ))}
                                     </div>
@@ -657,7 +658,7 @@ const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
                             <button
                                 onClick={findRoutes}
                                 disabled={loadingRoutes || (!start && !startCoords) || (!destination && !destCoords)}
-                                className="flex-1 bg-gradient-to-r from-blue-600 to-blue-700 text-white py-3 rounded-lg font-semibold hover:from-blue-700 hover:to-blue-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+                                className="flex-1 bg-gradient-to-r from-cyan-600 to-cyan-700 text-white py-3 rounded-lg font-semibold hover:from-cyan-500 hover:to-cyan-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center border border-cyan-400/30"
                             >
                                 {loadingRoutes ? (
                                     <>
@@ -674,7 +675,7 @@ const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
                             {routes.length > 0 && (
                                 <button
                                     onClick={clearRoutes}
-                                    className="px-4 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
+                                    className="px-4 py-3 bg-slate-700 text-slate-300 rounded-lg hover:bg-slate-600 border border-cyan-400/20 transition-colors"
                                 >
                                     <X className="w-5 h-5" />
                                 </button>
@@ -686,8 +687,8 @@ const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
                     <div className="flex-1 overflow-y-auto p-5 custom-scrollbar">
                         {routes.length > 0 && (
                             <div className="space-y-3">
-                                <h3 className="font-semibold text-gray-800 flex items-center">
-                                    <Route className="w-4 h-4 mr-2" />
+                                <h3 className="font-semibold text-cyan-100 flex items-center">
+                                    <Route className="w-4 h-4 mr-2 text-cyan-400" />
                                     Route Options ({routes.length})
                                 </h3>
 
@@ -700,8 +701,8 @@ const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
                                             key={route.id}
                                             onClick={() => setSelectedRouteIndex(index)}
                                             className={`p-4 rounded-lg cursor-pointer transition-all border-l-4 ${isSelected
-                                                ? 'bg-gray-100 shadow-md'
-                                                : 'bg-white hover:bg-gray-50 border-gray-200'
+                                                ? 'bg-slate-700/80 shadow-md'
+                                                : 'bg-slate-700/40 hover:bg-slate-700/60 border-slate-600'
                                                 }`}
                                             style={{
                                                 borderLeftColor: routeColor,
@@ -717,7 +718,7 @@ const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
                                                     >
                                                         {index + 1}
                                                     </div>
-                                                    <span className="font-bold text-gray-800">
+                                                    <span className="font-bold text-cyan-50">
                                                         {index === 0 ? '🥇 Recommended' : index === 1 ? '🥈 Alternative 1' : '🥉 Alternative 2'}
                                                     </span>
                                                 </div>
@@ -734,28 +735,28 @@ const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
                                                 >
                                                     {formatDuration(route.duration)}
                                                 </span>
-                                                <span className="text-gray-500 text-sm">
+                                                <span className="text-slate-400 text-sm">
                                                     {formatDistance(route.distance)}
                                                 </span>
                                             </div>
 
                                             {/* Route summary if available */}
                                             {route.summary && route.summary !== `Route ${index + 1}` && (
-                                                <div className="text-xs text-gray-500 mb-2 truncate">
+                                                <div className="text-xs text-slate-400 mb-2 truncate">
                                                     via {route.summary}
                                                 </div>
                                             )}
 
                                             {/* Incident status badge */}
                                             {route.hasIncidents ? (
-                                                <div className="flex items-center gap-1 text-xs text-orange-700 bg-orange-100 px-2 py-1.5 rounded-md">
+                                                <div className="flex items-center gap-1 text-xs text-orange-300 bg-orange-500/20 px-2 py-1.5 rounded-md border border-orange-500/30">
                                                     <AlertTriangle className="w-3.5 h-3.5" />
                                                     <span className="font-medium">
                                                         {route.incidents.length} incident{route.incidents.length > 1 ? 's' : ''} on this route
                                                     </span>
                                                 </div>
                                             ) : (
-                                                <div className="flex items-center gap-1 text-xs text-green-700 bg-green-100 px-2 py-1.5 rounded-md">
+                                                <div className="flex items-center gap-1 text-xs text-green-300 bg-green-500/20 px-2 py-1.5 rounded-md border border-green-500/30">
                                                     <Check className="w-3.5 h-3.5" />
                                                     <span className="font-medium">Route is clear</span>
                                                 </div>
@@ -993,37 +994,37 @@ const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
             </div>
 
             {/* Horizontal Legend Section below Map */}
-            <div className="bg-white border-t border-gray-200 p-4">
+            <div className="bg-slate-800/80 border-t border-cyan-400/20 p-4">
                 <div className="flex flex-wrap items-center justify-center gap-x-8 gap-y-4">
                     {/* Route Colors Legend */}
                     <div className="flex items-center gap-4">
-                        <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Routes:</span>
+                        <span className="text-xs font-bold text-cyan-400 uppercase tracking-wider">Routes:</span>
                         <div className="flex items-center gap-4">
                             <div className="flex items-center text-xs">
                                 <div className="w-4 h-1.5 bg-green-500 rounded mr-1.5" />
-                                <span className="text-gray-700">Recommended</span>
+                                <span className="text-slate-300">Recommended</span>
                             </div>
                             <div className="flex items-center text-xs">
                                 <div className="w-4 h-1.5 bg-blue-500 rounded mr-1.5" />
-                                <span className="text-gray-700">Alt 1</span>
+                                <span className="text-slate-300">Alt 1</span>
                             </div>
                             <div className="flex items-center text-xs">
                                 <div className="w-4 h-1.5 bg-orange-500 rounded mr-1.5" />
-                                <span className="text-gray-700">Alt 2</span>
+                                <span className="text-slate-300">Alt 2</span>
                             </div>
                             <div className="flex items-center text-xs">
                                 <div className="w-4 h-1.5 bg-purple-500 rounded mr-1.5" />
-                                <span className="text-gray-700 font-semibold">Selected</span>
+                                <span className="text-slate-300 font-semibold">Selected</span>
                             </div>
                         </div>
                     </div>
 
                     {/* Divider */}
-                    <div className="hidden md:block w-px h-6 bg-gray-200" />
+                    <div className="hidden md:block w-px h-6 bg-cyan-400/30" />
 
                     {/* Incident Symbols Legend */}
                     <div className="flex items-center gap-3">
-                        <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Incidents:</span>
+                        <span className="text-xs font-bold text-cyan-400 uppercase tracking-wider">Incidents:</span>
                         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
                             {Object.entries(INCIDENT_TYPES).map(([key, config]) => (
                                 <div key={key} className="flex items-center text-xs">
@@ -1033,7 +1034,7 @@ const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
                                     >
                                         <span className="text-[10px] text-white">{config.emoji.split(' ')[0]}</span>
                                     </div>
-                                    <span className="text-gray-700">{config.label}</span>
+                                    <span className="text-slate-300">{config.label}</span>
                                 </div>
                             ))}
                         </div>
@@ -1042,12 +1043,12 @@ const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
             </div>
 
             {/* Footer with incident count */}
-            <div className="bg-gray-100 px-6 py-3 flex items-center justify-between text-sm">
-                <span className="text-gray-600">
-                    <AlertTriangle className="w-4 h-4 inline mr-1 text-orange-500" />
+            <div className="bg-slate-900/80 px-6 py-3 flex items-center justify-between text-sm border-t border-cyan-400/10">
+                <span className="text-slate-400">
+                    <AlertTriangle className="w-4 h-4 inline mr-1 text-orange-400" />
                     {incidents.length} active incident{incidents.length !== 1 ? 's' : ''} in Kigali
                 </span>
-                <span className="text-gray-500">
+                <span className="text-slate-500">
                     Powered by OSRM & OpenStreetMap
                 </span>
             </div>

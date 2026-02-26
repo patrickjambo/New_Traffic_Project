@@ -98,31 +98,53 @@ class SocketManager {
             
             // Officer sends location update
             socket.on('officer:location_update', async (data) => {
+                console.log('📍 Received location update from socket:', socket.id, data);
+                
                 const clientData = this.connectedClients.get(socket.id);
-                if (!clientData || clientData.role !== 'police') return;
+                
+                // Accept location if we have userId (even if role not set yet)
+                // This handles the case where location is sent before join:role
+                const userId = data.userId || clientData?.userId;
+                const role = data.role || clientData?.role;
+                
+                if (!userId) {
+                    console.log('⚠️ Location update rejected: no userId. Data:', data, 'ClientData:', clientData);
+                    return;
+                }
+                
+                // Update clientData if we got userId from the data payload
+                if (clientData && data.userId) {
+                    clientData.userId = data.userId;
+                    if (data.role) clientData.role = data.role;
+                }
 
                 const { latitude, longitude, accuracy, speed, heading, address, timestamp } = data;
                 
-                if (!latitude || !longitude) return;
+                if (!latitude || !longitude) {
+                    console.log('⚠️ Location rejected: missing lat/lng');
+                    return;
+                }
 
-                // Store in client data
-                clientData.lastLocation = {
-                    latitude,
-                    longitude,
-                    accuracy,
-                    speed,
-                    heading,
-                    address,
-                    timestamp: timestamp || new Date().toISOString(),
-                };
+                // Store in client data if available
+                if (clientData) {
+                    clientData.lastLocation = {
+                        latitude,
+                        longitude,
+                        accuracy,
+                        speed,
+                        heading,
+                        address,
+                        timestamp: timestamp || new Date().toISOString(),
+                    };
+                }
 
                 // Broadcast to admin for real-time tracking dashboard
                 const adminRoom = this.io.sockets.adapter.rooms.get('role:admin');
                 const adminCount = adminRoom ? adminRoom.size : 0;
-                console.log(`📡 Broadcasting to ${adminCount} admin clients`);
+                console.log(`📡 Broadcasting location to ${adminCount} admin clients for officer ${userId}`);
                 
                 this.io.to('role:admin').emit('officer:location', {
-                    officerId: clientData.userId,
+                    officerId: userId,
                     socketId: socket.id,
                     latitude,
                     longitude,
@@ -130,22 +152,55 @@ class SocketManager {
                     speed,
                     heading,
                     address,
-                    timestamp: clientData.lastLocation.timestamp,
+                    timestamp: timestamp || new Date().toISOString(),
                 });
 
                 // Update database (async, don't block)
-                this._updateOfficerLocationInDB(clientData.userId, {
+                this._updateOfficerLocationInDB(userId, {
                     latitude,
                     longitude,
                     address,
                 }).catch(err => console.error('DB location update error:', err));
 
-                console.log(`📍 Officer ${clientData.userId} location: ${latitude}, ${longitude}`);
+                console.log(`✅ Officer ${userId} location saved: ${latitude}, ${longitude}`);
             });
 
             // Heartbeat for connection health
             socket.on('ping', () => {
                 socket.emit('pong', { timestamp: Date.now() });
+            });
+
+            // 🚨 Handle emergency accepted from mobile app (instant broadcast)
+            socket.on('emergency:accepted', (data) => {
+                console.log('📱 Mobile app emitted emergency:accepted:', data);
+                
+                // Broadcast to all admins immediately (no DB call needed, API will handle that)
+                this.io.to('role:admin').emit('emergency:accepted', {
+                    emergencyId: data.emergencyId,
+                    acceptedBy: data.acceptedBy,
+                    timestamp: data.timestamp || new Date().toISOString(),
+                    message: data.message || `${data.acceptedBy?.officerName || 'Officer'} is responding`,
+                });
+                
+                // Also emit emergency:update for dashboard to update status
+                this.io.emit('emergency:update', {
+                    id: data.emergencyId,
+                    emergencyId: data.emergencyId,
+                    status: 'dispatched',
+                    assigned_to: data.acceptedBy?.officerId,
+                    assigned_to_name: data.acceptedBy?.officerName,
+                    responder_name: data.acceptedBy?.officerName,
+                });
+                
+                // Broadcast to other officers so they stop alarming
+                socket.to('role:police').emit('emergency:accepted', {
+                    emergencyId: data.emergencyId,
+                    acceptedBy: data.acceptedBy,
+                    timestamp: data.timestamp,
+                    message: data.message,
+                });
+                
+                console.log(`✅ Broadcasted emergency:accepted for #${data.emergencyId} by ${data.acceptedBy?.officerName}`);
             });
         });
     }
@@ -160,11 +215,11 @@ class SocketManager {
                 UPDATE officer_profiles 
                 SET current_latitude = $1, 
                     current_longitude = $2, 
-                    status = 'available',
+                    current_address = $3,
                     is_on_duty = true,
                     location_updated_at = NOW()
-                WHERE user_id = $3
-            `, [location.latitude, location.longitude, officerId]);
+                WHERE user_id = $4
+            `, [location.latitude, location.longitude, location.address || null, officerId]);
             console.log(`✅ DB updated for officer ${officerId}: ${location.latitude}, ${location.longitude}`);
         } catch (error) {
             console.error('Error updating officer location in DB:', error.message);
@@ -259,6 +314,8 @@ class SocketManager {
 
         const payload = {
             id: emergency.id,
+            emergencyId: emergency.id,  // Add emergencyId for mobile app compatibility
+            alertId: emergency.id,      // Add alertId as fallback
             type: emergency.emergency_type,
             severity: emergency.severity,
             location: {
@@ -266,6 +323,9 @@ class SocketManager {
                 latitude: parseFloat(emergency.latitude),
                 longitude: parseFloat(emergency.longitude),
             },
+            latitude: parseFloat(emergency.latitude),
+            longitude: parseFloat(emergency.longitude),
+            location_name: emergency.location_name,
             description: emergency.description,
             servicesNeeded: emergency.services_needed,
             createdAt: emergency.created_at || new Date().toISOString(),
@@ -308,13 +368,17 @@ class SocketManager {
 
         const payload = {
             id: emergency.id,
+            emergencyId: emergency.id,
             status: emergency.status,
             assignedTo: emergency.assigned_to,
+            assigned_to: emergency.assigned_to,
+            assigned_to_name: emergency.assigned_to_name || emergency.responder_name,
+            responder_name: emergency.assigned_to_name || emergency.responder_name,
             updatedAt: emergency.updated_at || new Date().toISOString(),
         };
 
         this.io.emit('emergency:update', payload);
-        console.log(`🔄 Emitted emergency:update - ID: ${emergency.id}, Status: ${emergency.status}`);
+        console.log(`🔄 Emitted emergency:update - ID: ${emergency.id}, Status: ${emergency.status}, Officer: ${payload.responder_name || 'N/A'}`);
     }
 
     // ============================================

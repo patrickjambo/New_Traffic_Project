@@ -174,13 +174,10 @@ const LoginPage = () => {
               </button>
             </form>
 
-            {/* Register Link */}
+            {/* Contact Admin Info */}
             <div className="mt-8 pt-6 border-t border-slate-700/50 text-center">
               <p className="text-slate-400 text-sm">
-                Need admin access?{' '}
-                <Link to="/register" className="text-cyan-400 hover:text-cyan-300 font-semibold transition-colors">
-                  Request Account
-                </Link>
+                Need access? Contact your system administrator
               </p>
             </div>
 
@@ -196,7 +193,7 @@ const LoginPage = () => {
 
         {/* Footer Note */}
         <p className="text-center text-slate-500 text-xs mt-8">
-          For District Admins and Super Admins only
+          Authorized Personnel Only
         </p>
       </div>
     </div>

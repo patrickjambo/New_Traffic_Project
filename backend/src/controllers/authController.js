@@ -39,8 +39,8 @@ const register = async (req, res) => {
 
         const user = result.rows[0];
 
-        // Generate token
-        const token = generateToken(user.id, user.email, user.role);
+        // Generate token (include full_name)
+        const token = generateToken(user.id, user.email, user.role, null, user.full_name);
 
         res.status(201).json({
             success: true,
@@ -109,8 +109,8 @@ const login = async (req, res) => {
             });
         }
 
-        // Generate token (include district_id for district admins)
-        const token = generateToken(user.id, user.email, user.role, user.district_id);
+        // Generate token (include district_id for district admins and full_name)
+        const token = generateToken(user.id, user.email, user.role, user.district_id, user.full_name);
 
         res.json({
             success: true,

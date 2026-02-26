@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { MapPin, Navigation, AlertTriangle, Clock, Menu, X, Activity, Camera, Phone, ChevronRight, ArrowRight, CheckCircle, Eye, Bell, Car, Flame, ChevronLeft, Globe, Shield, Send, Users, Radio, AlertCircle, MapPinned, FileWarning, Truck, Siren, TrendingUp } from 'lucide-react';
+import { MapPin, Navigation, AlertTriangle, Clock, Menu, X, Activity, Camera, Phone, ChevronRight, ArrowRight, CheckCircle, Eye, Bell, Car, Flame, ChevronLeft, Globe, Shield, Send, Users, Radio, AlertCircle, MapPinned, FileWarning, Truck, Siren, TrendingUp, Mail } from 'lucide-react';
 import { useData } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
 import ReportIncidentForm from '../components/ReportIncidentForm';
@@ -52,15 +52,15 @@ const HomePage = () => {
   };
 
   const getSeverityStyles = (sev) => {
-    const s = { critical: 'bg-gradient-to-r from-red-500 to-rose-600 text-white', high: 'bg-gradient-to-r from-orange-500 to-amber-500 text-white', medium: 'bg-gradient-to-r from-yellow-400 to-amber-400 text-gray-900', low: 'bg-gradient-to-r from-blue-500 to-cyan-500 text-white' };
-    return s[sev] || s.low;
+  // Use a single primary color for all severities for consistency
+  return 'bg-cyan-500/90 text-white';
   };
 
   const stats = [
-    { label: 'Total Reports', value: statistics?.total_incidents || 156, icon: FileWarning, color: 'from-blue-500 to-cyan-500', bg: 'bg-blue-50' },
-    { label: 'Active Now', value: statistics?.active_reports || 12, icon: Radio, color: 'from-orange-500 to-red-500', bg: 'bg-orange-50' },
-    { label: 'Avg Response', value: (statistics?.avg_response_time || 8) + 'min', icon: Clock, color: 'from-emerald-500 to-green-500', bg: 'bg-emerald-50' },
-    { label: 'Resolved Today', value: statistics?.resolved_today || 23, icon: CheckCircle, color: 'from-violet-500 to-purple-500', bg: 'bg-violet-50' }
+    { label: 'Total Reports', value: statistics?.total_incidents || 156, icon: FileWarning },
+    { label: 'Active Now', value: statistics?.active_reports || 12, icon: Radio },
+    { label: 'Avg Response', value: (statistics?.avg_response_time || 8) + 'min', icon: Clock },
+    { label: 'Resolved Today', value: statistics?.resolved_today || 23, icon: CheckCircle }
   ];
 
   return (
@@ -194,7 +194,7 @@ const HomePage = () => {
       </header>
 
       {/* HERO - FULL WIDTH BACKGROUND IMAGE */}
-      <section className="relative h-[75vh] min-h-[500px] max-h-[700px] overflow-hidden">
+      <section className="relative h-[85vh] min-h-[600px] max-h-[850px] overflow-hidden">
         {/* Background Images - Fullscreen Rotating */}
         {heroSlides.map((slide, i) => (
           <div key={slide.id} className={"absolute inset-0 transition-all duration-1000 ease-in-out " + (i === currentSlide ? 'opacity-100 scale-100' : 'opacity-0 scale-105')}>
@@ -236,63 +236,49 @@ const HomePage = () => {
         <button onClick={() => setCurrentSlide(p => (p + 1) % heroSlides.length)} className="absolute right-4 top-1/2 -translate-y-1/2 p-3 rounded-full bg-white/10 backdrop-blur-md hover:bg-white/20 border border-white/20 transition-all"><ChevronRight className="w-6 h-6 text-white" /></button>
       </section>
 
-      {/* STATS - Advanced Dynamic Section */}
-      <section className="relative bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 py-16 overflow-hidden">
-        {/* Animated Background Effects */}
+      {/* STATS - Compact Section */}
+      <section className="relative bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 py-6 overflow-hidden">
+        {/* Subtle Background Effects */}
         <div className="absolute inset-0">
-          {/* Animated Grid */}
           <div className="absolute inset-0 opacity-5" style={{backgroundImage: 'radial-gradient(circle at 2px 2px, cyan 1px, transparent 0)', backgroundSize: '40px 40px'}} />
-          {/* Glowing Orbs */}
-          <div className="absolute top-10 left-1/4 w-64 h-64 bg-cyan-500/10 rounded-full blur-3xl animate-pulse" />
-          <div className="absolute bottom-10 right-1/4 w-72 h-72 bg-blue-500/10 rounded-full blur-3xl animate-pulse" style={{animationDelay: '1s'}} />
-          {/* Border Lines */}
           <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-cyan-500/30 to-transparent" />
           <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-cyan-500/30 to-transparent" />
         </div>
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
-          {/* Section Title */}
-          <div className="text-center mb-10">
-            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-cyan-500/10 backdrop-blur border border-cyan-400/30 mb-4">
-              <Activity className="w-4 h-4 text-cyan-400 animate-pulse" />
-              <span className="text-cyan-300 text-sm font-semibold">Real-Time Statistics</span>
+          {/* Section Title - Compact */}
+          <div className="text-center mb-4">
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-cyan-500/10 backdrop-blur border border-cyan-400/30">
+              <Activity className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
+              <span className="text-cyan-300 text-xs font-semibold">Real-Time Statistics</span>
             </div>
           </div>
 
-          {/* Stats Grid */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6">
+          {/* Stats Grid - Compact */}
+          <div className="grid grid-cols-4 gap-3">
             {stats.map((stat, i) => (
               <div 
                 key={i} 
-                className="group relative p-6 rounded-3xl bg-slate-800/50 backdrop-blur-xl border border-cyan-400/20 hover:border-cyan-400/50 hover:bg-slate-800/70 transition-all duration-500 hover:scale-105 hover:-translate-y-1 overflow-hidden"
-                style={{animationDelay: `${i * 100}ms`}}
+                className="group relative p-4 rounded-2xl bg-slate-800/50 backdrop-blur-xl border border-cyan-400/20 hover:border-cyan-400/40 transition-all duration-300 overflow-hidden"
               >
-                {/* Hover Glow Effect */}
-                <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/0 via-transparent to-blue-500/0 group-hover:from-cyan-500/10 group-hover:to-blue-500/10 transition-all duration-500" />
-                
-                {/* Animated Corner Accent */}
-                <div className="absolute top-0 right-0 w-20 h-20 bg-gradient-to-br from-cyan-500/10 to-transparent rounded-bl-full opacity-0 group-hover:opacity-100 transition-all duration-500" />
-                
+                {/* Hover Effect */}
+                <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/0 to-cyan-500/0 group-hover:from-cyan-500/5 group-hover:to-cyan-500/10 transition-all duration-300" />
                 {/* Content */}
-                <div className="relative z-10">
-                  {/* Icon with enhanced styling */}
-                  <div className={`inline-flex p-3.5 rounded-2xl bg-gradient-to-br shadow-lg mb-4 group-hover:scale-110 group-hover:rotate-3 transition-transform duration-500 ${stat.color}`}>
-                    <stat.icon className="w-6 h-6 text-white" />
+                <div className="relative z-10 flex items-center gap-3">
+                  {/* Icon */}
+                  <div className="p-2.5 rounded-xl bg-gradient-to-br from-cyan-500 to-teal-400 shadow-lg">
+                    <stat.icon className="w-5 h-5 text-cyan-50" />
                   </div>
-                  
-                  {/* Value with gradient */}
-                  <p className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white to-cyan-200 mb-1 group-hover:from-cyan-300 group-hover:to-white transition-all duration-500">
-                    {stat.value}
-                  </p>
-                  
-                  {/* Label */}
-                  <p className="text-sm font-medium text-slate-400 group-hover:text-cyan-300 transition-colors duration-300">
-                    {stat.label}
-                  </p>
+                  {/* Text */}
+                  <div>
+                    <p className="text-2xl font-black text-white">
+                      {stat.value}
+                    </p>
+                    <p className="text-xs font-medium text-slate-400">
+                      {stat.label}
+                    </p>
+                  </div>
                 </div>
-
-                {/* Bottom Accent Line */}
-                <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-cyan-500/0 to-transparent group-hover:via-cyan-500/50 transition-all duration-500" />
               </div>
             ))}
           </div>
@@ -543,38 +529,34 @@ const HomePage = () => {
                 <div className="absolute top-0 right-0 w-32 h-32 bg-cyan-500/10 rounded-full blur-2xl group-hover:bg-cyan-500/20 transition-all duration-500" />
                 
                 <div className="relative z-10">
-                  <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-cyan-500 to-blue-600 shadow-lg shadow-cyan-500/30 flex items-center justify-center mb-4 group-hover:scale-110 group-hover:rotate-3 transition-transform duration-500">
-                    <Camera className="w-7 h-7 text-white" />
+                  <div className="w-14 h-14 rounded-2xl bg-slate-800/80 border border-slate-700/50 flex items-center justify-center mb-4 group-hover:scale-110 group-hover:rotate-3 transition-transform duration-500">
+                    <Camera className="w-7 h-7 text-slate-400" />
                   </div>
                   <h3 className="text-xl font-bold text-white mb-2">Report an Incident</h3>
                   <p className="text-slate-400 text-sm mb-5">Help keep Rwanda's roads safe</p>
                   <button 
                     onClick={() => setShowIncidentModal(true)} 
-                    className="w-full py-3.5 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-600 text-white font-bold hover:from-blue-500 hover:to-cyan-500 transition-all duration-300 flex items-center justify-center gap-2 shadow-lg shadow-blue-500/30 hover:shadow-blue-500/50 hover:scale-[1.02] active:scale-[0.98]"
+                    className="w-full py-3.5 rounded-xl bg-cyan-500/80 text-white/90 font-bold hover:bg-cyan-500 transition-all duration-300 flex items-center justify-center gap-2 shadow-lg shadow-cyan-500/20 hover:shadow-cyan-500/30 hover:scale-[1.02] active:scale-[0.98]"
                   >
-                    <Send className="w-5 h-5" />
+                    <Send className="w-5 h-5 text-white/80" />
                     Submit Report
                   </button>
                 </div>
               </div>
 
               {/* Emergency Report Card */}
-              <div className="bg-gradient-to-br from-slate-800/80 to-slate-900/80 backdrop-blur-xl rounded-3xl border border-red-400/20 p-6 shadow-2xl shadow-red-500/10 relative overflow-hidden group hover:border-red-400/40 hover:shadow-red-500/20 transition-all duration-500">
-                {/* Animated Background */}
-                <div className="absolute inset-0 bg-gradient-to-br from-red-500/5 via-transparent to-rose-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-                <div className="absolute top-0 right-0 w-32 h-32 bg-red-500/10 rounded-full blur-2xl group-hover:bg-red-500/20 transition-all duration-500" />
-                
+              <div className="bg-slate-800/50 border border-slate-700/50 rounded-3xl p-6 shadow-2xl shadow-red-500/10 relative overflow-hidden group hover:border-red-400/40 hover:shadow-red-500/20 transition-all duration-500">
                 <div className="relative z-10">
-                  <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-red-500 to-rose-600 shadow-lg shadow-red-500/30 flex items-center justify-center mb-4 animate-pulse group-hover:scale-110 group-hover:rotate-3 transition-transform duration-500">
-                    <Siren className="w-7 h-7 text-white" />
+                  <div className="w-14 h-14 rounded-2xl bg-slate-800/80 border border-slate-700/50 flex items-center justify-center mb-4 group-hover:scale-110 group-hover:rotate-3 transition-transform duration-500">
+                    <Siren className="w-7 h-7 text-slate-400" />
                   </div>
                   <h3 className="text-xl font-bold text-white mb-2">Emergency?</h3>
                   <p className="text-slate-400 text-sm mb-5">Critical incidents need immediate attention</p>
                   <button 
                     onClick={() => setShowEmergencyModal(true)} 
-                    className="w-full py-3.5 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 text-white font-bold hover:from-red-500 hover:to-rose-500 transition-all duration-300 flex items-center justify-center gap-2 shadow-lg shadow-red-500/30 hover:shadow-red-500/50 hover:scale-[1.02] active:scale-[0.98]"
+                    className="w-full py-3.5 rounded-xl bg-red-500/80 text-white/90 font-bold hover:bg-red-500 transition-all duration-300 flex items-center justify-center gap-2 shadow-lg shadow-red-500/20 hover:shadow-red-500/30 hover:scale-[1.02] active:scale-[0.98]"
                   >
-                    <AlertTriangle className="w-5 h-5" />
+                    <AlertTriangle className="w-5 h-5 text-white/80" />
                     Emergency Report
                   </button>
                 </div>
@@ -671,38 +653,159 @@ const HomePage = () => {
         </div>
       </section>
 
-      {/* FOOTER */}
-      <footer className="bg-slate-900 text-white pt-16 pb-8">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="grid md:grid-cols-4 gap-8 mb-12">
-            <div className="md:col-span-2">
-              <div className="flex items-center gap-4 mb-4">
-                <div className="w-16 h-16 rounded-full bg-white p-1 shadow-xl"><img src="/assets/rnp-logo.png" alt="RNP" className="w-full h-full object-contain rounded-full" /></div>
-                <div><h4 className="text-xl font-bold">Rwanda National Police</h4><p className="text-slate-400 text-sm">Traffic Management System</p></div>
+      {/* FOOTER - Advanced Professional Design */}
+      <footer className="relative bg-gradient-to-b from-slate-900 via-slate-950 to-black text-white overflow-hidden">
+        {/* Animated Background Elements */}
+        <div className="absolute inset-0 pointer-events-none">
+          <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-cyan-500/50 to-transparent" />
+          <div className="absolute top-20 left-10 w-72 h-72 bg-cyan-500/5 rounded-full blur-3xl" />
+          <div className="absolute bottom-20 right-10 w-96 h-96 bg-blue-500/5 rounded-full blur-3xl" />
+          <div className="absolute inset-0 opacity-[0.02]" style={{backgroundImage: 'radial-gradient(circle at 2px 2px, white 1px, transparent 0)', backgroundSize: '32px 32px'}} />
+        </div>
+
+        {/* Main Footer Content */}
+        <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-10 pb-4">
+          <div className="grid lg:grid-cols-12 gap-8 mb-8">
+            
+            {/* Brand Section */}
+            <div className="lg:col-span-5">
+              <div className="flex items-center gap-4 mb-6 group">
+                <div className="relative">
+                  <div className="absolute inset-0 bg-gradient-to-br from-cyan-400 to-blue-500 rounded-full blur-lg opacity-50 group-hover:opacity-75 transition-opacity" />
+                  <div className="relative w-20 h-20 rounded-full bg-white p-1.5 shadow-2xl ring-2 ring-cyan-400/30">
+                    <img src="/assets/rnp-logo.png" alt="RNP" className="w-full h-full object-contain rounded-full" />
+                  </div>
+                </div>
+                <div>
+                  <h4 className="text-2xl font-bold bg-gradient-to-r from-white to-cyan-200 bg-clip-text text-transparent">Rwanda National Police</h4>
+                  <p className="text-cyan-400/80 text-sm font-medium tracking-wide">Traffic Management System</p>
+                </div>
               </div>
-              <p className="text-slate-400 text-sm max-w-md">Ensuring safer roads across Rwanda</p>
-            </div>
-            <div>
-              <h5 className="font-bold mb-4 text-slate-200">Quick Links</h5>
-              <div className="space-y-2 text-sm">
-                <a href="#about" className="block text-slate-400 hover:text-white transition-colors">About Us</a>
-                <button onClick={() => { setShowRoutePlanner(true); setTimeout(() => document.getElementById('route-planner')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100); }} className="block text-slate-400 hover:text-white transition-colors text-left">Check Route</button>
-                <button onClick={() => setShowDailyIncidentsModal(true)} className="block text-slate-400 hover:text-white transition-colors text-left">View Incidents</button>
-                <button onClick={() => setShowIncidentModal(true)} className="block text-slate-400 hover:text-white transition-colors text-left">Report Incident</button>
-                <Link to="/login" className="block text-slate-400 hover:text-white transition-colors">Staff Portal</Link>
+              <p className="text-slate-400 text-sm leading-relaxed max-w-md mb-8">
+                Committed to ensuring safer roads and efficient traffic management across Rwanda through innovative technology and dedicated service.
+              </p>
+              
+              {/* Social Links / Contact Icons */}
+              <div className="flex items-center gap-3">
+                <a href="#" className="group p-3 rounded-xl bg-slate-800/50 border border-slate-700/50 hover:border-cyan-400/50 hover:bg-cyan-500/10 transition-all duration-300">
+                  <Globe className="w-5 h-5 text-slate-400 group-hover:text-cyan-400 transition-colors" />
+                </a>
+                <a href="mailto:info@rnp.gov.rw" className="group p-3 rounded-xl bg-slate-800/50 border border-slate-700/50 hover:border-cyan-400/50 hover:bg-cyan-500/10 transition-all duration-300">
+                  <Mail className="w-5 h-5 text-slate-400 group-hover:text-cyan-400 transition-colors" />
+                </a>
+                <a href="tel:112" className="group p-3 rounded-xl bg-slate-800/50 border border-slate-700/50 hover:border-cyan-400/50 hover:bg-cyan-500/10 transition-all duration-300">
+                  <Phone className="w-5 h-5 text-slate-400 group-hover:text-cyan-400 transition-colors" />
+                </a>
               </div>
             </div>
-            <div>
-              <h5 className="font-bold mb-4 text-slate-200">Emergency</h5>
-              <div className="space-y-3">
-                <div className="flex items-center gap-3"><div className="p-2 rounded-lg bg-red-500/20"><Phone className="w-5 h-5 text-red-400" /></div><div><p className="text-xs text-slate-400">Emergency</p><p className="font-bold">112</p></div></div>
-                <div className="flex items-center gap-3"><div className="p-2 rounded-lg bg-blue-500/20"><Car className="w-5 h-5 text-blue-400" /></div><div><p className="text-xs text-slate-400">Traffic</p><p className="font-bold">113</p></div></div>
+
+            {/* Quick Links Section */}
+            <div className="lg:col-span-3">
+              <h5 className="text-sm font-bold text-white uppercase tracking-wider mb-6 flex items-center gap-2">
+                <div className="w-8 h-0.5 bg-gradient-to-r from-cyan-400 to-transparent" />
+                Quick Links
+              </h5>
+              <nav className="space-y-1">
+                <a href="#about" className="group flex items-center gap-3 p-2.5 -ml-2.5 rounded-xl hover:bg-cyan-500/10 transition-all duration-300">
+                  <div className="w-8 h-8 rounded-lg bg-slate-800/80 border border-slate-700/50 group-hover:border-cyan-400/50 group-hover:bg-cyan-500/20 flex items-center justify-center transition-all duration-300">
+                    <Users className="w-4 h-4 text-slate-400 group-hover:text-cyan-400 transition-colors" />
+                  </div>
+                  <span className="text-slate-400 group-hover:text-white font-medium transition-colors">About Us</span>
+                  <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-cyan-400 ml-auto opacity-0 group-hover:opacity-100 transform translate-x-0 group-hover:translate-x-1 transition-all duration-300" />
+                </a>
+                <button onClick={() => { setShowRoutePlanner(true); setTimeout(() => document.getElementById('route-planner')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100); }} className="group flex items-center gap-3 p-2.5 -ml-2.5 rounded-xl hover:bg-cyan-500/10 transition-all duration-300 w-full text-left">
+                  <div className="w-8 h-8 rounded-lg bg-slate-800/80 border border-slate-700/50 group-hover:border-cyan-400/50 group-hover:bg-cyan-500/20 flex items-center justify-center transition-all duration-300">
+                    <Navigation className="w-4 h-4 text-slate-400 group-hover:text-cyan-400 transition-colors" />
+                  </div>
+                  <span className="text-slate-400 group-hover:text-white font-medium transition-colors">Check Route</span>
+                  <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-cyan-400 ml-auto opacity-0 group-hover:opacity-100 transform translate-x-0 group-hover:translate-x-1 transition-all duration-300" />
+                </button>
+                <button onClick={() => setShowDailyIncidentsModal(true)} className="group flex items-center gap-3 p-2.5 -ml-2.5 rounded-xl hover:bg-cyan-500/10 transition-all duration-300 w-full text-left">
+                  <div className="w-8 h-8 rounded-lg bg-slate-800/80 border border-slate-700/50 group-hover:border-cyan-400/50 group-hover:bg-cyan-500/20 flex items-center justify-center transition-all duration-300">
+                    <Eye className="w-4 h-4 text-slate-400 group-hover:text-cyan-400 transition-colors" />
+                  </div>
+                  <span className="text-slate-400 group-hover:text-white font-medium transition-colors">View Incidents</span>
+                  <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-cyan-400 ml-auto opacity-0 group-hover:opacity-100 transform translate-x-0 group-hover:translate-x-1 transition-all duration-300" />
+                </button>
+                <button onClick={() => setShowIncidentModal(true)} className="group flex items-center gap-3 p-2.5 -ml-2.5 rounded-xl hover:bg-cyan-500/10 transition-all duration-300 w-full text-left">
+                  <div className="w-8 h-8 rounded-lg bg-slate-800/80 border border-slate-700/50 group-hover:border-cyan-400/50 group-hover:bg-cyan-500/20 flex items-center justify-center transition-all duration-300">
+                    <Camera className="w-4 h-4 text-slate-400 group-hover:text-cyan-400 transition-colors" />
+                  </div>
+                  <span className="text-slate-400 group-hover:text-white font-medium transition-colors">Report Incident</span>
+                  <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-cyan-400 ml-auto opacity-0 group-hover:opacity-100 transform translate-x-0 group-hover:translate-x-1 transition-all duration-300" />
+                </button>
+                <Link to="/login" className="group flex items-center gap-3 p-2.5 -ml-2.5 rounded-xl hover:bg-cyan-500/10 transition-all duration-300">
+                  <div className="w-8 h-8 rounded-lg bg-slate-800/80 border border-slate-700/50 group-hover:border-cyan-400/50 group-hover:bg-cyan-500/20 flex items-center justify-center transition-all duration-300">
+                    <Shield className="w-4 h-4 text-slate-400 group-hover:text-cyan-400 transition-colors" />
+                  </div>
+                  <span className="text-slate-400 group-hover:text-white font-medium transition-colors">Staff Portal</span>
+                  <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-cyan-400 ml-auto opacity-0 group-hover:opacity-100 transform translate-x-0 group-hover:translate-x-1 transition-all duration-300" />
+                </Link>
+              </nav>
+            </div>
+
+            {/* Emergency Contacts Section */}
+            <div className="lg:col-span-4">
+              <h5 className="text-sm font-bold text-white uppercase tracking-wider mb-6 flex items-center gap-2">
+                <div className="w-8 h-0.5 bg-gradient-to-r from-red-400 to-transparent" />
+                Emergency Contacts
+              </h5>
+              <div className="space-y-2">
+                {/* Emergency 112 */}
+                <a href="tel:112" className="group relative flex items-center gap-3 p-3 rounded-2xl bg-slate-800/50 border border-slate-700/50 hover:border-cyan-400/50 hover:bg-cyan-500/10 transition-all duration-300">
+                  <div className="relative flex-shrink-0 w-14 h-14 rounded-xl bg-slate-800/80 border border-slate-700/50 group-hover:border-cyan-400/50 group-hover:bg-cyan-500/20 flex items-center justify-center transition-all duration-300">
+                    <Siren className="w-7 h-7 text-slate-400 group-hover:text-cyan-400 transition-colors" />
+                  </div>
+                  <div className="relative flex-1">
+                    <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-0">Emergency Hotline</p>
+                    <p className="text-3xl font-black text-white">112</p>
+                  </div>
+                </a>
+
+                {/* Traffic 113 */}
+                <a href="tel:113" className="group relative flex items-center gap-3 p-3 rounded-2xl bg-slate-800/50 border border-slate-700/50 hover:border-cyan-400/50 hover:bg-cyan-500/10 transition-all duration-300">
+                  <div className="relative flex-shrink-0 w-14 h-14 rounded-xl bg-slate-800/80 border border-slate-700/50 group-hover:border-cyan-400/50 group-hover:bg-cyan-500/20 flex items-center justify-center transition-all duration-300">
+                    <Car className="w-7 h-7 text-slate-400 group-hover:text-cyan-400 transition-colors" />
+                  </div>
+                  <div className="relative flex-1">
+                    <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-0">Traffic Police</p>
+                    <p className="text-3xl font-black text-white">113</p>
+                  </div>
+                </a>
+
+                {/* Fire Brigade */}
+                <a href="tel:112" className="group relative flex items-center gap-3 p-3 rounded-2xl bg-slate-800/50 border border-slate-700/50 hover:border-cyan-400/50 hover:bg-cyan-500/10 transition-all duration-300">
+                  <div className="relative flex-shrink-0 w-14 h-14 rounded-xl bg-slate-800/80 border border-slate-700/50 group-hover:border-cyan-400/50 group-hover:bg-cyan-500/20 flex items-center justify-center transition-all duration-300">
+                    <Flame className="w-7 h-7 text-slate-400 group-hover:text-cyan-400 transition-colors" />
+                  </div>
+                  <div className="relative flex-1">
+                    <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-0">Fire & Rescue</p>
+                    <p className="text-3xl font-black text-white">112</p>
+                  </div>
+                </a>
               </div>
             </div>
           </div>
-          <div className="border-t border-slate-800 pt-8 flex flex-col sm:flex-row justify-between items-center gap-4">
-            <p className="text-slate-500 text-sm">© 2026 Rwanda National Police</p>
-            <div className="flex items-center gap-2 text-slate-500 text-sm"><Globe className="w-4 h-4" />Kigali, Rwanda</div>
+
+          {/* Bottom Bar */}
+          <div className="relative pt-8 border-t border-slate-800/50">
+            <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-cyan-500/20 to-transparent" />
+            <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
+              <div className="flex items-center gap-2 text-slate-500 text-sm">
+                <span>© 2026 Rwanda National Police.</span>
+                <span className="hidden sm:inline">All rights reserved.</span>
+              </div>
+              <div className="flex items-center gap-6 text-sm">
+                <div className="flex items-center gap-2 text-slate-500">
+                  <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <span>System Online</span>
+                </div>
+                <div className="flex items-center gap-2 text-slate-500">
+                  <MapPin className="w-4 h-4 text-cyan-500" />
+                  <span>Kigali, Rwanda</span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </footer>

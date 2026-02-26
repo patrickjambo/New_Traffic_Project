@@ -5,7 +5,19 @@ import 'dart:async';
 import '../services/api_service.dart';
 import '../services/websocket_service.dart';
 import '../config/app_config.dart';
+import '../config/app_theme.dart';
 import '../main.dart' show appState;
+
+/// ============================================================================
+/// Map Screen - TrafficGuard Mobile App
+/// ============================================================================
+/// Interactive map screen featuring:
+/// - Google Maps integration
+/// - Real-time incident markers
+/// - Traffic overlay
+/// - Incident filtering
+/// - Consistent dark theme design
+/// ============================================================================
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -76,18 +88,13 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     setState(() => _isLoading = true);
     
     try {
-      // Check and request location permission
       await _checkLocationPermission();
       
-      // Get current location
       if (_locationPermissionGranted) {
         await _getCurrentLocation();
       }
       
-      // Load incidents from API
       await _loadIncidents();
-      
-      // Load traffic data
       await _loadTrafficData();
       
       setState(() {
@@ -121,7 +128,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       _locationPermissionGranted = permission == LocationPermission.always || 
                                    permission == LocationPermission.whileInUse;
     } catch (e) {
-      print('Error checking location permission: $e');
+      debugPrint('Error checking location permission: $e');
       _locationPermissionGranted = false;
     }
   }
@@ -137,11 +144,10 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
         _currentPosition = LatLng(position.latitude, position.longitude);
       });
       
-      // Start listening to location updates
       _locationSubscription = Geolocator.getPositionStream(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.high,
-          distanceFilter: 50, // Update every 50 meters
+          distanceFilter: 50,
         ),
       ).listen((Position position) {
         setState(() {
@@ -150,7 +156,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
         });
       });
     } catch (e) {
-      print('Error getting current location: $e');
+      debugPrint('Error getting current location: $e');
     }
   }
 
@@ -159,21 +165,15 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       final response = await _apiService.get('/api/incidents');
       final data = response.data;
       
-      print('DEBUG: Incidents API response: $data');
-      
       if (data != null && data['success'] == true && data['data'] != null) {
         final incidents = data['data'] as List;
-        print('DEBUG: Loaded ${incidents.length} incidents');
         setState(() {
           _incidents = incidents.cast<Map<String, dynamic>>();
           _updateIncidentMarkers();
         });
-        print('DEBUG: Markers count after update: ${_markers.length}');
-      } else {
-        print('DEBUG: No incidents data - success: ${data?['success']}, data: ${data?['data']}');
       }
     } catch (e) {
-      print('Error loading incidents: $e');
+      debugPrint('Error loading incidents: $e');
     }
   }
 
@@ -189,19 +189,16 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
         });
       }
     } catch (e) {
-      print('Error loading traffic data: $e');
+      debugPrint('Error loading traffic data: $e');
     }
   }
 
   void _setupWebSocketListeners() {
-    // Listen for new incidents
     _incidentSubscription = _wsService.incidentStream.listen((incident) {
       setState(() {
         _incidents.add(incident);
         _updateIncidentMarkers();
       });
-      
-      // Show notification
       _showIncidentNotification(incident);
     });
   }
@@ -234,13 +231,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     final incidentCircles = <Circle>{};
     
     for (final incident in _incidents) {
-      // Get type - API returns 'incident_type' but we also check 'type' for compatibility
       final type = (incident['incident_type'] ?? incident['type'])?.toString() ?? 'unknown';
       
-      // Filter by type if needed
-      if (_selectedFilter != 'all' && type != _selectedFilter) {
-        continue;
-      }
+      if (_selectedFilter != 'all' && type != _selectedFilter) continue;
       
       final lat = _parseDouble(incident['latitude'] ?? incident['location']?['latitude']);
       final lng = _parseDouble(incident['longitude'] ?? incident['location']?['longitude']);
@@ -251,25 +244,23 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       final severity = incident['severity']?.toString().toLowerCase() ?? 'medium';
       final id = incident['id']?.toString() ?? DateTime.now().millisecondsSinceEpoch.toString();
       
-      // Determine marker color based on severity
       double hue;
       Color circleColor;
       switch (severity) {
         case 'critical':
         case 'high':
           hue = BitmapDescriptor.hueRed;
-          circleColor = Colors.red.withOpacity(0.2);
+          circleColor = AppColors.error.withValues(alpha: 0.2);
           break;
         case 'medium':
           hue = BitmapDescriptor.hueOrange;
-          circleColor = Colors.orange.withOpacity(0.2);
+          circleColor = AppColors.warning.withValues(alpha: 0.2);
           break;
         default:
           hue = BitmapDescriptor.hueYellow;
-          circleColor = Colors.yellow.withOpacity(0.2);
+          circleColor = AppColors.success.withValues(alpha: 0.2);
       }
       
-      // Add marker
       incidentMarkers.add(Marker(
         markerId: MarkerId('incident_$id'),
         position: position,
@@ -282,14 +273,13 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
         onTap: () => _showIncidentDetails(incident),
       ));
       
-      // Add radius circle for high severity incidents
       if (severity == 'high' || severity == 'critical') {
         incidentCircles.add(Circle(
           circleId: CircleId('incident_radius_$id'),
           center: position,
-          radius: 500, // 500m radius
+          radius: 500,
           fillColor: circleColor,
-          strokeColor: circleColor.withOpacity(0.5),
+          strokeColor: circleColor.withValues(alpha: 0.5),
           strokeWidth: 2,
         ));
       }
@@ -321,16 +311,15 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       
       if (lat == null || lng == null) continue;
       
-      // Color based on traffic density
       Color color;
       if (density > 0.8) {
-        color = Colors.red.withOpacity(0.4);
+        color = AppColors.error.withValues(alpha: 0.4);
       } else if (density > 0.5) {
-        color = Colors.orange.withOpacity(0.3);
+        color = AppColors.warning.withValues(alpha: 0.3);
       } else if (density > 0.3) {
-        color = Colors.yellow.withOpacity(0.2);
+        color = Colors.yellow.withValues(alpha: 0.2);
       } else {
-        color = Colors.green.withOpacity(0.1);
+        color = AppColors.success.withValues(alpha: 0.1);
       }
       
       trafficCircles.add(Circle(
@@ -359,17 +348,34 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   String _getIncidentTitle(String type) {
     switch (type.toLowerCase()) {
       case 'accident':
-        return '🚗 Vehicle Accident';
+        return 'Vehicle Accident';
       case 'congestion':
-        return '🚦 Traffic Congestion';
+        return 'Traffic Congestion';
       case 'roadblock':
-        return '🚧 Road Block';
+        return 'Road Block';
       case 'hazard':
-        return '⚠️ Road Hazard';
+        return 'Road Hazard';
       case 'emergency':
-        return '🚨 Emergency';
+        return 'Emergency';
       default:
-        return '📍 Incident';
+        return 'Incident';
+    }
+  }
+
+  IconData _getIncidentIcon(String type) {
+    switch (type.toLowerCase()) {
+      case 'accident':
+        return Icons.car_crash;
+      case 'congestion':
+        return Icons.traffic;
+      case 'roadblock':
+        return Icons.block;
+      case 'hazard':
+        return Icons.warning;
+      case 'emergency':
+        return Icons.emergency;
+      default:
+        return Icons.place;
     }
   }
 
@@ -378,52 +384,71 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     final severity = incident['severity']?.toString() ?? 'medium';
     final description = incident['description']?.toString() ?? 'No description';
     final reportedAt = incident['created_at'] ?? incident['reported_at'];
-    
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) => Container(
-        decoration: BoxDecoration(
-          color: Theme.of(context).scaffoldBackgroundColor,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        decoration: const BoxDecoration(
+          color: AppColors.backgroundSecondary,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
         ),
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Handle
             Center(
               child: Container(
                 width: 40,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: Colors.grey[300],
+                  color: AppColors.border,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 24),
+            
+            // Header
             Row(
               children: [
-                _getIncidentIcon(type, severity),
-                const SizedBox(width: 12),
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: _getSeverityColor(severity).withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Icon(
+                    _getIncidentIcon(type),
+                    color: _getSeverityColor(severity),
+                    size: 28,
+                  ),
+                ),
+                const SizedBox(width: 16),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         _getIncidentTitle(type),
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
+                        style: AppTextStyles.titleMedium.copyWith(color: AppColors.textPrimary),
                       ),
-                      Text(
-                        'Severity: ${severity.toUpperCase()}',
-                        style: TextStyle(
-                          color: _getSeverityColor(severity),
-                          fontWeight: FontWeight.w500,
+                      const SizedBox(height: 4),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: _getSeverityColor(severity).withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          severity.toUpperCase(),
+                          style: AppTextStyles.labelSmall.copyWith(
+                            color: _getSeverityColor(severity),
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ),
                     ],
@@ -431,19 +456,47 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                 ),
               ],
             ),
-            const SizedBox(height: 16),
-            Text(
-              description,
-              style: const TextStyle(fontSize: 14),
-            ),
-            if (reportedAt != null) ...[
-              const SizedBox(height: 12),
-              Text(
-                'Reported: ${_formatDateTime(reportedAt)}',
-                style: TextStyle(color: Colors.grey[600], fontSize: 12),
-              ),
-            ],
             const SizedBox(height: 20),
+            
+            // Description
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppColors.background,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Description',
+                    style: AppTextStyles.labelMedium.copyWith(color: AppColors.textTertiary),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    description,
+                    style: AppTextStyles.bodyMedium.copyWith(color: AppColors.textSecondary),
+                  ),
+                  if (reportedAt != null) ...[
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Icon(Icons.access_time, size: 14, color: AppColors.textTertiary),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Reported ${_formatDateTime(reportedAt)}',
+                          style: AppTextStyles.bodySmall.copyWith(color: AppColors.textTertiary),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+            
+            // Action buttons
             Row(
               children: [
                 Expanded(
@@ -452,8 +505,16 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                       Navigator.pop(context);
                       _navigateToIncident(incident);
                     },
-                    icon: const Icon(Icons.directions),
+                    icon: const Icon(Icons.directions, size: 20),
                     label: const Text('Navigate'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -463,8 +524,16 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                       Navigator.pop(context);
                       _reportUpdate(incident);
                     },
-                    icon: const Icon(Icons.update),
+                    icon: const Icon(Icons.update, size: 20),
                     label: const Text('Update'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.textSecondary,
+                      side: const BorderSide(color: AppColors.border),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
                   ),
                 ),
               ],
@@ -476,52 +545,18 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     );
   }
 
-  Widget _getIncidentIcon(String type, String severity) {
-    IconData icon;
-    Color color = _getSeverityColor(severity);
-    
-    switch (type.toLowerCase()) {
-      case 'accident':
-        icon = Icons.car_crash;
-        break;
-      case 'congestion':
-        icon = Icons.traffic;
-        break;
-      case 'roadblock':
-        icon = Icons.block;
-        break;
-      case 'hazard':
-        icon = Icons.warning;
-        break;
-      case 'emergency':
-        icon = Icons.emergency;
-        break;
-      default:
-        icon = Icons.place;
-    }
-    
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Icon(icon, color: color, size: 28),
-    );
-  }
-
   Color _getSeverityColor(String severity) {
     switch (severity.toLowerCase()) {
       case 'critical':
         return Colors.purple;
       case 'high':
-        return Colors.red;
+        return AppColors.error;
       case 'medium':
-        return Colors.orange;
+        return AppColors.warning;
       case 'low':
-        return Colors.yellow[700]!;
+        return AppColors.success;
       default:
-        return Colors.grey;
+        return AppColors.textTertiary;
     }
   }
 
@@ -531,7 +566,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       final now = DateTime.now();
       final diff = now.difference(dt);
       
-      if (diff.inMinutes < 1) return 'Just now';
+      if (diff.inMinutes < 1) return 'just now';
       if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
       if (diff.inHours < 24) return '${diff.inHours}h ago';
       return '${diff.inDays}d ago';
@@ -552,9 +587,13 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   }
 
   void _reportUpdate(Map<String, dynamic> incident) {
-    // Navigate to report update screen
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Feature coming soon: Report incident update')),
+      SnackBar(
+        content: const Text('Feature coming soon: Report incident update'),
+        backgroundColor: AppColors.primary,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
     );
   }
 
@@ -564,12 +603,14 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       SnackBar(
         content: Row(
           children: [
-            const Icon(Icons.warning, color: Colors.white),
+            const Icon(Icons.warning_amber, color: Colors.white),
             const SizedBox(width: 8),
             Expanded(child: Text('New ${_getIncidentTitle(type)} reported nearby!')),
           ],
         ),
-        backgroundColor: Colors.orange,
+        backgroundColor: AppColors.warning,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         action: SnackBarAction(
           label: 'View',
           textColor: Colors.white,
@@ -595,37 +636,158 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     });
   }
 
+  void _showFilterSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        decoration: const BoxDecoration(
+          color: AppColors.backgroundSecondary,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.border,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              'Filter Incidents',
+              style: AppTextStyles.titleMedium.copyWith(color: AppColors.textPrimary),
+            ),
+            const SizedBox(height: 16),
+            _buildFilterOption('all', 'All Incidents', Icons.layers),
+            _buildFilterOption('accident', 'Accidents', Icons.car_crash),
+            _buildFilterOption('congestion', 'Congestion', Icons.traffic),
+            _buildFilterOption('roadblock', 'Road Blocks', Icons.block),
+            _buildFilterOption('hazard', 'Hazards', Icons.warning),
+            const SizedBox(height: 10),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFilterOption(String value, String label, IconData icon) {
+    final isSelected = _selectedFilter == value;
+    return Material(
+      color: isSelected ? AppColors.primary.withValues(alpha: 0.1) : Colors.transparent,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: () {
+          setState(() {
+            _selectedFilter = value;
+            _updateIncidentMarkers();
+          });
+          Navigator.pop(context);
+        },
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          child: Row(
+            children: [
+              Icon(
+                icon,
+                color: isSelected ? AppColors.primary : AppColors.textSecondary,
+                size: 22,
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Text(
+                  label,
+                  style: AppTextStyles.bodyMedium.copyWith(
+                    color: isSelected ? AppColors.primary : AppColors.textSecondary,
+                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                  ),
+                ),
+              ),
+              if (isSelected)
+                const Icon(Icons.check_circle, color: AppColors.primary, size: 20),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = appState.theme.isDarkMode;
     
     return Scaffold(
+      backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: const Text('Traffic Map'),
+        backgroundColor: AppColors.background,
+        elevation: 0,
+        leading: IconButton(
+          icon: Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: AppColors.backgroundSecondary,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: const Icon(
+              Icons.arrow_back,
+              color: AppColors.textPrimary,
+              size: 20,
+            ),
+          ),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: Text(
+          'Traffic Map',
+          style: AppTextStyles.titleLarge.copyWith(color: AppColors.textPrimary),
+        ),
+        centerTitle: true,
         actions: [
           IconButton(
-            icon: Icon(_showTrafficLayer ? Icons.layers : Icons.layers_outlined),
-            onPressed: () {
-              setState(() => _showTrafficLayer = !_showTrafficLayer);
-            },
-            tooltip: 'Toggle Traffic Layer',
+            icon: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: _showTrafficLayer 
+                    ? AppColors.primary.withValues(alpha: 0.1)
+                    : AppColors.backgroundSecondary,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: _showTrafficLayer ? AppColors.primary : AppColors.border,
+                ),
+              ),
+              child: Icon(
+                Icons.layers,
+                color: _showTrafficLayer ? AppColors.primary : AppColors.textSecondary,
+                size: 20,
+              ),
+            ),
+            onPressed: () => setState(() => _showTrafficLayer = !_showTrafficLayer),
           ),
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.filter_list),
-            onSelected: (value) {
-              setState(() {
-                _selectedFilter = value;
-                _updateIncidentMarkers();
-              });
-            },
-            itemBuilder: (context) => [
-              const PopupMenuItem(value: 'all', child: Text('All Incidents')),
-              const PopupMenuItem(value: 'accident', child: Text('🚗 Accidents')),
-              const PopupMenuItem(value: 'congestion', child: Text('🚦 Congestion')),
-              const PopupMenuItem(value: 'roadblock', child: Text('🚧 Road Blocks')),
-              const PopupMenuItem(value: 'hazard', child: Text('⚠️ Hazards')),
-            ],
+          IconButton(
+            icon: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: AppColors.backgroundSecondary,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: const Icon(
+                Icons.filter_list,
+                color: AppColors.textPrimary,
+                size: 20,
+              ),
+            ),
+            onPressed: _showFilterSheet,
           ),
+          const SizedBox(width: 8),
         ],
       ),
       body: Stack(
@@ -639,11 +801,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
             onMapCreated: (controller) {
               _mapController = controller;
               _updateCurrentLocationMarker();
-              
-              // Apply dark mode style if needed
-              if (isDark) {
-                _setDarkMapStyle(controller);
-              }
+              if (isDark) _setDarkMapStyle(controller);
             },
             markers: _markers,
             circles: _circles,
@@ -654,27 +812,30 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
             zoomControlsEnabled: false,
             compassEnabled: true,
             trafficEnabled: _showTrafficLayer,
-            onTap: (latLng) {
-              // Optional: Add incident at tapped location
-            },
           ),
           
           // Loading overlay
           if (_isLoading)
             Container(
-              color: Colors.black26,
-              child: const Center(
-                child: Card(
-                  child: Padding(
-                    padding: EdgeInsets.all(20),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        CircularProgressIndicator(),
-                        SizedBox(height: 16),
-                        Text('Loading map...'),
-                      ],
-                    ),
+              color: AppColors.background.withValues(alpha: 0.8),
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                    color: AppColors.backgroundSecondary,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const CircularProgressIndicator(color: AppColors.primary),
+                      const SizedBox(height: 16),
+                      Text(
+                        'Loading map...',
+                        style: AppTextStyles.bodyMedium.copyWith(color: AppColors.textSecondary),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -686,21 +847,28 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
               top: 16,
               left: 16,
               right: 16,
-              child: Card(
-                color: Colors.red[100],
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.error, color: Colors.red),
-                      const SizedBox(width: 8),
-                      Expanded(child: Text(_errorMessage!)),
-                      IconButton(
-                        icon: const Icon(Icons.close),
-                        onPressed: () => setState(() => _errorMessage = null),
+              child: Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: AppColors.error.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppColors.error.withValues(alpha: 0.3)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.error_outline, color: AppColors.error),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        _errorMessage!,
+                        style: AppTextStyles.bodySmall.copyWith(color: AppColors.error),
                       ),
-                    ],
-                  ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close, color: AppColors.error, size: 20),
+                      onPressed: () => setState(() => _errorMessage = null),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -709,29 +877,30 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
           Positioned(
             top: 16,
             right: 16,
-            child: Card(
-              child: Padding(
-                padding: const EdgeInsets.all(8),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _buildLegendItem(Colors.red, 'High Severity'),
-                    _buildLegendItem(Colors.orange, 'Medium'),
-                    _buildLegendItem(Colors.yellow[700]!, 'Low'),
-                    const Divider(height: 8),
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          '${_incidents.length}',
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                        const Text(' incidents'),
-                      ],
-                    ),
-                  ],
-                ),
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.backgroundSecondary,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _buildLegendItem(AppColors.error, 'High Severity'),
+                  const SizedBox(height: 6),
+                  _buildLegendItem(AppColors.warning, 'Medium'),
+                  const SizedBox(height: 6),
+                  _buildLegendItem(AppColors.success, 'Low'),
+                  const SizedBox(height: 8),
+                  Container(height: 1, width: 80, color: AppColors.border),
+                  const SizedBox(height: 8),
+                  Text(
+                    '${_incidents.length} incidents',
+                    style: AppTextStyles.labelSmall.copyWith(color: AppColors.textTertiary),
+                  ),
+                ],
               ),
             ),
           ),
@@ -742,40 +911,38 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
             right: 16,
             child: Column(
               children: [
-                FloatingActionButton.small(
-                  heroTag: 'map_type',
+                _buildMapFAB(
+                  icon: Icons.map,
                   onPressed: _toggleMapType,
-                  child: const Icon(Icons.map),
+                  isActive: _mapType != MapType.normal,
                 ),
-                const SizedBox(height: 8),
-                FloatingActionButton.small(
-                  heroTag: 'toggle_incidents',
+                const SizedBox(height: 10),
+                _buildMapFAB(
+                  icon: Icons.warning,
                   onPressed: () {
                     setState(() {
                       _showIncidents = !_showIncidents;
                       _updateIncidentMarkers();
                     });
                   },
-                  backgroundColor: _showIncidents ? null : Colors.grey,
-                  child: const Icon(Icons.warning),
+                  isActive: _showIncidents,
                 ),
-                const SizedBox(height: 8),
-                FloatingActionButton.small(
-                  heroTag: 'toggle_heatmap',
+                const SizedBox(height: 10),
+                _buildMapFAB(
+                  icon: Icons.whatshot,
                   onPressed: () {
                     setState(() {
                       _showHeatmap = !_showHeatmap;
                       _updateTrafficOverlay();
                     });
                   },
-                  backgroundColor: _showHeatmap ? null : Colors.grey,
-                  child: const Icon(Icons.whatshot),
+                  isActive: _showHeatmap,
                 ),
-                const SizedBox(height: 8),
-                FloatingActionButton.small(
-                  heroTag: 'refresh',
+                const SizedBox(height: 10),
+                _buildMapFAB(
+                  icon: Icons.refresh,
                   onPressed: _initializeMap,
-                  child: const Icon(Icons.refresh),
+                  isActive: false,
                 ),
               ],
             ),
@@ -784,30 +951,62 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: _centerOnCurrentLocation,
-        child: const Icon(Icons.my_location),
+        backgroundColor: AppColors.primary,
+        child: const Icon(Icons.my_location, color: Colors.white),
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.startFloat,
     );
   }
 
-  Widget _buildLegendItem(Color color, String label) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 12,
-            height: 12,
-            decoration: BoxDecoration(
-              color: color,
-              shape: BoxShape.circle,
-            ),
+  Widget _buildMapFAB({
+    required IconData icon,
+    required VoidCallback onPressed,
+    required bool isActive,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: isActive ? AppColors.primary : AppColors.backgroundSecondary,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isActive ? AppColors.primary : AppColors.border,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.1),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
           ),
-          const SizedBox(width: 6),
-          Text(label, style: const TextStyle(fontSize: 11)),
         ],
       ),
+      child: IconButton(
+        icon: Icon(
+          icon,
+          color: isActive ? Colors.white : AppColors.textSecondary,
+          size: 22,
+        ),
+        onPressed: onPressed,
+      ),
+    );
+  }
+
+  Widget _buildLegendItem(Color color, String label) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 12,
+          height: 12,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(6),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          label,
+          style: AppTextStyles.labelSmall.copyWith(color: AppColors.textSecondary),
+        ),
+      ],
     );
   }
 

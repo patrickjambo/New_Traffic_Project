@@ -2,12 +2,21 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 import '../services/incident_service.dart';
+import '../config/app_theme.dart';
 import 'package:location/location.dart';
 import 'package:video_player/video_player.dart';
 
-/// AI-Powered Video Capture Screen
-/// Records video from mobile camera, uploads to backend for AI analysis
-/// AI automatically detects incidents, determines severity, and creates database entry
+/// ============================================================================
+/// AI Video Capture Screen - TrafficGuard Mobile App
+/// ============================================================================
+/// AI-powered video analysis screen featuring:
+/// - Video recording with camera
+/// - Automatic AI analysis
+/// - Real-time upload progress
+/// - Results visualization
+/// - Consistent dark theme design
+/// ============================================================================
+
 class AIVideoCaptureScreen extends StatefulWidget {
   const AIVideoCaptureScreen({super.key});
 
@@ -15,7 +24,8 @@ class AIVideoCaptureScreen extends StatefulWidget {
   State<AIVideoCaptureScreen> createState() => _AIVideoCaptureScreenState();
 }
 
-class _AIVideoCaptureScreenState extends State<AIVideoCaptureScreen> {
+class _AIVideoCaptureScreenState extends State<AIVideoCaptureScreen>
+    with SingleTickerProviderStateMixin {
   final IncidentService _incidentService = IncidentService();
   final ImagePicker _picker = ImagePicker();
   
@@ -23,6 +33,7 @@ class _AIVideoCaptureScreenState extends State<AIVideoCaptureScreen> {
   VideoPlayerController? _videoController;
   LocationData? _currentLocation;
   
+  // ignore: unused_field
   bool _isRecording = false;
   bool _isUploading = false;
   bool _isAnalyzing = false;
@@ -31,19 +42,33 @@ class _AIVideoCaptureScreenState extends State<AIVideoCaptureScreen> {
   Map<String, dynamic>? _aiResults;
   String? _errorMessage;
 
+  late AnimationController _pulseController;
+  late Animation<double> _pulseAnimation;
+
   @override
   void initState() {
     super.initState();
     _getCurrentLocation();
+    _initAnimations();
+  }
+
+  void _initAnimations() {
+    _pulseController = AnimationController(
+      duration: const Duration(milliseconds: 1500),
+      vsync: this,
+    )..repeat(reverse: true);
+    _pulseAnimation = Tween<double>(begin: 1.0, end: 1.1).animate(
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+    );
   }
 
   @override
   void dispose() {
     _videoController?.dispose();
+    _pulseController.dispose();
     super.dispose();
   }
 
-  /// Get current GPS location
   Future<void> _getCurrentLocation() async {
     final location = Location();
     
@@ -51,9 +76,7 @@ class _AIVideoCaptureScreenState extends State<AIVideoCaptureScreen> {
     if (!serviceEnabled) {
       serviceEnabled = await location.requestService();
       if (!serviceEnabled) {
-        setState(() {
-          _errorMessage = 'Location services are disabled';
-        });
+        setState(() => _errorMessage = 'Location services are disabled');
         return;
       }
     }
@@ -62,9 +85,7 @@ class _AIVideoCaptureScreenState extends State<AIVideoCaptureScreen> {
     if (permissionGranted == PermissionStatus.denied) {
       permissionGranted = await location.requestPermission();
       if (permissionGranted != PermissionStatus.granted) {
-        setState(() {
-          _errorMessage = 'Location permission denied';
-        });
+        setState(() => _errorMessage = 'Location permission denied');
         return;
       }
     }
@@ -73,7 +94,6 @@ class _AIVideoCaptureScreenState extends State<AIVideoCaptureScreen> {
     setState(() {});
   }
 
-  /// Record video using camera (max 30 seconds)
   Future<void> _recordVideo() async {
     try {
       final XFile? video = await _picker.pickVideo(
@@ -88,38 +108,24 @@ class _AIVideoCaptureScreenState extends State<AIVideoCaptureScreen> {
           _errorMessage = null;
         });
 
-        // Initialize video player for preview
         _videoController = VideoPlayerController.file(_videoFile!)
           ..initialize().then((_) {
             setState(() {});
           });
       }
     } catch (e) {
-      setState(() {
-        _errorMessage = 'Failed to record video: $e';
-      });
+      setState(() => _errorMessage = 'Failed to record video: $e');
     }
   }
 
-  /// Upload video and get AI analysis
   Future<void> _uploadAndAnalyze() async {
     if (_videoFile == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please record a video first'),
-          backgroundColor: Colors.orange,
-        ),
-      );
+      _showSnackBar('Please record a video first', AppColors.warning);
       return;
     }
 
     if (_currentLocation == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Unable to get location. Please enable location services.'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      _showSnackBar('Unable to get location. Please enable location services.', AppColors.error);
       return;
     }
 
@@ -130,16 +136,6 @@ class _AIVideoCaptureScreenState extends State<AIVideoCaptureScreen> {
       _errorMessage = null;
       _aiResults = null;
     });
-
-    // Show uploading message
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Uploading video...'),
-          duration: Duration(seconds: 2),
-        ),
-      );
-    }
 
     final result = await _incidentService.analyzeVideoAndCreateIncident(
       videoFile: _videoFile!,
@@ -162,41 +158,27 @@ class _AIVideoCaptureScreenState extends State<AIVideoCaptureScreen> {
     });
 
     if (result['success']) {
-      setState(() {
-        _aiResults = result['data'];
-      });
-
-      if (!mounted) return;
-
-      // Show success message
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(result['message'] ?? 'Analysis complete!'),
-          backgroundColor: Colors.green,
-          duration: const Duration(seconds: 3),
-        ),
-      );
-
-      // Show results dialog
+      setState(() => _aiResults = result['data']);
+      _showSnackBar(result['message'] ?? 'Analysis complete!', AppColors.success);
       _showResultsDialog();
     } else {
-      setState(() {
-        _errorMessage = result['message'];
-      });
-
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(result['message']),
-          backgroundColor: Colors.red,
-          duration: const Duration(seconds: 4),
-        ),
-      );
+      setState(() => _errorMessage = result['message']);
+      _showSnackBar(result['message'], AppColors.error);
     }
   }
 
-  /// Show AI analysis results in dialog
+  void _showSnackBar(String message, Color color) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: color,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    );
+  }
+
   void _showResultsDialog() {
     if (_aiResults == null) return;
 
@@ -209,229 +191,372 @@ class _AIVideoCaptureScreenState extends State<AIVideoCaptureScreen> {
     final incidentCreated = _aiResults!['incident_created'] ?? false;
     final severity = _aiResults!['severity'] ?? 'unknown';
 
-    showDialog(
+    showModalBottomSheet(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Row(
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) => Container(
+        decoration: const BoxDecoration(
+          color: AppColors.backgroundSecondary,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              incidentDetected ? Icons.warning_amber : Icons.check_circle,
-              color: incidentDetected ? Colors.red : Colors.green,
-              size: 32,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                incidentDetected ? 'Incident Detected!' : 'No Incident',
-                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            // Handle bar
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AppColors.border,
+                borderRadius: BorderRadius.circular(2),
               ),
             ),
+            const SizedBox(height: 24),
+            
+            // Result header
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: incidentDetected
+                    ? AppColors.error.withValues(alpha: 0.1)
+                    : AppColors.success.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: incidentDetected
+                          ? AppColors.error.withValues(alpha: 0.1)
+                          : AppColors.success.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(
+                      incidentDetected ? Icons.warning_amber : Icons.check_circle,
+                      color: incidentDetected ? AppColors.error : AppColors.success,
+                      size: 32,
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          incidentDetected ? 'Incident Detected!' : 'No Incident',
+                          style: AppTextStyles.titleMedium.copyWith(
+                            color: incidentDetected ? AppColors.error : AppColors.success,
+                          ),
+                        ),
+                        if (incidentDetected)
+                          Text(
+                            '${incidentType.toString().toUpperCase().replaceAll('_', ' ')} - ${severity.toString().toUpperCase()}',
+                            style: AppTextStyles.bodySmall.copyWith(color: AppColors.textSecondary),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 24),
+
+            // Stats grid
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppColors.background,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Column(
+                children: [
+                  _buildStatRow(Icons.directions_car, 'Vehicles Detected', vehicleCount.toString()),
+                  const Divider(color: AppColors.border, height: 20),
+                  _buildStatRow(Icons.speed, 'Average Speed', '${avgSpeed.toStringAsFixed(1)} km/h'),
+                  const Divider(color: AppColors.border, height: 20),
+                  _buildStatRow(Icons.stop_circle_outlined, 'Stationary', stationaryCount.toString()),
+                  if (incidentDetected) ...[
+                    const Divider(color: AppColors.border, height: 20),
+                    _buildStatRow(Icons.analytics, 'Confidence', '${(confidence * 100).toStringAsFixed(1)}%'),
+                  ],
+                ],
+              ),
+            ),
+
+            if (incidentCreated) ...[
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppColors.success.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.success.withValues(alpha: 0.3)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.check_circle, color: AppColors.success, size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'Incident saved • Authorities notified',
+                        style: AppTextStyles.bodySmall.copyWith(color: AppColors.success),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+            const SizedBox(height: 24),
+
+            // Action buttons
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      setState(() {
+                        _videoFile = null;
+                        _aiResults = null;
+                        _videoController?.dispose();
+                        _videoController = null;
+                      });
+                    },
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.textSecondary,
+                      side: const BorderSide(color: AppColors.border),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text('Record Another'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      Navigator.pop(context);
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text('Done'),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
           ],
         ),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (incidentDetected) ...[
-                _buildResultRow(
-                  'Type',
-                  incidentType.toString().toUpperCase().replaceAll('_', ' '),
-                  Icons.category,
-                ),
-                _buildResultRow(
-                  'Severity',
-                  severity.toString().toUpperCase(),
-                  Icons.priority_high,
-                  color: _getSeverityColor(severity),
-                ),
-                _buildResultRow(
-                  'Confidence',
-                  '${(confidence * 100).toStringAsFixed(1)}%',
-                  Icons.analytics,
-                ),
-                const Divider(height: 24),
-              ],
-              _buildResultRow(
-                'Vehicles Detected',
-                vehicleCount.toString(),
-                Icons.directions_car,
-              ),
-              _buildResultRow(
-                'Average Speed',
-                '${avgSpeed.toStringAsFixed(1)} km/h',
-                Icons.speed,
-              ),
-              _buildResultRow(
-                'Stationary Vehicles',
-                stationaryCount.toString(),
-                Icons.stop_circle,
-              ),
-              if (incidentCreated) ...[
-                const Divider(height: 24),
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.green.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.green),
-                  ),
-                  child: const Row(
-                    children: [
-                      Icon(Icons.check_circle, color: Colors.green),
-                      SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'Incident saved to database.\nNotifications sent to authorities.',
-                          style: TextStyle(color: Colors.green, fontSize: 12),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ],
+      ),
+    );
+  }
+
+  Widget _buildStatRow(IconData icon, String label, String value) {
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: AppColors.primary.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(icon, size: 18, color: AppColors.primary),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            label,
+            style: AppTextStyles.bodyMedium.copyWith(color: AppColors.textSecondary),
           ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              setState(() {
-                _videoFile = null;
-                _aiResults = null;
-                _videoController?.dispose();
-                _videoController = null;
-              });
-            },
-            child: const Text('Record Another'),
+        Text(
+          value,
+          style: AppTextStyles.bodyMedium.copyWith(
+            color: AppColors.textPrimary,
+            fontWeight: FontWeight.w600,
           ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              Navigator.pop(context); // Return to previous screen
-            },
-            child: const Text('Done'),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
-  Widget _buildResultRow(String label, String value, IconData icon, {Color? color}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
-        children: [
-          Icon(icon, size: 20, color: color ?? Colors.blue),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              label,
-              style: const TextStyle(fontSize: 14, color: Colors.grey),
-            ),
-          ),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.bold,
-              color: color ?? Colors.black87,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
+  // ignore: unused_element
   Color _getSeverityColor(String severity) {
     switch (severity.toLowerCase()) {
       case 'critical':
-        return Colors.red;
+        return AppColors.error;
       case 'high':
         return Colors.orange;
       case 'medium':
-        return Colors.yellow[700]!;
+        return AppColors.warning;
       case 'low':
-        return Colors.blue;
+        return AppColors.success;
       default:
-        return Colors.grey;
+        return AppColors.textTertiary;
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: const Text('AI Video Analysis'),
+        backgroundColor: AppColors.background,
+        elevation: 0,
+        leading: IconButton(
+          icon: Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: AppColors.backgroundSecondary,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: const Icon(
+              Icons.arrow_back,
+              color: AppColors.textPrimary,
+              size: 20,
+            ),
+          ),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: Text(
+          'AI Video Analysis',
+          style: AppTextStyles.titleLarge.copyWith(color: AppColors.textPrimary),
+        ),
         centerTitle: true,
-        backgroundColor: Colors.deepPurple,
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             // Info Card
-            Card(
-              color: Colors.blue[50],
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  children: [
-                    Icon(Icons.video_camera_front, size: 48, color: Colors.blue[700]),
-                    const SizedBox(height: 12),
-                    const Text(
-                      'AI-Powered Incident Detection',
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Record traffic footage (max 30 seconds)\nAI will analyze and detect incidents automatically',
-                      style: TextStyle(fontSize: 14, color: Colors.black54),
-                      textAlign: TextAlign.center,
-                    ),
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    AppColors.primary.withValues(alpha: 0.15),
+                    AppColors.primary.withValues(alpha: 0.05),
                   ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
                 ),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: AppColors.primary.withValues(alpha: 0.2)),
+              ),
+              child: Column(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: const Icon(
+                      Icons.psychology,
+                      size: 40,
+                      color: AppColors.primary,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'AI-Powered Detection',
+                    style: AppTextStyles.titleMedium.copyWith(color: AppColors.textPrimary),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Record traffic footage (max 30 seconds)\nAI will analyze and detect incidents automatically',
+                    style: AppTextStyles.bodyMedium.copyWith(color: AppColors.textSecondary),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
               ),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 20),
 
             // Location Status
             if (_currentLocation != null)
-              Card(
-                color: Colors.green[50],
-                child: ListTile(
-                  leading: const Icon(Icons.location_on, color: Colors.green),
-                  title: const Text('Location Acquired'),
-                  subtitle: Text(
-                    'Lat: ${_currentLocation!.latitude!.toStringAsFixed(6)}\n'
-                    'Lng: ${_currentLocation!.longitude!.toStringAsFixed(6)}',
-                    style: const TextStyle(fontSize: 11),
-                  ),
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: AppColors.backgroundSecondary,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: AppColors.success.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(Icons.location_on, color: AppColors.success, size: 22),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Location Acquired',
+                            style: AppTextStyles.bodyMedium.copyWith(
+                              color: AppColors.textPrimary,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          Text(
+                            '${_currentLocation!.latitude!.toStringAsFixed(6)}, ${_currentLocation!.longitude!.toStringAsFixed(6)}',
+                            style: AppTextStyles.bodySmall.copyWith(color: AppColors.textTertiary),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Icon(Icons.check_circle, color: AppColors.success, size: 20),
+                  ],
                 ),
               ),
 
             // Video Preview
             if (_videoFile != null) ...[
-              const SizedBox(height: 16),
-              Card(
+              const SizedBox(height: 20),
+              Container(
+                decoration: BoxDecoration(
+                  color: AppColors.backgroundSecondary,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppColors.border),
+                ),
                 child: Column(
                   children: [
-                    if (_videoController != null && _videoController!.value.isInitialized)
-                      AspectRatio(
-                        aspectRatio: _videoController!.value.aspectRatio,
-                        child: VideoPlayer(_videoController!),
-                      )
-                    else
-                      Container(
-                        height: 200,
-                        color: Colors.black12,
-                        child: const Center(
-                          child: CircularProgressIndicator(),
-                        ),
-                      ),
+                    ClipRRect(
+                      borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+                      child: _videoController != null && _videoController!.value.isInitialized
+                          ? AspectRatio(
+                              aspectRatio: _videoController!.value.aspectRatio,
+                              child: VideoPlayer(_videoController!),
+                            )
+                          : Container(
+                              height: 200,
+                              color: AppColors.background,
+                              child: const Center(
+                                child: CircularProgressIndicator(color: AppColors.primary),
+                              ),
+                            ),
+                    ),
                     Padding(
                       padding: const EdgeInsets.all(12),
                       child: Row(
@@ -439,10 +564,16 @@ class _AIVideoCaptureScreenState extends State<AIVideoCaptureScreen> {
                         children: [
                           if (_videoController != null && _videoController!.value.isInitialized)
                             IconButton(
-                              icon: Icon(
-                                _videoController!.value.isPlaying
-                                    ? Icons.pause
-                                    : Icons.play_arrow,
+                              icon: Container(
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: AppColors.primary.withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Icon(
+                                  _videoController!.value.isPlaying ? Icons.pause : Icons.play_arrow,
+                                  color: AppColors.primary,
+                                ),
                               ),
                               onPressed: () {
                                 setState(() {
@@ -452,14 +583,12 @@ class _AIVideoCaptureScreenState extends State<AIVideoCaptureScreen> {
                                 });
                               },
                             ),
-                          const SizedBox(width: 16),
-                          ElevatedButton.icon(
+                          const SizedBox(width: 12),
+                          TextButton.icon(
                             onPressed: _recordVideo,
-                            icon: const Icon(Icons.refresh),
+                            icon: const Icon(Icons.refresh, size: 20),
                             label: const Text('Re-record'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.orange,
-                            ),
+                            style: TextButton.styleFrom(foregroundColor: AppColors.warning),
                           ),
                         ],
                       ),
@@ -471,96 +600,174 @@ class _AIVideoCaptureScreenState extends State<AIVideoCaptureScreen> {
 
             // Upload Progress
             if (_isUploading) ...[
-              const SizedBox(height: 16),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    children: [
-                      const Text('Uploading video...', style: TextStyle(fontSize: 16)),
-                      const SizedBox(height: 12),
-                      LinearProgressIndicator(
+              const SizedBox(height: 20),
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: AppColors.backgroundSecondary,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.cloud_upload, color: AppColors.primary),
+                        const SizedBox(width: 12),
+                        Text(
+                          'Uploading video...',
+                          style: AppTextStyles.bodyMedium.copyWith(color: AppColors.textPrimary),
+                        ),
+                        const Spacer(),
+                        Text(
+                          '${_uploadProgress.toStringAsFixed(0)}%',
+                          style: AppTextStyles.bodyMedium.copyWith(
+                            color: AppColors.primary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: LinearProgressIndicator(
                         value: _uploadProgress / 100,
-                        backgroundColor: Colors.grey[200],
-                        valueColor: const AlwaysStoppedAnimation<Color>(Colors.blue),
+                        backgroundColor: AppColors.border,
+                        valueColor: const AlwaysStoppedAnimation<Color>(AppColors.primary),
+                        minHeight: 6,
                       ),
-                      const SizedBox(height: 8),
-                      Text('${_uploadProgress.toStringAsFixed(0)}%'),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
             ],
 
             // AI Analysis Progress
             if (_isAnalyzing) ...[
-              const SizedBox(height: 16),
-              Card(
-                color: Colors.purple[50],
-                child: const Padding(
-                  padding: EdgeInsets.all(16),
-                  child: Column(
-                    children: [
-                      CircularProgressIndicator(),
-                      SizedBox(height: 12),
-                      Text(
-                        '🤖 AI analyzing video...',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                      ),
-                      SizedBox(height: 4),
-                      Text(
-                        'Detecting incidents, counting vehicles, analyzing traffic flow',
-                        style: TextStyle(fontSize: 12, color: Colors.black54),
-                        textAlign: TextAlign.center,
-                      ),
+              const SizedBox(height: 20),
+              Container(
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      AppColors.primary.withValues(alpha: 0.15),
+                      AppColors.primary.withValues(alpha: 0.05),
                     ],
                   ),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppColors.primary.withValues(alpha: 0.2)),
+                ),
+                child: Column(
+                  children: [
+                    ScaleTransition(
+                      scale: _pulseAnimation,
+                      child: Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: AppColors.primary.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: const Icon(Icons.psychology, size: 40, color: AppColors.primary),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'AI analyzing video...',
+                      style: AppTextStyles.titleMedium.copyWith(color: AppColors.textPrimary),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Detecting incidents, counting vehicles, analyzing traffic flow',
+                      style: AppTextStyles.bodySmall.copyWith(color: AppColors.textSecondary),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
                 ),
               ),
             ],
 
             // Error Message
             if (_errorMessage != null) ...[
-              const SizedBox(height: 16),
-              Card(
-                color: Colors.red[50],
-                child: ListTile(
-                  leading: const Icon(Icons.error, color: Colors.red),
-                  title: const Text('Error'),
-                  subtitle: Text(_errorMessage!),
+              const SizedBox(height: 20),
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: AppColors.error.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppColors.error.withValues(alpha: 0.3)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.error_outline, color: AppColors.error),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        _errorMessage!,
+                        style: AppTextStyles.bodyMedium.copyWith(color: AppColors.error),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
 
-            const SizedBox(height: 24),
+            const SizedBox(height: 28),
 
             // Action Buttons
             if (_videoFile == null)
-              ElevatedButton.icon(
-                onPressed: _recordVideo,
-                icon: const Icon(Icons.videocam, size: 32),
-                label: const Text('Record Video', style: TextStyle(fontSize: 18)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.deepPurple,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+              SizedBox(
+                height: 60,
+                child: ElevatedButton(
+                  onPressed: _recordVideo,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    elevation: 0,
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.videocam, size: 28),
+                      const SizedBox(width: 12),
+                      Text(
+                        'Record Video',
+                        style: AppTextStyles.titleMedium.copyWith(color: Colors.white),
+                      ),
+                    ],
                   ),
                 ),
               )
             else if (!_isUploading && !_isAnalyzing)
-              ElevatedButton.icon(
-                onPressed: _uploadAndAnalyze,
-                icon: const Icon(Icons.cloud_upload, size: 32),
-                label: const Text('Upload & Analyze', style: TextStyle(fontSize: 18)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blue,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+              SizedBox(
+                height: 60,
+                child: ElevatedButton(
+                  onPressed: _uploadAndAnalyze,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    elevation: 0,
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.cloud_upload, size: 28),
+                      const SizedBox(width: 12),
+                      Text(
+                        'Upload & Analyze',
+                        style: AppTextStyles.titleMedium.copyWith(color: Colors.white),
+                      ),
+                    ],
                   ),
                 ),
               ),
+            const SizedBox(height: 20),
           ],
         ),
       ),

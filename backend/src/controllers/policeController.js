@@ -242,7 +242,7 @@ const updateOfficerLocation = async (req, res) => {
                 current_longitude = $2,
                 current_address = $3,
                 location_updated_at = NOW(),
-                status = 'available'
+                is_on_duty = true
             WHERE user_id = $4
         `, [latitude, longitude, address, userId]);
 

@@ -8,6 +8,8 @@ const {
     updateEmergencyStatus,
     getUserEmergencies,
     getEmergencyStats,
+    respondToEmergency,
+    getNearbyOfficers,
 } = require('../controllers/emergencyController');
 
 const router = express.Router();
@@ -133,6 +135,37 @@ router.get(
     authenticate,
     authorize('police', 'admin'),
     require('../controllers/emergencyController').generateEmergencyReport
+);
+
+/**
+ * @route   POST /api/emergency/:id/respond
+ * @desc    Officer responds to emergency (accept/decline/forward)
+ * @access  Private (Police)
+ */
+router.post(
+    '/:id/respond',
+    authenticate,
+    authorize('police', 'admin'),
+    [
+        body('action')
+            .notEmpty()
+            .withMessage('Action is required')
+            .isIn(['accept', 'decline', 'forward'])
+            .withMessage('Invalid action'),
+    ],
+    respondToEmergency
+);
+
+/**
+ * @route   GET /api/emergency/:id/nearby-officers
+ * @desc    Get nearby officers for forwarding
+ * @access  Private (Police)
+ */
+router.get(
+    '/:id/nearby-officers',
+    authenticate,
+    authorize('police', 'admin'),
+    getNearbyOfficers
 );
 
 module.exports = router;

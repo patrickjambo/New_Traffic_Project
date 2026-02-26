@@ -7,6 +7,7 @@ const {
     getNearbyIncidents,
     getIncidentById,
     updateIncidentStatus,
+    respondToIncident,
     getUserIncidents,
     getIncidentStatistics,
 } = require('../controllers/incidentController');
@@ -85,6 +86,18 @@ router.patch(
     authorize('police', 'admin'),
     validate(schemas.updateIncidentStatus),
     updateIncidentStatus
+);
+
+/**
+ * @route   PUT /api/incidents/:id/respond
+ * @desc    Police officer respond to incident (responding, on_scene, resolved, cancelled)
+ * @access  Private (Police only)
+ */
+router.put(
+    '/:id/respond',
+    authenticate,
+    authorize('police'),
+    respondToIncident
 );
 
 module.exports = router;

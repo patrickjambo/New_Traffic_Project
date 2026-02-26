@@ -27,6 +27,10 @@ class WebSocketService {
   String? _pendingUserId;
   String? _pendingUserRole;
   
+  // 🔥 Track shown emergencies to prevent duplicates
+  final Set<String> _shownEmergencyIds = {};
+  final Set<String> _acceptedEmergencyIds = {};
+  
   // Stream controllers for reactive updates
   final _incidentStreamController = StreamController<Map<String, dynamic>>.broadcast();
   final _emergencyStreamController = StreamController<Map<String, dynamic>>.broadcast();
@@ -47,7 +51,22 @@ class WebSocketService {
   final Map<String, Function(Map<String, dynamic>)> _customEventHandlers = {};
 
   bool get isConnected => _isConnected;
-
+  
+  // 🔥 Method to mark emergency as accepted (clears from shown set)
+  void markEmergencyAccepted(dynamic emergencyId) {
+    final id = emergencyId?.toString() ?? '';
+    if (id.isNotEmpty) {
+      _acceptedEmergencyIds.add(id);
+      print('✅ Marked emergency $id as accepted');
+    }
+  }
+  
+  // 🔥 Clear old emergency IDs (call periodically or on new session)
+  void clearOldEmergencies() {
+    _shownEmergencyIds.clear();
+    _acceptedEmergencyIds.clear();
+    print('🧹 Cleared emergency tracking sets');
+  }
   /// Initialize WebSocket connection with auto-reconnect
   void connect({String? userId, String? userRole}) {
     try {
@@ -134,26 +153,43 @@ class WebSocketService {
 
   /// Join user and role rooms for targeted notifications
   void _joinRooms(String? userId, String? userRole) {
-    if (_socket == null || !_socket!.connected) return;
+    if (_socket == null || !_socket!.connected) {
+      print('⚠️ Socket not connected, will retry joining rooms...');
+      // Retry after a short delay
+      Future.delayed(const Duration(seconds: 2), () {
+        if (_socket != null && _socket!.connected) {
+          _joinRooms(userId, userRole);
+        }
+      });
+      return;
+    }
     
     // Join role-based room
     _socket!.emit('join:role', {
       'role': userRole ?? 'public',
       'userId': userId,
     });
-    print('📍 Joined role room: ${userRole ?? 'public'}');
+    print('✅ Joined role room: ${userRole ?? 'public'} (userId: $userId)');
     
     // 🔥 Join user-specific room for targeted notifications (deployments, etc.)
     if (userId != null) {
       _socket!.emit('join:user', {
         'userId': userId,
       });
-      print('📍 Joined user room: user:$userId');
+      print('✅ Joined user room: user:$userId');
       
       // Store for reconnection
       _pendingUserId = userId;
       _pendingUserRole = userRole;
     }
+  }
+
+  /// Public method to manually join rooms (call after login)
+  void joinRooms({required String userId, required String userRole}) {
+    print('🔌 Manual room join requested for userId: $userId, role: $userRole');
+    _pendingUserId = userId;
+    _pendingUserRole = userRole;
+    _joinRooms(userId, userRole);
   }
 
   /// Setup listeners for all server events
@@ -177,6 +213,11 @@ class WebSocketService {
     _socket!.on('incident:alert', (data) {
       print('🚨 Incident alert received: $data');
       _handleIncidentAlert(data);
+    });
+
+    _socket!.on('incident:response', (data) {
+      print('🚔 Officer responded to incident: $data');
+      _handleIncidentResponse(data);
     });
 
     // ============================================
@@ -341,6 +382,39 @@ class WebSocketService {
     }
   }
 
+  void _handleIncidentResponse(dynamic data) {
+    try {
+      final responseData = _parseData(data);
+      final incidentId = responseData['incidentId'];
+      final action = responseData['action'];
+      final officerName = responseData['officerName'] ?? 'An officer';
+      
+      print('🚔 Incident $incidentId: $officerName is $action');
+      
+      _incidentStreamController.add({
+        'type': 'response',
+        'data': responseData,
+      });
+
+      // Show notification that another officer is responding
+      if (action == 'responding') {
+        _notificationService.addNotification(
+          title: '🚔 Officer Responding',
+          message: '$officerName is responding to incident #$incidentId',
+          type: 'info',
+        );
+      } else if (action == 'resolved') {
+        _notificationService.addNotification(
+          title: '✅ Incident Resolved',
+          message: 'Incident #$incidentId resolved by $officerName',
+          type: 'success',
+        );
+      }
+    } catch (e) {
+      print('Error handling incident:response: $e');
+    }
+  }
+
   void _handleEmergencyNew(dynamic data) {
     try {
       final emergencyData = _parseData(data);
@@ -401,7 +475,24 @@ class WebSocketService {
   void _handleEmergencyAlert(dynamic data) {
     try {
       final alertData = _parseData(data);
-      print('🚨🚨🚨 PROCESSING EMERGENCY ALERT: $alertData');
+      final emergencyId = (alertData['emergencyId'] ?? alertData['alertId'] ?? alertData['id'])?.toString() ?? '';
+      
+      print('🚨 EMERGENCY ALERT received - ID: $emergencyId');
+      
+      // � Check for duplicate - skip if already shown or accepted
+      if (emergencyId.isNotEmpty) {
+        if (_shownEmergencyIds.contains(emergencyId)) {
+          print('⚠️ Skipping duplicate emergency alert: $emergencyId');
+          return;
+        }
+        if (_acceptedEmergencyIds.contains(emergencyId)) {
+          print('⚠️ Skipping already accepted emergency: $emergencyId');
+          return;
+        }
+        _shownEmergencyIds.add(emergencyId);
+      }
+      
+      print('🚨�🚨🚨 PROCESSING EMERGENCY ALERT: $alertData');
       
       _emergencyStreamController.add({
         'type': 'alert',
@@ -418,6 +509,7 @@ class WebSocketService {
         'location': alertData['location_name'] ?? alertData['locationName'] ?? 'Unknown location',
         'latitude': alertData['latitude'],
         'longitude': alertData['longitude'],
+        'emergencyId': emergencyId,
         ...alertData,
       });
 
@@ -425,7 +517,7 @@ class WebSocketService {
       if (navigatorKey.currentState != null) {
         navigatorKey.currentState!.pushNamed(
           '/emergency-alert',
-          arguments: alertData,
+          arguments: {...alertData, 'emergencyId': emergencyId},
         );
       }
 
@@ -464,26 +556,43 @@ class WebSocketService {
   void _handleEmergencyAlarm(dynamic data) {
     try {
       final alarmData = _parseData(data);
+      final emergencyId = (alarmData['emergencyId'] ?? alarmData['alertId'] ?? alarmData['id'])?.toString() ?? '';
+      
+      print('🚨 EMERGENCY ALARM received - ID: $emergencyId');
+      
+      // 🔥 Check for duplicate - skip if already shown or accepted
+      if (emergencyId.isNotEmpty) {
+        if (_shownEmergencyIds.contains(emergencyId)) {
+          print('⚠️ Skipping duplicate emergency alarm: $emergencyId');
+          return;
+        }
+        if (_acceptedEmergencyIds.contains(emergencyId)) {
+          print('⚠️ Skipping already accepted emergency: $emergencyId');
+          return;
+        }
+        _shownEmergencyIds.add(emergencyId);
+      }
+      
       print('🚨🚨🚨 PROCESSING EMERGENCY ALARM: $alarmData');
       
       // Emit to the emergency alarm stream (for full-screen UI)
-      _emergencyAlarmController.add(alarmData);
+      _emergencyAlarmController.add({...alarmData, 'emergencyId': emergencyId});
       
       // Also add to emergency stream
       _emergencyStreamController.add({
         'type': 'alarm',
-        'data': alarmData,
+        'data': {...alarmData, 'emergencyId': emergencyId},
       });
 
       // Trigger full-screen emergency alert with siren
       final emergencyService = EmergencyAlertService();
-      emergencyService.showEmergencyAlert(alarmData);
+      emergencyService.showEmergencyAlert({...alarmData, 'emergencyId': emergencyId});
       
       // Navigate to emergency alert screen using global navigator
       if (navigatorKey.currentState != null) {
         navigatorKey.currentState!.pushNamed(
           '/emergency-alert',
-          arguments: alarmData,
+          arguments: {...alarmData, 'emergencyId': emergencyId},
         );
       }
 

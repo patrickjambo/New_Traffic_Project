@@ -24,6 +24,7 @@ import {
   AlertTriangle,
   CheckCircle,
   XCircle,
+  Trash2,
 } from 'lucide-react';
 
 // Create axios instance with authentication
@@ -52,8 +53,12 @@ const OfficerManagement = () => {
   const [showEditModal, setShowEditModal] = useState(false);
   const [showResetPasswordModal, setShowResetPasswordModal] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showViewPasswordModal, setShowViewPasswordModal] = useState(false);
   const [selectedOfficer, setSelectedOfficer] = useState(null);
   const [confirmAction, setConfirmAction] = useState(null);
+  const [officerPassword, setOfficerPassword] = useState('');
+  const [showPasswordText, setShowPasswordText] = useState(false);
   
   // Form states
   const [formData, setFormData] = useState({
@@ -115,6 +120,10 @@ const OfficerManagement = () => {
       const response = await axios.post('/admin/officers', formData);
       
       if (response.data.success) {
+        // Store the password temporarily for viewing
+        setOfficerPassword(formData.password);
+        setSelectedOfficer(response.data.data);
+        
         toast.success(
           <div>
             <strong>Officer Created!</strong>
@@ -125,9 +134,10 @@ const OfficerManagement = () => {
           </div>,
           { duration: 5000 }
         );
+        
+        // Show view password modal
+        setShowViewPasswordModal(true);
         setShowCreateModal(false);
-        resetForm();
-        fetchOfficers();
       }
     } catch (error) {
       console.error('Error creating officer:', error);
@@ -209,6 +219,36 @@ const OfficerManagement = () => {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleDeleteOfficer = async () => {
+    if (!selectedOfficer) return;
+
+    try {
+      setSubmitting(true);
+      await axios.delete(`/admin/officers/${selectedOfficer.id}`);
+      toast.success(
+        <div>
+          <strong>Officer Deleted!</strong>
+          <br />
+          <span className="text-sm">{selectedOfficer.full_name} has been permanently removed from the system</span>
+        </div>,
+        { duration: 5000 }
+      );
+      setShowDeleteModal(false);
+      setSelectedOfficer(null);
+      fetchOfficers();
+    } catch (error) {
+      console.error('Error deleting officer:', error);
+      toast.error(error.response?.data?.message || 'Failed to delete officer');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const openDeleteModal = (officer) => {
+    setSelectedOfficer(officer);
+    setShowDeleteModal(true);
   };
 
   const resetForm = () => {
@@ -491,6 +531,13 @@ const OfficerManagement = () => {
                           title={officer.is_active ? 'Block Officer' : 'Activate Officer'}
                         >
                           {officer.is_active ? <UserX className="w-4 h-4" /> : <UserCheck className="w-4 h-4" />}
+                        </button>
+                        <button
+                          onClick={() => openDeleteModal(officer)}
+                          className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors"
+                          title="Delete Officer"
+                        >
+                          <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
                     </td>
@@ -837,6 +884,159 @@ const OfficerManagement = () => {
                 >
                   {submitting && <RefreshCw className="w-4 h-4 animate-spin" />}
                   {confirmAction.type === 'block' ? 'Block Officer' : 'Activate Officer'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Officer Modal */}
+      {showDeleteModal && selectedOfficer && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-800 border border-white/10 rounded-xl w-full max-w-md">
+            <div className="flex items-center justify-between p-4 border-b border-white/10">
+              <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                <Trash2 className="w-5 h-5 text-red-500" />
+                Delete Officer
+              </h3>
+              <button
+                onClick={() => setShowDeleteModal(false)}
+                className="p-1 text-gray-400 hover:text-white rounded-lg hover:bg-white/10"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-4 space-y-4">
+              <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-red-400 font-semibold">Permanent Deletion</p>
+                    <p className="text-red-300 text-sm mt-1">
+                      This action cannot be undone. The officer will be permanently removed from the system and all associated data will be erased from the database.
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <div className="bg-slate-900/50 rounded-lg p-3">
+                <p className="text-sm text-gray-400 mb-2">Officer to be deleted:</p>
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold bg-gray-600">
+                    {selectedOfficer.full_name?.charAt(0)?.toUpperCase() || 'O'}
+                  </div>
+                  <div>
+                    <p className="text-white font-medium">{selectedOfficer.full_name}</p>
+                    <p className="text-gray-500 text-sm">{selectedOfficer.email}</p>
+                    <p className="text-gray-500 text-sm">{selectedOfficer.badge_number || 'N/A'}</p>
+                  </div>
+                </div>
+              </div>
+              <div className="flex gap-3 pt-4">
+                <button
+                  onClick={() => setShowDeleteModal(false)}
+                  className="flex-1 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleDeleteOfficer}
+                  disabled={submitting}
+                  className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-red-600/50 text-white rounded-lg transition-colors flex items-center justify-center gap-2"
+                >
+                  {submitting && <RefreshCw className="w-4 h-4 animate-spin" />}
+                  Delete Permanently
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* View Password Modal */}
+      {showViewPasswordModal && selectedOfficer && officerPassword && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-800 border border-white/10 rounded-xl w-full max-w-md">
+            <div className="flex items-center justify-between p-4 border-b border-white/10">
+              <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                <Eye className="w-5 h-5 text-blue-400" />
+                View Officer Password
+              </h3>
+              <button
+                onClick={() => {
+                  setShowViewPasswordModal(false);
+                  setOfficerPassword('');
+                  setShowPasswordText(false);
+                }}
+                className="p-1 text-gray-400 hover:text-white rounded-lg hover:bg-white/10"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-4 space-y-4">
+              <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="w-5 h-5 text-blue-400 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-blue-400 font-semibold">Password Information</p>
+                    <p className="text-blue-300 text-sm mt-1">
+                      This is the password you created for this officer. Share it securely with them so they can login to the mobile app.
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <div className="bg-slate-900/50 rounded-lg p-3">
+                <p className="text-sm text-gray-400 mb-2">Officer Details:</p>
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold bg-gradient-to-br from-blue-500 to-cyan-600">
+                    {selectedOfficer.full_name?.charAt(0)?.toUpperCase() || 'O'}
+                  </div>
+                  <div>
+                    <p className="text-white font-medium">{selectedOfficer.full_name}</p>
+                    <p className="text-gray-500 text-sm">{selectedOfficer.email}</p>
+                  </div>
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">Password</label>
+                <div className="relative">
+                  <input
+                    type={showPasswordText ? 'text' : 'password'}
+                    value={officerPassword}
+                    readOnly
+                    className="w-full px-4 py-3 bg-slate-900/50 border border-white/10 rounded-lg text-white font-mono text-center focus:outline-none focus:border-blue-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPasswordText(!showPasswordText)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
+                  >
+                    {showPasswordText ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+              <div>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(officerPassword);
+                    toast.success('Password copied to clipboard!');
+                  }}
+                  className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors flex items-center justify-center gap-2"
+                >
+                  <Lock className="w-4 h-4" />
+                  Copy Password
+                </button>
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button
+                  onClick={() => {
+                    setShowViewPasswordModal(false);
+                    setOfficerPassword('');
+                    setShowPasswordText(false);
+                  }}
+                  className="flex-1 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors"
+                >
+                  Close
                 </button>
               </div>
             </div>

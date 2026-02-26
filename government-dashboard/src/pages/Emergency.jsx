@@ -24,6 +24,9 @@ const Emergency = () => {
   
   // Track deployed officers and acknowledgments
   const [deployedOfficers, setDeployedOfficers] = useState({});
+  
+  // Track which emergencies have been accepted by officers (real-time)
+  const [acceptedEmergencies, setAcceptedEmergencies] = useState({});
 
   // Fetch available officers when modal opens
   useEffect(() => {
@@ -77,9 +80,29 @@ const Emergency = () => {
       }));
     });
 
+    // 🚨 Listen for emergency accepted by officer (real-time)
+    const unsubEmergencyAccepted = subscribe('emergency:accepted', (data) => {
+      console.log('✅ Emergency accepted by officer:', data);
+      toast.success(
+        `🚔 ${data.acceptedBy?.officerName || 'Officer'} is responding to emergency #${data.emergencyId}!`,
+        { duration: 6000, icon: '🚨' }
+      );
+      
+      setAcceptedEmergencies(prev => ({
+        ...prev,
+        [data.emergencyId]: {
+          officerId: data.acceptedBy?.officerId,
+          officerName: data.acceptedBy?.officerName,
+          timestamp: data.timestamp,
+          message: data.message
+        }
+      }));
+    });
+
     return () => {
       unsubAck();
       unsubStatus();
+      unsubEmergencyAccepted();
     };
   }, [isConnected, subscribe]);
 
@@ -266,12 +289,43 @@ const Emergency = () => {
                     <div className="text-center mb-2">
                       <span className="text-xs text-gray-500 uppercase tracking-wider">Current Status</span>
                       <p className={`font-bold ${emergency.status === 'resolved' ? 'text-green-400' :
-                        emergency.status === 'active' ? 'text-orange-400' :
+                        emergency.status === 'active' || emergency.status === 'dispatched' ? 'text-orange-400' :
                           'text-red-400'
                         }`}>
                         {emergency.status.toUpperCase()}
                       </p>
                     </div>
+
+                    {/* 🚔 Officer Response Status - Real-time */}
+                    {(emergency.assigned_to || acceptedEmergencies[emergency.id]) && (
+                      <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-3 mb-2">
+                        <div className="flex items-center gap-2 text-green-400">
+                          <UserCheck className="w-4 h-4" />
+                          <span className="text-xs font-bold uppercase">Officer Responding</span>
+                        </div>
+                        <p className="text-white font-medium mt-1">
+                          {acceptedEmergencies[emergency.id]?.officerName || emergency.assigned_to_name || 'Officer assigned'}
+                        </p>
+                        {acceptedEmergencies[emergency.id]?.timestamp && (
+                          <p className="text-green-400/70 text-xs mt-1">
+                            Accepted at {new Date(acceptedEmergencies[emergency.id].timestamp).toLocaleTimeString()}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                    
+                    {/* ⚠️ Waiting for Response */}
+                    {!emergency.assigned_to && !acceptedEmergencies[emergency.id] && emergency.status === 'pending' && (
+                      <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3 mb-2 animate-pulse">
+                        <div className="flex items-center gap-2 text-yellow-400">
+                          <Radio className="w-4 h-4 animate-spin" />
+                          <span className="text-xs font-bold uppercase">Awaiting Response</span>
+                        </div>
+                        <p className="text-yellow-200/70 text-xs mt-1">
+                          Alert sent to nearby officers
+                        </p>
+                      </div>
+                    )}
 
                     {emergency.status !== 'resolved' && (
                       <div className="grid grid-cols-2 gap-2">

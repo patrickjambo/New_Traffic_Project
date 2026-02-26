@@ -184,12 +184,16 @@ const getNearbyIncidents = async (req, res) => {
                 i.video_url,
                 i.created_at,
                 i.updated_at,
+                i.responding_officer_id,
+                i.response_started_at,
                 COALESCE(i.is_anonymous, false) as is_anonymous,
                 'manual' as source,
                 u.full_name as reported_by_name,
+                responder.full_name as responding_officer_name,
                 (6371 * acos(cos(radians($1)) * cos(radians(i.latitude)) * cos(radians(i.longitude) - radians($2)) + sin(radians($1)) * sin(radians(i.latitude)))) as distance_km
               FROM incidents i
               LEFT JOIN users u ON i.reported_by = u.id
+              LEFT JOIN users responder ON i.responding_officer_id = responder.id
               WHERE i.latitude IS NOT NULL AND i.longitude IS NOT NULL
                 AND (6371 * acos(cos(radians($1)) * cos(radians(i.latitude)) * cos(radians(i.longitude) - radians($2)) + sin(radians($1)) * sin(radians(i.latitude)))) < $3
             `;
@@ -211,11 +215,15 @@ const getNearbyIncidents = async (req, res) => {
                 i.video_url,
                 i.created_at,
                 i.updated_at,
+                i.responding_officer_id,
+                i.response_started_at,
                 COALESCE(i.is_anonymous, false) as is_anonymous,
                 'manual' as source,
-                u.full_name as reported_by_name
+                u.full_name as reported_by_name,
+                responder.full_name as responding_officer_name
               FROM incidents i
               LEFT JOIN users u ON i.reported_by = u.id
+              LEFT JOIN users responder ON i.responding_officer_id = responder.id
               WHERE 1=1
             `;
             params = [];
@@ -357,6 +365,145 @@ const updateIncidentStatus = async (req, res) => {
 };
 
 /**
+ * Police officer respond to incident
+ * This is different from updateIncidentStatus - it specifically handles police response
+ */
+const respondToIncident = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { action, response_notes } = req.body;
+        const officerId = req.user.id;
+        const officerName = req.user.full_name || 'Unknown Officer';
+
+        // Validate action
+        const validActions = ['responding', 'on_scene', 'resolved', 'cancelled'];
+        if (!validActions.includes(action)) {
+            return res.status(400).json({
+                success: false,
+                error: 'Invalid action. Must be: responding, on_scene, resolved, or cancelled'
+            });
+        }
+
+        // Get current incident
+        const incidentResult = await query(
+            `SELECT id, type, severity, status, latitude, longitude, address, responding_officer_id
+             FROM incidents WHERE id = $1`,
+            [id]
+        );
+
+        if (incidentResult.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                error: 'Incident not found'
+            });
+        }
+
+        const incident = incidentResult.rows[0];
+
+        // Check if another officer is already responding
+        if (incident.responding_officer_id && 
+            incident.responding_officer_id !== officerId && 
+            action === 'responding') {
+            
+            // Get responding officer's name
+            const responderResult = await query(
+                'SELECT full_name FROM users WHERE id = $1',
+                [incident.responding_officer_id]
+            );
+            const responderName = responderResult.rows[0]?.full_name || 'Another officer';
+            
+            return res.status(409).json({
+                success: false,
+                error: `${responderName} is already responding to this incident`
+            });
+        }
+
+        // Map action to status
+        const statusMap = {
+            'responding': 'responding',
+            'on_scene': 'in_progress',
+            'resolved': 'resolved',
+            'cancelled': 'active'
+        };
+
+        const newStatus = statusMap[action];
+        const respondingOfficerId = action === 'cancelled' ? null : officerId;
+
+        // Update incident with officer response
+        const updateResult = await query(
+            `UPDATE incidents 
+             SET status = $1, 
+                 responding_officer_id = $2, 
+                 response_started_at = CASE WHEN $3 = 'responding' THEN CURRENT_TIMESTAMP ELSE response_started_at END,
+                 response_notes = COALESCE($4, response_notes),
+                 verified_by = $5,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = $6
+             RETURNING id, type, severity, status, latitude, longitude, address, responding_officer_id, response_started_at`,
+            [newStatus, respondingOfficerId, action, response_notes, officerId, id]
+        );
+
+        // Add to incident updates history
+        await query(
+            'INSERT INTO incident_updates (incident_id, user_id, status, comment) VALUES ($1, $2, $3, $4)',
+            [id, officerId, newStatus, `Officer ${action}: ${response_notes || ''}`]
+        );
+
+        // Get updated incident with officer info
+        const updatedIncident = updateResult.rows[0];
+
+        // Emit real-time update to all connected clients
+        const io = socketManager.getIO();
+        if (io) {
+            // Notify admin dashboard
+            io.to('role:admin').emit('incident:response', {
+                incidentId: id,
+                action: action,
+                officerId: officerId,
+                officerName: officerName,
+                incident: updatedIncident,
+                timestamp: new Date().toISOString()
+            });
+
+            // Notify other police that this incident is being handled
+            io.to('role:police').emit('incident:response', {
+                incidentId: id,
+                action: action,
+                officerId: officerId,
+                officerName: officerName,
+                incident: updatedIncident,
+                timestamp: new Date().toISOString()
+            });
+
+            // Also emit incident update
+            socketManager.emitIncidentUpdate(updatedIncident);
+        }
+
+        console.log(`🚔 Officer ${officerName} (${officerId}) ${action} incident ${id}`);
+
+        res.json({
+            success: true,
+            message: `Successfully ${action} incident`,
+            data: {
+                incident: updatedIncident,
+                officer: {
+                    id: officerId,
+                    name: officerName
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Respond to incident error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to respond to incident',
+            details: error.message
+        });
+    }
+};
+
+/**
  * Get incidents reported by the current user
  */
 const getUserIncidents = async (req, res) => {
@@ -439,6 +586,7 @@ module.exports = {
     getNearbyIncidents,
     getIncidentById,
     updateIncidentStatus,
+    respondToIncident,
     getUserIncidents,
     getIncidentStatistics,
 };

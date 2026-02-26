@@ -8,8 +8,9 @@ class ApiService {
   factory ApiService() => _instance;
   ApiService._internal();
 
-  late final Dio _dio;
+  late Dio _dio;
   final _secureStorage = const FlutterSecureStorage();
+  bool _initialized = false;
 
   /// Initialize the API service
   void initialize() {
@@ -29,10 +30,23 @@ class ApiService {
     _dio.interceptors.add(_getLogInterceptor());
     _dio.interceptors.add(_getAuthInterceptor());
     _dio.interceptors.add(_getErrorInterceptor());
+    _initialized = true;
+    print('✅ ApiService initialized with baseUrl: ${EnvironmentConfig.baseApiUrl}');
   }
 
-  /// Get Dio instance
-  Dio get dio => _dio;
+  /// Reinitialize with new base URL (call after server config changes)
+  void reinitialize() {
+    print('🔄 Reinitializing ApiService with new baseUrl: ${EnvironmentConfig.baseApiUrl}');
+    initialize();
+  }
+
+  /// Get Dio instance - auto-initialize if needed
+  Dio get dio {
+    if (!_initialized) {
+      initialize();
+    }
+    return _dio;
+  }
 
   /// Logging interceptor
   InterceptorsWrapper _getLogInterceptor() {

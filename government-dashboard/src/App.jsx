@@ -8,7 +8,7 @@ import Header from './components/Header';
 import ErrorBoundary from './components/ErrorBoundary';
 import HomePage from './pages/HomePage';
 import LoginPage from './pages/LoginPage';
-import RegisterPage from './pages/RegisterPage';
+// RegisterPage removed - no public registration allowed
 import Dashboard from './pages/Dashboard';
 import DashboardPage from './pages/DashboardPage';
 import Incidents from './pages/Incidents';
@@ -98,7 +98,8 @@ function AppContent() {
           </ErrorBoundary>
         } />
         <Route path="/login" element={<LoginPage />} />
-        <Route path="/register" element={<RegisterPage />} />
+        {/* Register route removed - no public registration allowed */}
+        <Route path="/register" element={<Navigate to="/login" replace />} />
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/incidents" element={<HomePage />} />
         <Route path="/report" element={<HomePage />} />

@@ -39,10 +39,12 @@ const upload = multer({
 
 /**
  * @route   POST /api/auth/register
- * @desc    Register new user
- * @access  Public
+ * @desc    Register new user - ADMIN ONLY (no public registration)
+ * @access  Private (requires admin authentication)
  */
-router.post('/register', validate(schemas.register), register);
+// Public registration is DISABLED for security
+// Users can only be created by admins through the admin dashboard
+// router.post('/register', validate(schemas.register), register);
 
 /**
  * @route   POST /api/auth/login

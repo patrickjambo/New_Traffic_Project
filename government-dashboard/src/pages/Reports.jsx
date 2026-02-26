@@ -1,12 +1,22 @@
 import React, { useState, useMemo } from 'react';
-import { FileText, Download, BarChart2, Calendar, FileBarChart, Activity } from 'lucide-react';
+import { FileText, Download, BarChart2, Calendar, FileBarChart, Activity, Zap } from 'lucide-react';
 import { useData } from '../context/DataContext';
 import axios from '../config/axios';
 import toast from 'react-hot-toast';
+import {
+  generateEmergencyReportPDF,
+  generateMonthlyReportPDF,
+  generateAnnualReportPDF,
+  downloadPDF
+} from '../services/pdfReportGenerator';
 
 const Reports = () => {
-  const { incidents, emergencies, loading, downloadEmergencyReport } = useData();
+  const { incidents, emergencies, loading } = useData();
   const [generating, setGenerating] = useState(false);
+  const [selectedMonth, setSelectedMonth] = useState(new Date());
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  const [showMonthlyModal, setShowMonthlyModal] = useState(false);
+  const [showAnnualModal, setShowAnnualModal] = useState(false);
 
   // Calculate real metrics from data
   const metrics = useMemo(() => {
@@ -22,7 +32,6 @@ const Reports = () => {
 
   // Combine real emergencies with periodic analysis reports
   const allReports = useMemo(() => {
-    // 1. Real Emergencies
     const emergencyReports = emergencies.map(em => ({
       id: `em-${em.id}`,
       realId: em.id,
@@ -31,10 +40,10 @@ const Reports = () => {
       date: new Date(em.created_at).toLocaleDateString(),
       timestamp: new Date(em.created_at).getTime(),
       source: em.automatic ? 'AI' : 'Manual',
-      severity: em.severity
+      severity: em.severity,
+      data: em
     }));
 
-    // 2. Periodic Analysis Reports (Mocked as before, but could be real in future)
     const analysisReports = [1, 2, 3].map(i => ({
       id: `an-${i}`,
       type: 'analysis',
@@ -47,16 +56,49 @@ const Reports = () => {
     return [...emergencyReports, ...analysisReports].sort((a, b) => b.timestamp - a.timestamp);
   }, [emergencies]);
 
-  const generateReport = async () => {
-    setGenerating(true);
+  // Generate Monthly Report
+  const handleGenerateMonthlyReport = async () => {
     try {
-      // This endpoint might need to be implemented or verified
-      const response = await axios.get('/admin/reports/generate');
-      toast.success('Report generated successfully');
-      console.log('Report data:', response.data);
+      setGenerating(true);
+      const doc = generateMonthlyReportPDF(incidents, emergencies, selectedMonth);
+      const monthName = selectedMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+      downloadPDF(doc, `RNP_Traffic_Report_${monthName.replace(' ', '_')}.pdf`);
+      toast.success('Monthly report generated successfully');
+      setShowMonthlyModal(false);
     } catch (error) {
-      console.error('Error generating report:', error);
-      toast.error('Failed to generate report');
+      console.error('Error generating monthly report:', error);
+      toast.error('Failed to generate monthly report');
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  // Generate Annual Report
+  const handleGenerateAnnualReport = async () => {
+    try {
+      setGenerating(true);
+      const doc = generateAnnualReportPDF(incidents, emergencies, selectedYear);
+      downloadPDF(doc, `RNP_Traffic_Annual_Report_${selectedYear}.pdf`);
+      toast.success('Annual report generated successfully');
+      setShowAnnualModal(false);
+    } catch (error) {
+      console.error('Error generating annual report:', error);
+      toast.error('Failed to generate annual report');
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  // Download Emergency Report
+  const handleDownloadEmergencyReport = async (emergency) => {
+    try {
+      setGenerating(true);
+      const doc = generateEmergencyReportPDF(emergency, incidents);
+      downloadPDF(doc, `RNP_Emergency_Report_${emergency.id}.pdf`);
+      toast.success('Emergency report downloaded successfully');
+    } catch (error) {
+      console.error('Error downloading emergency report:', error);
+      toast.error('Failed to download emergency report');
     } finally {
       setGenerating(false);
     }
@@ -80,19 +122,22 @@ const Reports = () => {
           </h1>
           <p className="text-gray-400 mt-1">Generate comprehensive reports and analyze traffic patterns</p>
         </div>
-        <button
-          onClick={generateReport}
-          disabled={generating}
-          className={`bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl font-medium transition-all flex items-center gap-2 shadow-lg shadow-blue-600/20 ${generating ? 'opacity-75 cursor-not-allowed' : 'hover:scale-105'
-            }`}
-        >
-          {generating ? (
-            <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-          ) : (
-            <Download className="w-5 h-5" />
-          )}
-          {generating ? 'Generating...' : 'Generate Report'}
-        </button>
+        <div className="flex gap-3">
+          <button
+            onClick={() => setShowMonthlyModal(true)}
+            className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-xl font-medium transition-all flex items-center gap-2 shadow-lg shadow-green-600/20 hover:scale-105"
+          >
+            <Calendar className="w-5 h-5" />
+            Monthly Report
+          </button>
+          <button
+            onClick={() => setShowAnnualModal(true)}
+            className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-xl font-medium transition-all flex items-center gap-2 shadow-lg shadow-purple-600/20 hover:scale-105"
+          >
+            <Zap className="w-5 h-5" />
+            Annual Report
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -168,12 +213,13 @@ const Reports = () => {
                 <button
                   onClick={() => {
                     if (report.type === 'emergency') {
-                      downloadEmergencyReport(report.realId);
+                      handleDownloadEmergencyReport(report.data);
                     } else {
                       toast.success('Downloading analysis report...');
                     }
                   }}
-                  className="text-sm text-blue-400 hover:text-blue-300 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                  disabled={generating}
+                  className="text-sm text-blue-400 hover:text-blue-300 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-50"
                 >
                   <Download className="w-4 h-4" /> Download
                 </button>
@@ -187,6 +233,99 @@ const Reports = () => {
           )}
         </div>
       </div>
+
+      {/* Monthly Report Modal */}
+      {showMonthlyModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-slate-800 rounded-xl p-6 max-w-md w-full mx-4 border border-white/10">
+            <h2 className="text-xl font-bold text-white mb-4">Generate Monthly Report</h2>
+            
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-300 mb-2">Select Month</label>
+              <input
+                type="month"
+                value={selectedMonth.toISOString().slice(0, 7)}
+                onChange={(e) => setSelectedMonth(new Date(e.target.value + '-01'))}
+                className="w-full px-4 py-2 bg-slate-700 border border-white/10 rounded-lg text-white focus:outline-none focus:border-blue-500"
+              />
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowMonthlyModal(false)}
+                className="flex-1 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleGenerateMonthlyReport}
+                disabled={generating}
+                className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {generating ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    <Download className="w-4 h-4" />
+                    Generate & Download
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Annual Report Modal */}
+      {showAnnualModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-slate-800 rounded-xl p-6 max-w-md w-full mx-4 border border-white/10">
+            <h2 className="text-xl font-bold text-white mb-4">Generate Annual Report</h2>
+            
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-300 mb-2">Select Year</label>
+              <select
+                value={selectedYear}
+                onChange={(e) => setSelectedYear(parseInt(e.target.value))}
+                className="w-full px-4 py-2 bg-slate-700 border border-white/10 rounded-lg text-white focus:outline-none focus:border-blue-500"
+              >
+                {[2024, 2023, 2022, 2021, 2020].map(year => (
+                  <option key={year} value={year}>{year}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowAnnualModal(false)}
+                className="flex-1 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleGenerateAnnualReport}
+                disabled={generating}
+                className="flex-1 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {generating ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    <Download className="w-4 h-4" />
+                    Generate & Download
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

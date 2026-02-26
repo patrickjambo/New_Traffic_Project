@@ -419,7 +419,16 @@ const updateEmergencyStatus = async (req, res) => {
             params
         );
 
-        const updatedEmergency = result.rows[0];
+        // Get updated emergency with officer name
+        const fullResult = await db.query(
+            `SELECT e.*, u.full_name as assigned_to_name
+             FROM emergencies e
+             LEFT JOIN users u ON e.assigned_to = u.id
+             WHERE e.id = $1`,
+            [id]
+        );
+
+        const updatedEmergency = fullResult.rows[0] || result.rows[0];
 
         // Record status change in history
         await db.query(
@@ -670,6 +679,282 @@ CONFIDENTIAL - OFFICIAL USE ONLY
     }
 };
 
+/**
+ * @desc    Officer responds to emergency (accept/decline/forward)
+ * @route   POST /api/emergency/:id/respond
+ * @access  Private (Police)
+ */
+const respondToEmergency = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { action, notes, forwardToOfficerId } = req.body;
+        const officerId = req.user.id;
+        const officerName = req.user.full_name;
+
+        // Validate action
+        if (!['accept', 'decline', 'forward'].includes(action)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid action. Must be: accept, decline, or forward',
+            });
+        }
+
+        // Get emergency details
+        const emergencyResult = await db.query(
+            `SELECT e.*, u.full_name as reporter_name, u.phone as reporter_phone,
+                    assigned.full_name as current_responder_name
+             FROM emergencies e
+             LEFT JOIN users u ON e.user_id = u.id
+             LEFT JOIN users assigned ON e.assigned_to = assigned.id
+             WHERE e.id = $1`,
+            [id]
+        );
+
+        if (emergencyResult.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Emergency not found',
+            });
+        }
+
+        const emergency = emergencyResult.rows[0];
+
+        // Check if already assigned to another officer
+        if (emergency.assigned_to && emergency.assigned_to !== officerId && action === 'accept') {
+            return res.status(400).json({
+                success: false,
+                message: `Emergency already accepted by ${emergency.current_responder_name}`,
+                acceptedBy: {
+                    officerId: emergency.assigned_to,
+                    officerName: emergency.current_responder_name
+                }
+            });
+        }
+
+        let responseMessage = '';
+        let newStatus = emergency.status;
+
+        if (action === 'accept') {
+            // Officer accepts the emergency
+            await db.query(
+                `UPDATE emergencies 
+                 SET assigned_to = $1, status = 'dispatched', 
+                     response_time = NOW(), updated_at = NOW()
+                 WHERE id = $2`,
+                [officerId, id]
+            );
+            newStatus = 'dispatched';
+            responseMessage = `Officer ${officerName} is responding to the emergency`;
+
+            // Record in history
+            await db.query(
+                `INSERT INTO emergency_status_history 
+                 (emergency_id, old_status, new_status, changed_by, notes)
+                 VALUES ($1, $2, 'dispatched', $3, $4)`,
+                [id, emergency.status, officerId, `Accepted by ${officerName}`]
+            );
+
+            // 🔔 Broadcast to ALL nearby officers that this emergency has been accepted
+            // This will stop alarms on their devices
+            socketManager.io.to('role:police').emit('emergency:accepted', {
+                emergencyId: parseInt(id),
+                acceptedBy: {
+                    officerId: officerId,
+                    officerName: officerName
+                },
+                timestamp: new Date().toISOString(),
+                message: `${officerName} is responding to this emergency`
+            });
+
+            // 🔔 Also broadcast to admins so they see real-time updates
+            socketManager.io.to('role:admin').emit('emergency:accepted', {
+                emergencyId: parseInt(id),
+                acceptedBy: {
+                    officerId: officerId,
+                    officerName: officerName
+                },
+                timestamp: new Date().toISOString(),
+                message: `${officerName} is responding to this emergency`
+            });
+
+            // 🔔 Also emit emergency:update with full data for dashboard refresh
+            socketManager.io.emit('emergency:update', {
+                id: parseInt(id),
+                emergencyId: parseInt(id),
+                status: 'dispatched',
+                assigned_to: officerId,
+                assigned_to_name: officerName,
+                responder_name: officerName,
+                response_time: new Date().toISOString(),
+            });
+
+            console.log(`✅ Emergency #${id} accepted by officer ${officerName} (ID: ${officerId})`);
+
+        } else if (action === 'decline') {
+            // Officer declines
+            responseMessage = 'Emergency declined. Other officers will be notified.';
+
+            // Record decline
+            await db.query(
+                `INSERT INTO emergency_response_log 
+                 (emergency_id, officer_id, action, notes, created_at)
+                 VALUES ($1, $2, 'declined', $3, NOW())
+                 ON CONFLICT DO NOTHING`,
+                [id, officerId, notes || 'Declined without reason']
+            );
+
+            console.log(`⚠️ Emergency #${id} declined by officer ${officerName}`);
+
+        } else if (action === 'forward') {
+            // Forward to another officer
+            if (!forwardToOfficerId) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'forwardToOfficerId is required for forwarding',
+                });
+            }
+
+            // Get target officer info
+            const targetOfficer = await db.query(
+                `SELECT u.id, u.full_name, op.fcm_token FROM users u 
+                 LEFT JOIN officer_profiles op ON u.id = op.user_id
+                 WHERE u.id = $1 AND u.role = 'police'`,
+                [forwardToOfficerId]
+            );
+
+            if (targetOfficer.rows.length === 0) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Target officer not found',
+                });
+            }
+
+            const target = targetOfficer.rows[0];
+
+            // Send notification to target officer
+            socketManager.io.to(`user:${forwardToOfficerId}`).emit('emergency:forwarded', {
+                emergency: emergency,
+                forwardedBy: {
+                    officerId: officerId,
+                    officerName: officerName
+                },
+                timestamp: new Date().toISOString()
+            });
+
+            responseMessage = `Emergency forwarded to ${target.full_name}`;
+            console.log(`➡️ Emergency #${id} forwarded from ${officerName} to ${target.full_name}`);
+        }
+
+        // Get updated emergency with full details
+        const updatedResult = await db.query(
+            `SELECT e.*, 
+                    u.full_name as reporter_name, 
+                    u.phone as reporter_phone,
+                    assigned.full_name as assigned_to_name,
+                    assigned.phone as responder_phone
+             FROM emergencies e
+             LEFT JOIN users u ON e.user_id = u.id
+             LEFT JOIN users assigned ON e.assigned_to = assigned.id
+             WHERE e.id = $1`,
+            [id]
+        );
+
+        const updatedEmergency = updatedResult.rows[0];
+
+        // Emit update to admin dashboard
+        socketManager.emitEmergencyUpdate(updatedEmergency);
+
+        res.json({
+            success: true,
+            message: responseMessage,
+            action: action,
+            data: {
+                emergency: updatedEmergency,
+                responder: action === 'accept' ? {
+                    officerId: officerId,
+                    officerName: officerName
+                } : null
+            }
+        });
+
+    } catch (error) {
+        console.error('Respond to emergency error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to respond to emergency',
+            error: error.message,
+        });
+    }
+};
+
+/**
+ * @desc    Get nearby available officers for forwarding
+ * @route   GET /api/emergency/:id/nearby-officers
+ * @access  Private (Police)
+ */
+const getNearbyOfficers = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const currentOfficerId = req.user.id;
+
+        // Get emergency location
+        const emergencyResult = await db.query(
+            'SELECT latitude, longitude FROM emergencies WHERE id = $1',
+            [id]
+        );
+
+        if (emergencyResult.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Emergency not found',
+            });
+        }
+
+        const emergency = emergencyResult.rows[0];
+
+        // Find nearby officers (within 10km, excluding current officer)
+        const officersResult = await db.query(
+            `SELECT u.id, u.full_name, op.badge_number, op.current_latitude, op.current_longitude,
+                    op.is_on_duty,
+                    (6371 * acos(cos(radians($1)) * cos(radians(op.current_latitude)) * 
+                     cos(radians(op.current_longitude) - radians($2)) + 
+                     sin(radians($1)) * sin(radians(op.current_latitude)))) as distance_km
+             FROM users u
+             JOIN officer_profiles op ON u.id = op.user_id
+             WHERE u.role = 'police'
+               AND u.id != $3
+               AND op.is_on_duty = true
+               AND op.current_latitude IS NOT NULL
+               AND op.current_longitude IS NOT NULL
+             HAVING (6371 * acos(cos(radians($1)) * cos(radians(op.current_latitude)) * 
+                     cos(radians(op.current_longitude) - radians($2)) + 
+                     sin(radians($1)) * sin(radians(op.current_latitude)))) < 10
+             ORDER BY distance_km ASC
+             LIMIT 10`,
+            [emergency.latitude, emergency.longitude, currentOfficerId]
+        );
+
+        res.json({
+            success: true,
+            data: officersResult.rows.map(o => ({
+                id: o.id,
+                fullName: o.full_name,
+                badgeNumber: o.badge_number,
+                distanceKm: parseFloat(o.distance_km).toFixed(2),
+                isOnDuty: o.is_on_duty
+            }))
+        });
+
+    } catch (error) {
+        console.error('Get nearby officers error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to get nearby officers',
+            error: error.message,
+        });
+    }
+};
+
 module.exports = {
     createEmergency,
     getEmergencies,
@@ -678,4 +963,6 @@ module.exports = {
     getUserEmergencies,
     getEmergencyStats,
     generateEmergencyReport,
+    respondToEmergency,
+    getNearbyOfficers,
 };

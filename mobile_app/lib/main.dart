@@ -18,7 +18,9 @@ import 'screens/about_screen.dart';
 import 'screens/emergency_report_screen.dart';
 import 'screens/auto_monitor_screen.dart';
 import 'screens/emergency_alert_screen.dart';
+import 'screens/emergency_response_screen.dart';
 import 'screens/deployments_screen.dart';
+import 'screens/ai_video_capture_screen.dart';
 import 'services/websocket_service.dart';
 import 'services/notification_service.dart';
 import 'services/api_service.dart';
@@ -75,6 +77,15 @@ void main() async {
   try {
     final emergencyAlertService = EmergencyAlertService();
     await emergencyAlertService.initialize();
+    
+    // Set callback to show full-screen emergency alert
+    emergencyAlertService.onEmergencyAlarm = (data) {
+      print('🚨 EMERGENCY ALARM CALLBACK TRIGGERED: $data');
+      if (navigatorKey.currentState != null) {
+        navigatorKey.currentState!.pushNamed('/emergency-alert', arguments: data);
+      }
+    };
+    
     print('✅ Emergency Alert Service initialized');
   } catch (e) {
     print('Failed to initialize Emergency Alert Service: $e');
@@ -284,6 +295,8 @@ class _TrafficGuardAppState extends State<TrafficGuardApp> {
             return MaterialPageRoute(builder: (_) => const EmergencyReportScreen());
           case '/auto-monitor':
             return MaterialPageRoute(builder: (_) => const AutoMonitorScreen());
+          case '/ai-video':
+            return MaterialPageRoute(builder: (_) => const AIVideoCaptureScreen());
           case '/emergency-alert':
             final args = settings.arguments as Map<String, dynamic>?;
             return MaterialPageRoute(

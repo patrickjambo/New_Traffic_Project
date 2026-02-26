@@ -8,7 +8,7 @@ class ServerConfig {
   static const String _aiPortKey = 'ai_port';
   
   // Default values (fallback)
-  static const String _defaultIp = '192.168.32.179';
+  static const String _defaultIp = '192.168.31.229';
   static const int _defaultServerPort = 3000;
   static const int _defaultAiPort = 8000;
   

@@ -5,6 +5,7 @@ import 'package:location/location.dart';
 import 'package:geocoding/geocoding.dart' as geocoding;
 import 'websocket_service.dart';
 import 'api_service.dart';
+import 'auth_service.dart';
 
 /// Location data with address
 class LocationInfo {
@@ -256,12 +257,28 @@ class LocationTrackingService {
       _isTracking = true;
       print('📍 Location tracking started (interval: ${_streamIntervalSeconds}s)');
       
-      // Immediately send current location if we have one
-      if (streamToServer && _currentLocation != null) {
-        print('📍 Sending initial location immediately...');
-        await _sendLocationToServer();
-      } else {
-        print('⚠️ No current location to send yet');
+      // Immediately get and send current location
+      if (streamToServer) {
+        // If we don't have current location, fetch it first
+        if (_currentLocation == null) {
+          print('📍 Fetching initial location...');
+          try {
+            final locationData = await _location.getLocation().timeout(
+              const Duration(seconds: 10),
+              onTimeout: () => throw TimeoutException('Location timeout'),
+            );
+            await _updateLocation(locationData, geocode: false);
+          } catch (e) {
+            print('⚠️ Failed to fetch initial location: $e');
+          }
+        }
+        
+        if (_currentLocation != null) {
+          print('📍 Sending initial location immediately...');
+          await _sendLocationToServer();
+        } else {
+          print('⚠️ No current location available to send');
+        }
       }
     } catch (e) {
       print('❌ Error starting tracking: $e');
@@ -292,7 +309,15 @@ class LocationTrackingService {
       return;
     }
 
+    // Get current user data for userId
+    final authService = AuthService();
+    final userData = await authService.getUserData();
+    final userId = userData?['id']?.toString();
+    final userRole = userData?['role'] ?? 'police';
+
     final locationData = {
+      'userId': userId,  // Include userId for backend identification
+      'role': userRole,  // Include role for backend verification
       'latitude': _currentLocation!.latitude,
       'longitude': _currentLocation!.longitude,
       'accuracy': _currentLocation!.accuracy,
@@ -305,7 +330,7 @@ class LocationTrackingService {
     try {
       // Try WebSocket first for real-time updates
       if (_wsService.isConnected) {
-        print('📍 Sending location via WebSocket: ${_currentLocation!.latitude}, ${_currentLocation!.longitude}');
+        print('📍 Sending location via WebSocket (userId: $userId): ${_currentLocation!.latitude}, ${_currentLocation!.longitude}');
         _wsService.emit('officer:location_update', locationData);
         print('✅ Location sent via WebSocket');
       } else {

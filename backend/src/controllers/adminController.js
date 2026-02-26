@@ -367,6 +367,24 @@ const createOfficer = async (req, res) => {
         );
         console.log('✅ Officer profile created');
 
+        // 🔔 Notify all connected admins about the new officer via WebSocket
+        try {
+            const socketManager = require('../services/socketManager');
+            if (socketManager.io) {
+                socketManager.io.to('role:admin').emit('officer:created', {
+                    officerId: officer.id,
+                    fullName: full_name,
+                    email: cleanEmail,
+                    badgeNumber: officerBadge,
+                    unit: officerUnit,
+                    timestamp: new Date().toISOString(),
+                });
+                console.log('📡 Broadcasted new officer creation to admins');
+            }
+        } catch (socketError) {
+            console.log('⚠️ Socket broadcast error (non-critical):', socketError.message);
+        }
+
         res.status(201).json({
             success: true,
             message: `Officer ${full_name} created successfully. They can now login with email: ${cleanEmail}`,
@@ -635,36 +653,258 @@ const toggleOfficerStatus = async (req, res) => {
 };
 
 /**
- * Delete officer (soft delete - just blocks them)
+ * Delete officer (hard delete - permanently removes from database)
  */
 const deleteOfficer = async (req, res) => {
     try {
         const { id } = req.params;
 
-        const result = await query(
-            `UPDATE users SET is_active = false, updated_at = CURRENT_TIMESTAMP 
-             WHERE id = $1 AND role = 'police'
-             RETURNING id, email, full_name`,
+        // First, get officer details before deletion
+        const officerResult = await query(
+            `SELECT id, email, full_name FROM users WHERE id = $1 AND role = 'police'`,
             [id]
         );
 
-        if (result.rows.length === 0) {
+        if (officerResult.rows.length === 0) {
             return res.status(404).json({
                 success: false,
                 message: 'Officer not found',
             });
         }
 
+        const officer = officerResult.rows[0];
+
+        // Delete officer profile first (foreign key constraint)
+        await query(
+            `DELETE FROM officer_profiles WHERE user_id = $1`,
+            [id]
+        );
+
+        // Delete any deployment officer records
+        await query(
+            `DELETE FROM deployment_officers WHERE officer_id = $1`,
+            [id]
+        );
+
+        // Delete the user record
+        await query(
+            `DELETE FROM users WHERE id = $1 AND role = 'police'`,
+            [id]
+        );
+
+        console.log(`🗑️ Officer ${officer.full_name} (${officer.email}) permanently deleted from database`);
+
         res.json({
             success: true,
-            message: `Officer ${result.rows[0].full_name} has been removed`,
-            data: result.rows[0],
+            message: `Officer ${officer.full_name} has been permanently deleted from the system`,
+            data: {
+                id: officer.id,
+                email: officer.email,
+                full_name: officer.full_name,
+            },
         });
     } catch (error) {
         console.error('Delete officer error:', error);
         res.status(500).json({
             success: false,
-            message: 'Failed to delete officer',
+            message: 'Failed to delete officer: ' + error.message,
+            error: error.message,
+        });
+    }
+};
+
+/**
+ * Update admin's current location
+ * Called from admin dashboard for live location tracking
+ */
+const updateAdminLocation = async (req, res) => {
+    try {
+        const adminId = req.user.id;
+        const { latitude, longitude, address } = req.body;
+
+        if (!latitude || !longitude) {
+            return res.status(400).json({
+                success: false,
+                message: 'Latitude and longitude are required',
+            });
+        }
+
+        // Create or update admin location record
+        await query(`
+            INSERT INTO admin_locations (admin_id, latitude, longitude, address, updated_at)
+            VALUES ($1, $2, $3, $4, NOW())
+            ON CONFLICT (admin_id) DO UPDATE SET
+                latitude = EXCLUDED.latitude,
+                longitude = EXCLUDED.longitude,
+                address = EXCLUDED.address,
+                updated_at = NOW()
+        `, [adminId, latitude, longitude, address]);
+
+        // Broadcast to all connected clients via WebSocket
+        const socketManager = require('../services/socketManager');
+        if (socketManager.io) {
+            socketManager.io.to('role:admin').emit('admin:location', {
+                adminId,
+                latitude,
+                longitude,
+                address,
+                timestamp: new Date().toISOString(),
+            });
+        }
+
+        console.log(`📍 Admin ${adminId} location updated: ${latitude}, ${longitude}`);
+
+        res.json({
+            success: true,
+            message: 'Admin location updated successfully',
+        });
+    } catch (error) {
+        console.error('Update admin location error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to update admin location',
+            error: error.message,
+        });
+    }
+};
+
+/**
+ * Get admin's current location
+ */
+const getAdminLocation = async (req, res) => {
+    try {
+        const adminId = req.user.id;
+
+        const result = await query(`
+            SELECT 
+                admin_id,
+                latitude,
+                longitude,
+                address,
+                updated_at
+            FROM admin_locations
+            WHERE admin_id = $1
+        `, [adminId]);
+
+        if (result.rows.length === 0) {
+            return res.json({
+                success: true,
+                data: null,
+                message: 'No location data available',
+            });
+        }
+
+        res.json({
+            success: true,
+            data: result.rows[0],
+        });
+    } catch (error) {
+        console.error('Get admin location error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch admin location',
+            error: error.message,
+        });
+    }
+};
+
+/**
+ * Get all admin locations (for super admin to see all admins)
+ */
+const getAllAdminLocations = async (req, res) => {
+    try {
+        const result = await query(`
+            SELECT 
+                al.admin_id,
+                u.full_name,
+                u.email,
+                al.latitude,
+                al.longitude,
+                al.address,
+                al.updated_at,
+                CASE WHEN al.updated_at > NOW() - INTERVAL '2 minutes' THEN true ELSE false END as is_online
+            FROM admin_locations al
+            JOIN users u ON al.admin_id = u.id
+            WHERE u.role = 'admin'
+            ORDER BY al.updated_at DESC
+        `);
+
+        res.json({
+            success: true,
+            data: result.rows,
+            total: result.rows.length,
+        });
+    } catch (error) {
+        console.error('Get all admin locations error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch admin locations',
+            error: error.message,
+        });
+    }
+};
+
+/**
+ * Calculate distance between admin and officers
+ * Returns officers sorted by distance from admin
+ */
+const getOfficersWithDistance = async (req, res) => {
+    try {
+        const adminId = req.user.id;
+
+        // Get admin location
+        const adminLocResult = await query(`
+            SELECT latitude, longitude FROM admin_locations WHERE admin_id = $1
+        `, [adminId]);
+
+        if (adminLocResult.rows.length === 0) {
+            return res.json({
+                success: true,
+                data: [],
+                message: 'Admin location not available',
+            });
+        }
+
+        const adminLoc = adminLocResult.rows[0];
+
+        // Get all officers with distance calculation
+        const result = await query(`
+            SELECT 
+                u.id,
+                u.full_name,
+                u.email,
+                u.phone,
+                COALESCE(op.badge_number, u.badge_number) as badge_number,
+                COALESCE(op.unit, u.unit, 'Traffic Unit') as unit,
+                op.current_latitude,
+                op.current_longitude,
+                op.location_updated_at,
+                op.is_on_duty,
+                CASE WHEN op.location_updated_at > NOW() - INTERVAL '2 minutes' THEN true ELSE false END as is_online,
+                -- Haversine formula to calculate distance in kilometers
+                (6371 * acos(cos(radians($1)) * cos(radians(op.current_latitude)) * 
+                cos(radians(op.current_longitude) - radians($2)) + 
+                sin(radians($1)) * sin(radians(op.current_latitude)))) as distance_km
+            FROM users u
+            LEFT JOIN officer_profiles op ON u.id = op.user_id
+            WHERE u.role = 'police' AND op.current_latitude IS NOT NULL AND op.current_longitude IS NOT NULL
+            ORDER BY distance_km ASC
+        `, [adminLoc.latitude, adminLoc.longitude]);
+
+        res.json({
+            success: true,
+            data: result.rows,
+            adminLocation: {
+                latitude: adminLoc.latitude,
+                longitude: adminLoc.longitude,
+            },
+            total: result.rows.length,
+        });
+    } catch (error) {
+        console.error('Get officers with distance error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to calculate distances',
             error: error.message,
         });
     }
@@ -682,4 +922,8 @@ module.exports = {
     resetOfficerPassword,
     toggleOfficerStatus,
     deleteOfficer,
+    updateAdminLocation,
+    getAdminLocation,
+    getAllAdminLocations,
+    getOfficersWithDistance,
 };

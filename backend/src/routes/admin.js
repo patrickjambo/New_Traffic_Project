@@ -12,6 +12,10 @@ const {
     resetOfficerPassword,
     toggleOfficerStatus,
     deleteOfficer,
+    updateAdminLocation,
+    getAdminLocation,
+    getAllAdminLocations,
+    getOfficersWithDistance,
 } = require('../controllers/adminController');
 
 const router = express.Router();
@@ -104,5 +108,37 @@ router.get('/logs', getSystemLogs);
  * @access  Private (Admin only)
  */
 router.get('/reports/generate', generateReport);
+
+// ============================================
+// ADMIN LOCATION TRACKING ROUTES
+// ============================================
+
+/**
+ * @route   POST /api/admin/location
+ * @desc    Update admin's current location
+ * @access  Private (Admin only)
+ */
+router.post('/location', updateAdminLocation);
+
+/**
+ * @route   GET /api/admin/location
+ * @desc    Get admin's current location
+ * @access  Private (Admin only)
+ */
+router.get('/location', getAdminLocation);
+
+/**
+ * @route   GET /api/admin/locations/all
+ * @desc    Get all admin locations (for super admin)
+ * @access  Private (Admin only)
+ */
+router.get('/locations/all', getAllAdminLocations);
+
+/**
+ * @route   GET /api/admin/officers/distance
+ * @desc    Get officers sorted by distance from admin
+ * @access  Private (Admin only)
+ */
+router.get('/officers/distance', getOfficersWithDistance);
 
 module.exports = router;

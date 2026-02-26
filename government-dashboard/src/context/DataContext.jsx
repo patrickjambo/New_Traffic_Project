@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import axios from '../config/axios';
 import toast from 'react-hot-toast';
 import { useWebSocket } from './WebSocketContext';
@@ -23,6 +23,11 @@ export const DataProvider = ({ children }) => {
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
+
+  // 🔥 Track shown notifications to prevent duplicates
+  const shownIncidentIds = useRef(new Set());
+  const shownEmergencyIds = useRef(new Set());
+  const shownDeploymentIds = useRef(new Set());
 
   const { subscribe, isConnected } = useWebSocket();
   const { user } = useAuth();
@@ -94,13 +99,34 @@ export const DataProvider = ({ children }) => {
 
   // Handle new incident
   const handleNewIncident = useCallback((incident) => {
+    const incidentId = incident.id?.toString() || incident.incidentId?.toString();
+    
+    // 🔥 Check for duplicate notification
+    if (incidentId && shownIncidentIds.current.has(incidentId)) {
+      console.log('⚠️ Skipping duplicate incident notification:', incidentId);
+      return;
+    }
+    
     console.log('🆕 New incident received:', incident);
-    setIncidents(prev => [incident, ...prev]);
+    
+    // Mark as shown
+    if (incidentId) {
+      shownIncidentIds.current.add(incidentId);
+      // Clear old IDs after 5 minutes to prevent memory leak
+      setTimeout(() => shownIncidentIds.current.delete(incidentId), 300000);
+    }
+    
+    setIncidents(prev => {
+      // Check if already in list
+      if (prev.some(i => i.id === incident.id)) return prev;
+      return [incident, ...prev];
+    });
 
-    // Show toast notification
-    toast.success(`New ${incident.type} incident reported`, {
+    // Show toast notification (only once)
+    toast.success(`New ${incident.type || 'Traffic'} incident reported`, {
       icon: '🚨',
-      duration: 5000,
+      duration: 4000,
+      id: `incident-${incidentId}`, // Prevent duplicate toasts
     });
 
     // Update statistics
@@ -117,18 +143,28 @@ export const DataProvider = ({ children }) => {
     setIncidents(prev =>
       prev.map(inc => inc.id === update.id ? { ...inc, ...update } : inc)
     );
-    toast.info(`Incident #${update.id} status: ${update.status}`, {
-      icon: '📝',
-    });
+    // Don't show toast for every update - too noisy
   }, []);
 
   // Handle new emergency
   const handleNewEmergency = useCallback((emergency) => {
+    const emergencyId = emergency.id?.toString() || emergency.emergencyId?.toString();
+    
+    // 🔥 Check for duplicate notification
+    if (emergencyId && shownEmergencyIds.current.has(emergencyId)) {
+      console.log('⚠️ Skipping duplicate emergency notification:', emergencyId);
+      return;
+    }
+    
     console.log('🚨 New emergency received:', emergency);
     
+    // Mark as shown
+    if (emergencyId) {
+      shownEmergencyIds.current.add(emergencyId);
+      setTimeout(() => shownEmergencyIds.current.delete(emergencyId), 300000);
+    }
+    
     // Normalize the emergency data to match database format
-    // WebSocket sends: { type, location: { name, lat, lng }, ... }
-    // Database has: { emergency_type, location_name, latitude, longitude, ... }
     const normalizedEmergency = {
       id: emergency.id,
       emergency_type: emergency.type || emergency.emergency_type,
@@ -142,11 +178,10 @@ export const DataProvider = ({ children }) => {
       contact_phone: emergency.contactPhone || emergency.contact_phone,
       created_at: emergency.createdAt || emergency.created_at || new Date().toISOString(),
       source: emergency.source || 'manual',
-      ...emergency, // Keep any extra fields
+      ...emergency,
     };
     
     setEmergencies(prev => {
-      // Check if emergency already exists (avoid duplicates)
       const exists = prev.some(e => e.id === normalizedEmergency.id);
       if (exists) {
         return prev.map(e => e.id === normalizedEmergency.id ? { ...e, ...normalizedEmergency } : e);
@@ -154,10 +189,11 @@ export const DataProvider = ({ children }) => {
       return [normalizedEmergency, ...prev];
     });
 
-    // Critical alert
+    // Critical alert (only once per emergency)
     toast.error(`🚨 EMERGENCY: ${normalizedEmergency.emergency_type} - ${normalizedEmergency.severity}`, {
       icon: '🚨',
-      duration: 10000,
+      duration: 8000,
+      id: `emergency-${emergencyId}`, // Prevent duplicate toasts
     });
   }, []);
 
@@ -167,9 +203,7 @@ export const DataProvider = ({ children }) => {
     setEmergencies(prev =>
       prev.map(em => em.id === update.id ? { ...em, ...update } : em)
     );
-    toast.info(`Emergency #${update.id} status: ${update.status}`, {
-      icon: '📋',
-    });
+    // Don't show toast for every status update - too noisy
   }, []);
 
   // Handle AI analysis complete
@@ -188,21 +222,35 @@ export const DataProvider = ({ children }) => {
     console.log('🔔 New notification:', notification);
     setNotifications(prev => [notification, ...prev]);
     setUnreadCount(prev => prev + 1);
-
-    toast(notification.title, {
-      icon: '🔔',
-      duration: 4000,
-    });
+    // Don't show toast for every notification - use notification bell instead
   }, []);
 
   // Handle new deployment
   const handleNewDeployment = useCallback((deployment) => {
+    const deploymentId = deployment.id?.toString();
+    
+    // Check for duplicate
+    if (deploymentId && shownDeploymentIds.current.has(deploymentId)) {
+      console.log('⚠️ Skipping duplicate deployment notification:', deploymentId);
+      return;
+    }
+    
     console.log('👮 New deployment received:', deployment);
-    setDeployments(prev => [deployment, ...prev]);
+    
+    if (deploymentId) {
+      shownDeploymentIds.current.add(deploymentId);
+      setTimeout(() => shownDeploymentIds.current.delete(deploymentId), 300000);
+    }
+    
+    setDeployments(prev => {
+      if (prev.some(d => d.id === deployment.id)) return prev;
+      return [deployment, ...prev];
+    });
 
-    toast.success(`Officer deployed to ${deployment.type}`, {
+    toast.success(`Officer deployed to ${deployment.type || 'incident'}`, {
       icon: '👮',
-      duration: 5000,
+      duration: 4000,
+      id: `deployment-${deploymentId}`,
     });
   }, []);
 
@@ -212,15 +260,20 @@ export const DataProvider = ({ children }) => {
     setDeployments(prev =>
       prev.map(dep => dep.id === update.id ? { ...dep, ...update } : dep)
     );
+    // Don't show toast for every update
   }, []);
 
   // Handle officer assigned
   const handleOfficerAssigned = useCallback((assignment) => {
     console.log('👮 Officer assigned:', assignment);
-    toast.success(`${assignment.officerName} assigned to incident`, {
-      icon: '📍',
-      duration: 5000,
-    });
+    // Only show if we have a name
+    if (assignment.officerName) {
+      toast.success(`${assignment.officerName} assigned`, {
+        icon: '📍',
+        duration: 4000,
+        id: `assignment-${assignment.incidentId || assignment.officerId}`,
+      });
+    }
     // Refresh available officers
     fetchAvailableOfficers();
   }, []);

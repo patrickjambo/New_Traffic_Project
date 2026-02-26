@@ -57,6 +57,15 @@ class AuthService {
             userRole: user['role'],
           );
           print('🔌 WebSocket reconnected with userId: ${user['id']}');
+          
+          // Ensure rooms are joined after connection is established
+          Future.delayed(const Duration(seconds: 2), () {
+            websocketService.joinRooms(
+              userId: user['id']?.toString() ?? '',
+              userRole: user['role'] ?? 'public',
+            );
+            print('🔌 Room join triggered for ${user['role']}');
+          });
         } catch (e) {
           print('⚠️ WebSocket reconnection error: $e');
         }

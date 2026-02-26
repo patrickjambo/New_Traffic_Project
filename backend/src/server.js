@@ -17,6 +17,9 @@ const fcmService = require('./services/fcmService');
 // Initialize FCM Service
 fcmService.initialize();
 
+// Centralized database access
+const db = require('./config/database');
+
 // Routes
 const authRoutes = require('./routes/auth');
 const incidentRoutes = require('./routes/incidents');
@@ -102,21 +105,11 @@ app.use('/api/geofencing', require('./routes/geofencing'));  // Geo-fencing & al
 // /api/alerts route
 app.get('/api/alerts', authenticate, async (req, res) => {
     try {
-        const { Pool } = require('pg');
-        const pool = new Pool({
-            host: process.env.DB_HOST || 'localhost',
-            port: parseInt(process.env.DB_PORT) || 5432,
-            database: process.env.DB_NAME || 'trafficguard',
-            user: process.env.DB_USER || 'trafficguard_user',
-            password: process.env.DB_PASSWORD || 's_123'
-        });
-        
-        const result = await pool.query(`
+        const result = await db.query(`
             SELECT * FROM incident_alerts 
             ORDER BY created_at DESC 
             LIMIT 50
         `);
-        await pool.end();
         
         res.json({
             success: true,
@@ -130,20 +123,10 @@ app.get('/api/alerts', authenticate, async (req, res) => {
 // /api/users/profile - alias for /api/auth/profile
 app.get('/api/users/profile', authenticate, async (req, res) => {
     try {
-        const { Pool } = require('pg');
-        const pool = new Pool({
-            host: process.env.DB_HOST || 'localhost',
-            port: parseInt(process.env.DB_PORT) || 5432,
-            database: process.env.DB_NAME || 'trafficguard',
-            user: process.env.DB_USER || 'trafficguard_user',
-            password: process.env.DB_PASSWORD || 's_123'
-        });
-        
-        const result = await pool.query(
+        const result = await db.query(
             'SELECT id, email, full_name, role, created_at FROM users WHERE id = $1',
             [req.user.id]
         );
-        await pool.end();
         
         if (result.rows.length === 0) {
             return res.status(404).json({ success: false, message: 'User not found' });
@@ -161,17 +144,7 @@ app.get('/api/users/profile', authenticate, async (req, res) => {
 // /api/districts route
 app.get('/api/districts', async (req, res) => {
     try {
-        const { Pool } = require('pg');
-        const pool = new Pool({
-            host: process.env.DB_HOST || 'localhost',
-            port: parseInt(process.env.DB_PORT) || 5432,
-            database: process.env.DB_NAME || 'trafficguard',
-            user: process.env.DB_USER || 'trafficguard_user',
-            password: process.env.DB_PASSWORD || 's_123'
-        });
-        
-        const result = await pool.query('SELECT * FROM districts WHERE is_active = true ORDER BY name');
-        await pool.end();
+        const result = await db.query('SELECT * FROM districts WHERE is_active = true ORDER BY name');
         
         res.json({
             success: true,
@@ -185,21 +158,11 @@ app.get('/api/districts', async (req, res) => {
 // /api/stats route
 app.get('/api/stats', async (req, res) => {
     try {
-        const { Pool } = require('pg');
-        const pool = new Pool({
-            host: process.env.DB_HOST || 'localhost',
-            port: parseInt(process.env.DB_PORT) || 5432,
-            database: process.env.DB_NAME || 'trafficguard',
-            user: process.env.DB_USER || 'trafficguard_user',
-            password: process.env.DB_PASSWORD || 's_123'
-        });
-        
         const [incidents, alerts, officers] = await Promise.all([
-            pool.query('SELECT COUNT(*) as count FROM incidents'),
-            pool.query('SELECT COUNT(*) as count FROM incident_alerts'),
-            pool.query("SELECT COUNT(*) as count FROM users WHERE role = 'police'")
+            db.query('SELECT COUNT(*) as count FROM incidents'),
+            db.query('SELECT COUNT(*) as count FROM incident_alerts'),
+            db.query("SELECT COUNT(*) as count FROM users WHERE role = 'police'")
         ]);
-        await pool.end();
         
         res.json({
             success: true,

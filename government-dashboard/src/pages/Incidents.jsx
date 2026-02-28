@@ -36,7 +36,7 @@ const Incidents = () => {
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-            <AlertTriangle className="w-8 h-8 text-red-500" />
+            <AlertTriangle className="w-8 h-8 text-cyan-500" />
             Incidents Management
           </h1>
           <p className="text-gray-400 mt-1">Monitor and manage traffic incidents in real-time</p>
@@ -48,7 +48,7 @@ const Incidents = () => {
             <input
               type="text"
               placeholder="Search incidents..."
-              className="pl-10 pr-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-blue-500 w-full"
+              className="pl-10 pr-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-cyan-500 w-full"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
@@ -57,21 +57,21 @@ const Incidents = () => {
           <div className="flex items-center gap-2 bg-slate-800 border border-slate-700 rounded-lg p-1">
             <button
               onClick={() => setFilter('all')}
-              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${filter === 'all' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'
+              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${filter === 'all' ? 'bg-cyan-600 text-white' : 'text-gray-400 hover:text-white'
                 }`}
             >
               All
             </button>
             <button
               onClick={() => setFilter('active')}
-              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${filter === 'active' ? 'bg-red-500/20 text-red-400' : 'text-gray-400 hover:text-white'
+              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${filter === 'active' ? 'bg-cyan-500/20 text-cyan-400' : 'text-gray-400 hover:text-white'
                 }`}
             >
               Active
             </button>
             <button
               onClick={() => setFilter('resolved')}
-              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${filter === 'resolved' ? 'bg-green-500/20 text-green-400' : 'text-gray-400 hover:text-white'
+              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${filter === 'resolved' ? 'bg-cyan-500/20 text-cyan-400' : 'text-gray-400 hover:text-white'
                 }`}
             >
               Resolved
@@ -82,7 +82,7 @@ const Incidents = () => {
 
       {loading ? (
         <div className="flex justify-center py-12">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-500"></div>
         </div>
       ) : (
         <div className="bg-slate-800/50 backdrop-blur-md border border-white/5 rounded-xl overflow-hidden">
@@ -104,9 +104,9 @@ const Incidents = () => {
                     <tr key={incident.id} className="hover:bg-slate-800/50 transition-colors">
                       <td className="p-4">
                         <div className="flex items-center gap-3">
-                          <div className={`p-2 rounded-lg ${incident.severity === 'critical' ? 'bg-red-500/20 text-red-400' :
-                            incident.severity === 'high' ? 'bg-orange-500/20 text-orange-400' :
-                              'bg-blue-500/20 text-blue-400'
+                          <div className={`p-2 rounded-lg ${incident.severity === 'critical' ? 'bg-cyan-700/20 text-cyan-300' :
+                            incident.severity === 'high' ? 'bg-cyan-600/20 text-cyan-400' :
+                              'bg-cyan-500/20 text-cyan-400'
                             }`}>
                             <AlertTriangle className="w-5 h-5" />
                           </div>
@@ -123,22 +123,22 @@ const Incidents = () => {
                         </div>
                       </td>
                       <td className="p-4">
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium border ${incident.severity === 'critical' ? 'bg-red-500/10 border-red-500/20 text-red-400' :
-                          incident.severity === 'high' ? 'bg-orange-500/10 border-orange-500/20 text-orange-400' :
-                            incident.severity === 'medium' ? 'bg-yellow-500/10 border-yellow-500/20 text-yellow-400' :
-                              'bg-blue-500/10 border-blue-500/20 text-blue-400'
+                        <span className={`px-2 py-1 rounded-full text-xs font-medium border ${incident.severity === 'critical' ? 'bg-cyan-700/10 border-cyan-700/20 text-cyan-300' :
+                          incident.severity === 'high' ? 'bg-cyan-600/10 border-cyan-600/20 text-cyan-400' :
+                            incident.severity === 'medium' ? 'bg-cyan-500/10 border-cyan-500/20 text-cyan-400' :
+                              'bg-cyan-400/10 border-cyan-400/20 text-cyan-300'
                           }`}>
                           {incident.severity?.toUpperCase()}
                         </span>
                       </td>
                       <td className="p-4">
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium flex items-center gap-1 w-fit ${incident.status === 'resolved' ? 'bg-green-500/10 text-green-400' :
-                          incident.status === 'in_progress' ? 'bg-blue-500/10 text-blue-400' :
-                            'bg-gray-500/10 text-gray-400'
+                        <span className={`px-2 py-1 rounded-full text-xs font-medium flex items-center gap-1 w-fit ${incident.status === 'resolved' ? 'bg-cyan-500/10 text-cyan-400' :
+                          incident.status === 'in_progress' ? 'bg-cyan-600/10 text-cyan-300' :
+                            'bg-cyan-700/10 text-cyan-200'
                           }`}>
-                          <span className={`w-1.5 h-1.5 rounded-full ${incident.status === 'resolved' ? 'bg-green-400' :
-                            incident.status === 'in_progress' ? 'bg-blue-400' :
-                              'bg-gray-400'
+                          <span className={`w-1.5 h-1.5 rounded-full ${incident.status === 'resolved' ? 'bg-cyan-400' :
+                            incident.status === 'in_progress' ? 'bg-cyan-300' :
+                              'bg-cyan-200'
                             }`}></span>
                           {incident.status?.replace('_', ' ').toUpperCase()}
                         </span>

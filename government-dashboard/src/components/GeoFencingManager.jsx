@@ -21,7 +21,9 @@ const loadFromCache = (key) => {
   } catch (e) {
     console.error('Cache load error:', e);
     // Clear corrupted cache
-    localStorage.removeItem(key);
+    try {
+      localStorage.removeItem(key);
+    } catch {}
   }
   return [];
 };
@@ -52,16 +54,14 @@ const GeoFencingManager = () => {
   const userDistrictId = user?.districtId;
   
   // State - initialize from cache for instant display (with safe fallbacks)
-  const [districts, setDistricts] = useState(() => {
-    try { return loadFromCache(CACHE_KEYS.DISTRICTS); } catch { return []; }
-  });
-  const [officers, setOfficers] = useState(() => {
-    try { return loadFromCache(CACHE_KEYS.OFFICERS); } catch { return []; }
-  });
+  const [districts, setDistricts] = useState([]);
+  const [officers, setOfficers] = useState([]);
   const [recentAlerts, setRecentAlerts] = useState([]);
   const [selectedDistrict, setSelectedDistrict] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [showAlertModal, setShowAlertModal] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState(new Date());
   const [, setTick] = useState(0); // Force re-render for time updates
   const [alertForm, setAlertForm] = useState({
     type: 'general',
@@ -72,6 +72,18 @@ const GeoFencingManager = () => {
     address: '',
     description: '',
   });
+
+  // Initialize from cache safely
+  useEffect(() => {
+    try {
+      const cachedDistricts = loadFromCache(CACHE_KEYS.DISTRICTS);
+      const cachedOfficers = loadFromCache(CACHE_KEYS.OFFICERS);
+      if (cachedDistricts.length > 0) setDistricts(cachedDistricts);
+      if (cachedOfficers.length > 0) setOfficers(cachedOfficers);
+    } catch (e) {
+      console.error('Failed to load cache:', e);
+    }
+  }, []);
 
   const { subscribe, isConnected } = useWebSocket();
 
@@ -107,45 +119,57 @@ const GeoFencingManager = () => {
   }, [isDistrictAdmin, userDistrictId, filteredDistricts, selectedDistrict]);
 
   // Fetch districts with stats
-  const fetchDistricts = useCallback(async () => {
+  const fetchDistricts = useCallback(async (silent = false) => {
     try {
       const response = await axios.get('/api/geofencing/districts');
-      if (response.data.success) {
+      if (response.data.success && Array.isArray(response.data.data)) {
         setDistricts(response.data.data);
         saveToCache(CACHE_KEYS.DISTRICTS, response.data.data);
+        if (!silent) setLastUpdated(new Date());
       }
     } catch (error) {
       console.error('Error fetching districts:', error);
+      // Don't set error state for network issues - keep showing cached data
     }
   }, []);
 
   // Fetch officers with locations
-  const fetchOfficers = useCallback(async () => {
+  const fetchOfficers = useCallback(async (silent = false) => {
     try {
       const response = await axios.get('/api/geofencing/officers');
-      if (response.data.success) {
+      if (response.data.success && Array.isArray(response.data.data)) {
         setOfficers(response.data.data);
         saveToCache(CACHE_KEYS.OFFICERS, response.data.data);
+        if (!silent) setLastUpdated(new Date());
       }
     } catch (error) {
       console.error('Error fetching officers:', error);
+      // Don't set error state for network issues - keep showing cached data
     }
   }, []);
 
   // Initial data load
   useEffect(() => {
     const loadData = async () => {
-      if (officers.length === 0) setLoading(true);
-      await Promise.all([fetchDistricts(), fetchOfficers()]);
-      setLoading(false);
+      try {
+        setLoading(true);
+        await Promise.all([fetchDistricts(), fetchOfficers()]);
+        setLastUpdated(new Date());
+      } catch (e) {
+        console.error('Error loading geo-fencing data:', e);
+        setError('Failed to load geo-fencing data');
+      } finally {
+        setLoading(false);
+      }
     };
     loadData();
 
-    // Refresh every 10 seconds for real-time feel
+    // Real-time polling every 5 seconds for seamless updates
     const interval = setInterval(() => {
-      fetchOfficers();
-      fetchDistricts();
-    }, 10000);
+      fetchOfficers(true); // silent update
+      fetchDistricts(true); // silent update
+      setLastUpdated(new Date());
+    }, 5000);
 
     return () => clearInterval(interval);
   }, [fetchDistricts, fetchOfficers]);
@@ -171,6 +195,7 @@ const GeoFencingManager = () => {
         saveToCache(CACHE_KEYS.OFFICERS, updated);
         return updated;
       });
+      setLastUpdated(new Date());
     });
 
     // Subscribe to officer status changes
@@ -185,6 +210,7 @@ const GeoFencingManager = () => {
         saveToCache(CACHE_KEYS.OFFICERS, updated);
         return updated;
       });
+      setLastUpdated(new Date());
     });
 
     // Subscribe to incident alerts (auto-dispatched from geo-fencing)
@@ -206,7 +232,8 @@ const GeoFencingManager = () => {
         isEmergency: false
       }, ...prev].slice(0, 10)); // Keep last 10 alerts
       // Refresh districts to update incident counts
-      fetchDistricts();
+      fetchDistricts(true);
+      setLastUpdated(new Date());
     });
 
     // Subscribe to emergency alarms (auto-dispatched from geo-fencing)
@@ -228,7 +255,8 @@ const GeoFencingManager = () => {
         isEmergency: true
       }, ...prev].slice(0, 10)); // Keep last 10 alerts
       // Refresh districts to update incident counts
-      fetchDistricts();
+      fetchDistricts(true);
+      setLastUpdated(new Date());
     });
 
     // Subscribe to alert acknowledgments
@@ -244,17 +272,20 @@ const GeoFencingManager = () => {
           ? { ...alert, acknowledged: true, acknowledgedAt: data.timestamp }
           : alert
       ));
+      setLastUpdated(new Date());
     });
 
     // Subscribe to new incidents/emergencies for district stats update
     const unsubIncidentNew = subscribe('incident:new', () => {
       console.log('📊 GeoFencing: New incident - refreshing stats');
-      fetchDistricts();
+      fetchDistricts(true);
+      setLastUpdated(new Date());
     });
 
     const unsubEmergencyNew = subscribe('emergency:new', () => {
       console.log('📊 GeoFencing: New emergency - refreshing stats');
-      fetchDistricts();
+      fetchDistricts(true);
+      setLastUpdated(new Date());
     });
 
     return () => {
@@ -301,9 +332,9 @@ const GeoFencingManager = () => {
   // Get duty status badge color
   const getDutyStatusColor = (status) => {
     switch (status) {
-      case 'on_duty': return 'bg-green-500';
-      case 'responding': return 'bg-red-500 animate-pulse';
-      case 'on_break': return 'bg-yellow-500';
+      case 'on_duty': return 'bg-cyan-500';
+      case 'responding': return 'bg-cyan-400 animate-pulse';
+      case 'on_break': return 'bg-cyan-600';
       default: return 'bg-gray-500';
     }
   };
@@ -323,7 +354,28 @@ const GeoFencingManager = () => {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-500 mx-auto mb-4"></div>
+          <p className="text-gray-400">Loading geo-fencing data...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <div className="text-red-500 text-4xl mb-4">⚠️</div>
+          <p className="text-white mb-2">Failed to load geo-fencing data</p>
+          <p className="text-gray-400 text-sm mb-4">{error}</p>
+          <button 
+            onClick={() => { setError(null); setLoading(true); fetchDistricts(); fetchOfficers(); }}
+            className="px-4 py-2 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg"
+          >
+            Retry
+          </button>
+        </div>
       </div>
     );
   }
@@ -334,18 +386,24 @@ const GeoFencingManager = () => {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-white">Geo-Fencing & Alert Management</h2>
-          <p className="text-gray-400">Manage districts, officers, and send targeted alerts</p>
+          <p className="text-gray-400">
+            Manage districts, officers, and send targeted alerts
+            <span className="ml-2 text-xs text-cyan-400 inline-flex items-center gap-1">
+              <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-cyan-500'}`}></span>
+              {isConnected ? 'Live' : 'Auto-updating'} • Last: {lastUpdated.toLocaleTimeString()}
+            </span>
+          </p>
         </div>
         <div className="flex gap-3">
           <button
             onClick={() => setShowAlertModal(true)}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center gap-2 transition-colors"
+            className="px-4 py-2 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg flex items-center gap-2 transition-colors"
           >
             <span>📢</span> Send Alert
           </button>
           <button
             onClick={() => { setAlertForm(prev => ({ ...prev, isEmergency: true })); setShowAlertModal(true); }}
-            className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg flex items-center gap-2 transition-colors animate-pulse"
+            className="px-4 py-2 bg-cyan-700 hover:bg-cyan-800 text-white rounded-lg flex items-center gap-2 transition-colors"
           >
             <span>🚨</span> Emergency Alarm
           </button>
@@ -356,19 +414,19 @@ const GeoFencingManager = () => {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="bg-gray-800/50 backdrop-blur rounded-xl p-4 border border-gray-700">
           <div className="flex items-center gap-3">
-            <div className="p-3 bg-blue-500/20 rounded-lg">
+            <div className="p-3 bg-cyan-500/20 rounded-lg">
               <span className="text-2xl">🗺️</span>
             </div>
             <div>
               <p className="text-gray-400 text-sm">Districts</p>
-              <p className="text-2xl font-bold text-white">{districts.length}</p>
+              <p className="text-2xl font-bold text-white">{filteredDistricts.length}</p>
             </div>
           </div>
         </div>
 
         <div className="bg-gray-800/50 backdrop-blur rounded-xl p-4 border border-gray-700">
           <div className="flex items-center gap-3">
-            <div className="p-3 bg-green-500/20 rounded-lg">
+            <div className="p-3 bg-cyan-500/20 rounded-lg">
               <span className="text-2xl">👮</span>
             </div>
             <div>
@@ -383,7 +441,7 @@ const GeoFencingManager = () => {
 
         <div className="bg-gray-800/50 backdrop-blur rounded-xl p-4 border border-gray-700">
           <div className="flex items-center gap-3">
-            <div className="p-3 bg-yellow-500/20 rounded-lg">
+            <div className="p-3 bg-cyan-500/20 rounded-lg">
               <span className="text-2xl">📍</span>
             </div>
             <div>
@@ -397,7 +455,7 @@ const GeoFencingManager = () => {
 
         <div className="bg-gray-800/50 backdrop-blur rounded-xl p-4 border border-gray-700">
           <div className="flex items-center gap-3">
-            <div className="p-3 bg-red-500/20 rounded-lg">
+            <div className="p-3 bg-cyan-600/20 rounded-lg">
               <span className="text-2xl">🚨</span>
             </div>
             <div>
@@ -434,7 +492,7 @@ const GeoFencingManager = () => {
                       {alert.title}
                     </p>
                     {alert.acknowledged && (
-                      <span className="text-xs text-green-400">✅ Acknowledged</span>
+                      <span className="text-xs text-cyan-400">✅ Acknowledged</span>
                     )}
                   </div>
                   <p className="text-sm text-gray-400 truncate">{alert.location}</p>
@@ -463,7 +521,7 @@ const GeoFencingManager = () => {
               onClick={() => !isDistrictAdmin && setSelectedDistrict(district)}
               className={`p-4 rounded-lg border ${isDistrictAdmin ? 'cursor-default' : 'cursor-pointer'} transition-all ${
                 selectedDistrict?.id === district.id
-                  ? 'bg-blue-600/20 border-blue-500'
+                  ? 'bg-cyan-600/20 border-cyan-500'
                   : 'bg-gray-700/50 border-gray-600 hover:border-gray-500'
               }`}
             >
@@ -478,11 +536,11 @@ const GeoFencingManager = () => {
                 </div>
                 <div>
                   <p className="text-gray-400">On Duty</p>
-                  <p className="text-green-400 font-medium">{district.officers_on_duty || 0}</p>
+                  <p className="text-cyan-400 font-medium">{district.officers_on_duty || 0}</p>
                 </div>
                 <div>
                   <p className="text-gray-400">Incidents</p>
-                  <p className="text-yellow-400 font-medium">{district.active_incidents || 0}</p>
+                  <p className="text-cyan-300 font-medium">{district.active_incidents || 0}</p>
                 </div>
               </div>
             </div>
@@ -503,7 +561,7 @@ const GeoFencingManager = () => {
           {selectedDistrict && !isDistrictAdmin && (
             <button
               onClick={() => setSelectedDistrict(null)}
-              className="text-sm text-blue-400 hover:text-blue-300"
+              className="text-sm text-cyan-400 hover:text-cyan-300"
             >
               Show All
             </button>
@@ -528,7 +586,7 @@ const GeoFencingManager = () => {
                   <tr key={officer.id} className="hover:bg-gray-700/30">
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-white text-sm font-medium">
+                        <div className="w-8 h-8 bg-cyan-600 rounded-full flex items-center justify-center text-white text-sm font-medium">
                           {officer.full_name?.charAt(0) || 'O'}
                         </div>
                         <span className="text-white">{officer.full_name || 'Unknown'}</span>
@@ -544,8 +602,8 @@ const GeoFencingManager = () => {
                     </td>
                     <td className="px-4 py-3">
                       {officer.latitude && officer.longitude ? (
-                        <span className="text-green-400 text-sm">
-                          📍 {officer.latitude.toFixed(4)}, {officer.longitude.toFixed(4)}
+                        <span className="text-cyan-400 text-sm">
+                          📍 {parseFloat(officer.latitude).toFixed(4)}, {parseFloat(officer.longitude).toFixed(4)}
                         </span>
                       ) : (
                         <span className="text-gray-500 text-sm">No GPS</span>
@@ -685,7 +743,7 @@ const GeoFencingManager = () => {
                 className={`px-4 py-2 rounded-lg text-white transition-colors ${
                   alertForm.isEmergency 
                     ? 'bg-red-600 hover:bg-red-700' 
-                    : 'bg-blue-600 hover:bg-blue-700'
+                    : 'bg-cyan-600 hover:bg-cyan-700'
                 }`}
               >
                 {alertForm.isEmergency ? '🚨 Send Emergency Alarm' : '📢 Send Alert'}

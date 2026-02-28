@@ -165,7 +165,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           subtitle: 'High-speed parallel upload with real-time AI analysis',
                           icon: Icons.rocket_launch_rounded,
                           iconBackgroundColor: AppColors.primary,
-                          cardColor: AppColors.primary.withOpacity(0.08),
+                          cardColor: AppColors.primary.withValues(alpha: 0.08),
                           badge: 'NEW',
                           badgeColor: AppColors.success,
                           onTap: () => Navigator.of(context).pushNamed('/fast-capture'),
@@ -179,7 +179,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           subtitle: 'Record video and let AI detect incidents automatically',
                           icon: Icons.smart_toy_rounded,
                           iconBackgroundColor: const Color(0xFF7C3AED),
-                          cardColor: const Color(0xFF7C3AED).withOpacity(0.08),
+                          cardColor: const Color(0xFF7C3AED).withValues(alpha: 0.08),
                           badge: 'AI',
                           badgeColor: const Color(0xFF7C3AED),
                           onTap: () => Navigator.of(context).pushNamed('/ai-video'),
@@ -193,7 +193,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                             subtitle: 'View and acknowledge your assigned deployments',
                             icon: Icons.assignment_rounded,
                             iconBackgroundColor: const Color(0xFF4F46E5),
-                            cardColor: const Color(0xFF4F46E5).withOpacity(0.08),
+                            cardColor: const Color(0xFF4F46E5).withValues(alpha: 0.08),
                             badge: 'OFFICER',
                             badgeColor: const Color(0xFF4F46E5),
                             onTap: () => Navigator.of(context).pushNamed('/deployments'),
@@ -267,7 +267,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 color: Colors.white,
                 boxShadow: [
                   BoxShadow(
-                    color: AppColors.primary.withOpacity(0.2),
+                    color: AppColors.primary.withValues(alpha: 0.2),
                     blurRadius: 8,
                     spreadRadius: 1,
                   ),
@@ -340,7 +340,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             value: activeCount.toString(),
             icon: Icons.warning_amber_rounded,
             iconColor: AppColors.warning,
-            backgroundColor: AppColors.warning.withOpacity(0.1),
+            backgroundColor: AppColors.warning.withValues(alpha: 0.1),
           ),
         ),
         const SizedBox(width: 16),
@@ -350,7 +350,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             value: resolvedCount.toString(),
             icon: Icons.check_circle_outline_rounded,
             iconColor: AppColors.success,
-            backgroundColor: AppColors.success.withOpacity(0.1),
+            backgroundColor: AppColors.success.withValues(alpha: 0.1),
           ),
         ),
       ],
@@ -586,12 +586,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             color: isResponding
-                ? AppColors.primary.withOpacity(0.05)
+                ? AppColors.primary.withValues(alpha: 0.05)
                 : AppColors.backgroundSecondary,
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
               color: isResponding
-                  ? AppColors.primary.withOpacity(0.3)
+                  ? AppColors.primary.withValues(alpha: 0.3)
                   : AppColors.border,
               width: 1,
             ),
@@ -604,7 +604,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: _getSeverityColor(severity).withOpacity(0.15),
+                      color: _getSeverityColor(severity).withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(14),
                     ),
                     child: Icon(
@@ -682,7 +682,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                               vertical: 3,
                             ),
                             decoration: BoxDecoration(
-                              color: AppColors.success.withOpacity(0.15),
+                              color: AppColors.success.withValues(alpha: 0.15),
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Row(
@@ -716,7 +716,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(
-                  color: _getSeverityColor(severity).withOpacity(0.15),
+                  color: _getSeverityColor(severity).withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
@@ -744,13 +744,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           Container(
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
-              color: AppColors.success.withOpacity(0.1),
+              color: AppColors.success.withValues(alpha: 0.1),
               shape: BoxShape.circle,
             ),
             child: Icon(
               Icons.check_circle_outline_rounded,
               size: 48,
-              color: AppColors.success.withOpacity(0.6),
+              color: AppColors.success.withValues(alpha: 0.6),
             ),
           ),
           const SizedBox(height: 20),
@@ -783,7 +783,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: AppColors.primary.withOpacity(0.3),
+            color: AppColors.primary.withValues(alpha: 0.3),
             blurRadius: 16,
             spreadRadius: 2,
             offset: const Offset(0, 4),
@@ -876,7 +876,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
         decoration: BoxDecoration(
-          color: isSelected ? AppColors.primary.withOpacity(0.1) : Colors.transparent,
+          color: isSelected ? AppColors.primary.withValues(alpha: 0.1) : Colors.transparent,
           borderRadius: BorderRadius.circular(12),
         ),
         child: Column(
@@ -946,7 +946,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
                       color: _getSeverityColor(incident['severity'] ?? 'low')
-                          .withOpacity(0.15),
+                          .withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(14),
                     ),
                     child: Icon(
@@ -1068,7 +1068,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           style: ElevatedButton.styleFrom(
                             backgroundColor: AppColors.primary,
                             foregroundColor: Colors.white,
-                            disabledBackgroundColor: AppColors.primary.withOpacity(0.4),
+                            disabledBackgroundColor: AppColors.primary.withValues(alpha: 0.4),
                             elevation: 0,
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(14),

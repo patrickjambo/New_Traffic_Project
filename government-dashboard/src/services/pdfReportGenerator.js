@@ -1,71 +1,151 @@
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
-import { format, startOfYear, endOfYear } from 'date-fns';
+import { format, startOfYear, endOfYear, isValid } from 'date-fns';
 
 /**
  * PDF Report Generator for RNP Traffic Command
  * Generates professional PDF reports with RNP branding
  */
 
-const RNP_LOGO_PATH = '/assets/rnp-logo.png';
 const INSTITUTION_NAME = 'Rwanda National Police';
 const DEPARTMENT_NAME = 'Traffic Command';
 const REPORT_TITLE = 'National Traffic Management & Incident Control';
+
+// RNP Logo as Base64 - will be loaded dynamically
+let logoBase64 = null;
+let logoLoaded = false;
+let logoLoadingPromise = null;
+
+/**
+ * Load logo image and convert to base64
+ */
+const loadLogo = async () => {
+  // If already loaded, return cached result
+  if (logoLoaded) return logoBase64;
+  
+  // If currently loading, wait for that promise
+  if (logoLoadingPromise) return logoLoadingPromise;
+  
+  logoLoadingPromise = (async () => {
+    try {
+      const response = await fetch('/assets/rnp-logo.png');
+      if (!response.ok) {
+        throw new Error(`Logo fetch failed: ${response.status}`);
+      }
+      const blob = await response.blob();
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          logoBase64 = reader.result;
+          logoLoaded = true;
+          logoLoadingPromise = null;
+          resolve(logoBase64);
+        };
+        reader.onerror = () => {
+          console.log('Error reading logo file');
+          logoLoaded = true;
+          logoLoadingPromise = null;
+          resolve(null);
+        };
+        reader.readAsDataURL(blob);
+      });
+    } catch (error) {
+      console.log('Logo not available:', error);
+      logoLoaded = true;
+      logoLoadingPromise = null;
+      return null;
+    }
+  })();
+  
+  return logoLoadingPromise;
+};
+
+// Pre-load logo on module load
+loadLogo();
+
+/**
+ * Safe date formatter
+ */
+const safeFormat = (date, formatStr) => {
+  try {
+    const d = new Date(date);
+    if (!isValid(d)) return 'N/A';
+    return format(d, formatStr);
+  } catch (e) {
+    return 'N/A';
+  }
+};
 
 /**
  * Generate a professional PDF report header with RNP branding
  */
 export const addReportHeader = (doc, title, subtitle = '') => {
   const pageWidth = doc.internal.pageSize.getWidth();
-  const pageHeight = doc.internal.pageSize.getHeight();
   
-  // Add background color
-  doc.setFillColor(15, 23, 42); // Dark blue background
-  doc.rect(0, 0, pageWidth, 60, 'F');
+  // Add dark blue background
+  doc.setFillColor(15, 23, 42);
+  doc.rect(0, 0, pageWidth, 70, 'F');
   
-  // Add RNP Logo (if available)
-  try {
-    doc.addImage(RNP_LOGO_PATH, 'PNG', 15, 8, 20, 20);
-  } catch (e) {
-    console.log('Logo not available, continuing without it');
+  // Logo positioning - the logo already has its own circular design
+  const logoSize = 30;
+  const logoX = 15;
+  const logoY = 8;
+  
+  if (logoBase64) {
+    try {
+      // Just add the logo directly - it already has circular border
+      doc.addImage(logoBase64, 'PNG', logoX, logoY, logoSize, logoSize);
+    } catch (e) {
+      console.log('Could not add logo to PDF');
+    }
   }
+  
+  // Text positioned to the right of logo
+  const textStartX = logoX + logoSize + 10;
   
   // Institution Name
   doc.setTextColor(255, 255, 255);
-  doc.setFontSize(14);
-  doc.setFont(undefined, 'bold');
-  doc.text(INSTITUTION_NAME, pageWidth / 2, 15, { align: 'center' });
-  
-  // Department Name
-  doc.setFontSize(11);
-  doc.setFont(undefined, 'normal');
-  doc.text(DEPARTMENT_NAME, pageWidth / 2, 22, { align: 'center' });
-  
-  // Report Title
-  doc.setFontSize(10);
-  doc.setTextColor(200, 200, 200);
-  doc.text(REPORT_TITLE, pageWidth / 2, 29, { align: 'center' });
-  
-  // Report Type Title
-  doc.setTextColor(255, 255, 255);
   doc.setFontSize(16);
   doc.setFont(undefined, 'bold');
-  doc.text(title, pageWidth / 2, 42, { align: 'center' });
+  doc.text(INSTITUTION_NAME, textStartX, 18);
+  
+  // Department Name - Cyan color
+  doc.setTextColor(0, 200, 255);
+  doc.setFontSize(11);
+  doc.setFont(undefined, 'bold');
+  doc.text(DEPARTMENT_NAME, textStartX, 26);
+  
+  // Report subtitle
+  doc.setFontSize(8);
+  doc.setTextColor(140, 160, 180);
+  doc.setFont(undefined, 'normal');
+  doc.text(REPORT_TITLE, textStartX, 33);
+  
+  // Separator line
+  doc.setDrawColor(0, 150, 255);
+  doc.setLineWidth(0.5);
+  doc.line(textStartX, 38, pageWidth - 15, 38);
+  
+  // Report Type Title - centered
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(18);
+  doc.setFont(undefined, 'bold');
+  doc.text(title, pageWidth / 2, 50, { align: 'center' });
   
   // Subtitle if provided
   if (subtitle) {
-    doc.setFontSize(10);
+    doc.setFontSize(11);
     doc.setFont(undefined, 'normal');
-    doc.setTextColor(200, 200, 200);
-    doc.text(subtitle, pageWidth / 2, 50, { align: 'center' });
+    doc.setTextColor(0, 180, 255);
+    doc.text(subtitle, pageWidth / 2, 58, { align: 'center' });
   }
   
-  // Add horizontal line
-  doc.setDrawColor(100, 150, 255);
-  doc.setLineWidth(0.5);
-  doc.line(15, 55, pageWidth - 15, 55);
+  // Bottom accent line
+  doc.setDrawColor(0, 150, 255);
+  doc.setLineWidth(1.5);
+  doc.line(0, 68, pageWidth, 68);
   
-  return 60; // Return Y position after header
+  return 75; // Return Y position after header
 };
 
 /**
@@ -85,7 +165,7 @@ export const addReportFooter = (doc, pageNumber) => {
   doc.setFont(undefined, 'normal');
   
   // Left: Generated date
-  doc.text(`Generated: ${format(new Date(), 'MMM dd, yyyy HH:mm')}`, 15, pageHeight - 5);
+  doc.text(`Generated: ${safeFormat(new Date(), 'MMM dd, yyyy HH:mm')}`, 15, pageHeight - 5);
   
   // Center: Institution
   doc.text(INSTITUTION_NAME, pageWidth / 2, pageHeight - 5, { align: 'center' });
@@ -97,9 +177,16 @@ export const addReportFooter = (doc, pageNumber) => {
 /**
  * Generate Emergency Report PDF
  */
-export const generateEmergencyReportPDF = (emergency, incidents) => {
+export const generateEmergencyReportPDF = async (emergency, incidents) => {
+  // Ensure logo is loaded
+  await loadLogo();
+  
+  if (!emergency) {
+    throw new Error('Emergency data is required');
+  }
+  
   const doc = new jsPDF();
-  let yPosition = addReportHeader(doc, 'Emergency Report', `Report ID: ${emergency.id}`);
+  let yPosition = addReportHeader(doc, 'Emergency Report', `Report ID: ${emergency.id || 'N/A'}`);
   
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
@@ -117,23 +204,30 @@ export const generateEmergencyReportPDF = (emergency, incidents) => {
   doc.setFont(undefined, 'normal');
   doc.setTextColor(0, 0, 0);
   
+  // Safely get severity
+  const severityText = emergency.severity ? String(emergency.severity).toUpperCase() : 'N/A';
+  const statusText = emergency.status ? String(emergency.status).toUpperCase() : 'N/A';
+  
   const emergencyDetails = [
-    ['Emergency Type:', emergency.emergency_type || 'N/A'],
-    ['Severity Level:', (emergency.severity || 'N/A').toUpperCase()],
-    ['Location:', emergency.location_name || 'N/A'],
-    ['Coordinates:', `${emergency.latitude?.toFixed(4)}, ${emergency.longitude?.toFixed(4)}`],
-    ['Date & Time:', format(new Date(emergency.created_at), 'MMM dd, yyyy HH:mm:ss')],
-    ['Status:', (emergency.status || 'N/A').toUpperCase()],
-    ['Source:', emergency.automatic ? 'AI Detection' : 'Manual Report'],
-    ['Description:', emergency.description || 'N/A']
+    ['Emergency Type:', emergency.emergency_type || emergency.type || 'N/A'],
+    ['Severity Level:', severityText],
+    ['Location:', emergency.location_name || emergency.location || 'N/A'],
+    ['Coordinates:', `${emergency.latitude ? emergency.latitude.toFixed(4) : 'N/A'}, ${emergency.longitude ? emergency.longitude.toFixed(4) : 'N/A'}`],
+    ['Date & Time:', safeFormat(emergency.created_at || emergency.timestamp, 'MMM dd, yyyy HH:mm:ss')],
+    ['Status:', statusText],
+    ['Source:', emergency.automatic || emergency.source === 'ai' ? 'AI Detection' : 'Manual Report'],
+    ['Description:', emergency.description || 'No description provided']
   ];
   
   emergencyDetails.forEach(([label, value]) => {
     doc.setFont(undefined, 'bold');
     doc.text(label, margin, yPosition);
     doc.setFont(undefined, 'normal');
-    doc.text(String(value), margin + 50, yPosition);
-    yPosition += 6;
+    // Handle long text by wrapping
+    const maxWidth = pageWidth - margin - 55;
+    const lines = doc.splitTextToSize(String(value || 'N/A'), maxWidth);
+    doc.text(lines, margin + 50, yPosition);
+    yPosition += 6 * Math.max(1, lines.length);
   });
   
   // Related Incidents Section
@@ -147,11 +241,11 @@ export const generateEmergencyReportPDF = (emergency, incidents) => {
     yPosition += 8;
     
     const incidentData = incidents.slice(0, 5).map(incident => [
-      incident.type || 'N/A',
-      incident.location || 'N/A',
-      format(new Date(incident.created_at), 'MMM dd, HH:mm'),
-      (incident.severity || 'N/A').toUpperCase(),
-      incident.status || 'N/A'
+      incident?.type || incident?.incident_type || 'N/A',
+      incident?.location || incident?.location_name || 'N/A',
+      safeFormat(incident?.created_at || incident?.timestamp, 'MMM dd, HH:mm'),
+      String(incident?.severity || 'N/A').toUpperCase(),
+      incident?.status || 'N/A'
     ]);
     
     doc.autoTable({
@@ -185,15 +279,111 @@ export const generateEmergencyReportPDF = (emergency, incidents) => {
 };
 
 /**
+ * Generate Incident Report PDF
+ */
+export const generateIncidentReportPDF = async (incident) => {
+  // Ensure logo is loaded
+  await loadLogo();
+  
+  if (!incident) {
+    throw new Error('Incident data is required');
+  }
+  
+  const doc = new jsPDF();
+  let yPosition = addReportHeader(doc, 'Incident Report', `Report ID: ${incident.id || 'N/A'}`);
+  
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const margin = 15;
+  
+  // Incident Details Section
+  yPosition += 10;
+  doc.setFontSize(12);
+  doc.setFont(undefined, 'bold');
+  doc.setTextColor(50, 150, 255);
+  doc.text('Incident Details', margin, yPosition);
+  
+  yPosition += 8;
+  doc.setFontSize(10);
+  doc.setFont(undefined, 'normal');
+  doc.setTextColor(0, 0, 0);
+  
+  // Safely get severity and status
+  const severityText = incident.severity ? String(incident.severity).toUpperCase() : 'N/A';
+  const statusText = incident.status ? String(incident.status).toUpperCase() : 'N/A';
+  
+  const incidentDetails = [
+    ['Incident Type:', incident.incident_type || incident.type || 'N/A'],
+    ['Severity Level:', severityText],
+    ['Location:', incident.location_name || incident.location || 'N/A'],
+    ['Coordinates:', `${incident.latitude ? incident.latitude.toFixed(4) : 'N/A'}, ${incident.longitude ? incident.longitude.toFixed(4) : 'N/A'}`],
+    ['Date & Time:', safeFormat(incident.created_at || incident.timestamp, 'MMM dd, yyyy HH:mm:ss')],
+    ['Status:', statusText],
+    ['Source:', incident.source === 'ai' || incident.detected_by === 'ai' ? 'AI Detection' : 'Manual Report'],
+    ['Description:', incident.description || 'No description provided']
+  ];
+  
+  incidentDetails.forEach(([label, value]) => {
+    doc.setFont(undefined, 'bold');
+    doc.text(label, margin, yPosition);
+    doc.setFont(undefined, 'normal');
+    // Handle long text
+    const maxWidth = pageWidth - margin - 60;
+    const lines = doc.splitTextToSize(String(value), maxWidth);
+    doc.text(lines, margin + 50, yPosition);
+    yPosition += 6 * lines.length;
+  });
+  
+  // Additional Details Section if available
+  yPosition += 10;
+  doc.setFontSize(12);
+  doc.setFont(undefined, 'bold');
+  doc.setTextColor(50, 150, 255);
+  doc.text('Additional Information', margin, yPosition);
+  
+  yPosition += 8;
+  doc.setFontSize(10);
+  doc.setFont(undefined, 'normal');
+  doc.setTextColor(0, 0, 0);
+  
+  const additionalDetails = [
+    ['Vehicle Count:', incident?.vehicle_count || '0'],
+    ['Pedestrian Count:', incident?.pedestrian_count || '0'],
+    ['Injuries:', incident?.injuries || '0'],
+    ['Road Blocked:', incident?.road_blocked ? 'Yes' : 'No'],
+    ['Emergency Services:', incident?.emergency_services_called ? 'Called' : 'Not Called']
+  ];
+  
+  additionalDetails.forEach(([label, value]) => {
+    doc.setFont(undefined, 'bold');
+    doc.text(label, margin, yPosition);
+    doc.setFont(undefined, 'normal');
+    doc.text(String(value), margin + 50, yPosition);
+    yPosition += 6;
+  });
+  
+  // Add footer
+  addReportFooter(doc, 1);
+  
+  return doc;
+};
+
+/**
  * Generate Monthly Report PDF
  */
-export const generateMonthlyReportPDF = (incidents, emergencies, month = new Date()) => {
+export const generateMonthlyReportPDF = async (incidents = [], emergencies = [], month = new Date()) => {
+  // Ensure logo is loaded
+  await loadLogo();
+  
   const doc = new jsPDF();
-  const monthName = format(month, 'MMMM yyyy');
+  const monthName = safeFormat(month, 'MMMM yyyy');
   let yPosition = addReportHeader(doc, 'Monthly Traffic Report', monthName);
   
   const pageWidth = doc.internal.pageSize.getWidth();
   const margin = 15;
+  
+  // Ensure arrays
+  const safeIncidents = incidents || [];
+  const safeEmergencies = emergencies || [];
   
   // Summary Statistics
   yPosition += 10;
@@ -204,11 +394,11 @@ export const generateMonthlyReportPDF = (incidents, emergencies, month = new Dat
   
   yPosition += 8;
   
-  const totalIncidents = incidents.length;
-  const totalEmergencies = emergencies.length;
-  const criticalIncidents = incidents.filter(i => i.severity === 'critical' || i.severity === 'high').length;
-  const resolvedIncidents = incidents.filter(i => i.status === 'resolved').length;
-  const aiDetected = incidents.filter(i => i.source === 'ai').length;
+  const totalIncidents = safeIncidents.length;
+  const totalEmergencies = safeEmergencies.length;
+  const criticalIncidents = safeIncidents.filter(i => i?.severity === 'critical' || i?.severity === 'high').length;
+  const resolvedIncidents = safeIncidents.filter(i => i?.status === 'resolved').length;
+  const aiDetected = safeIncidents.filter(i => i?.source === 'ai' || i?.detected_by === 'ai').length;
   
   const statsData = [
     ['Total Incidents', totalIncidents],
@@ -236,7 +426,7 @@ export const generateMonthlyReportPDF = (incidents, emergencies, month = new Dat
   yPosition += 30;
   
   // Incidents by Type
-  if (incidents.length > 0) {
+  if (safeIncidents.length > 0) {
     doc.setFontSize(12);
     doc.setFont(undefined, 'bold');
     doc.setTextColor(50, 150, 255);
@@ -245,15 +435,15 @@ export const generateMonthlyReportPDF = (incidents, emergencies, month = new Dat
     yPosition += 8;
     
     const incidentsByType = {};
-    incidents.forEach(incident => {
-      const type = incident.type || 'Unknown';
+    safeIncidents.forEach(incident => {
+      const type = incident?.type || incident?.incident_type || 'Unknown';
       incidentsByType[type] = (incidentsByType[type] || 0) + 1;
     });
     
     const typeData = Object.entries(incidentsByType).map(([type, count]) => [
       type,
       count,
-      ((count / totalIncidents) * 100).toFixed(1) + '%'
+      totalIncidents > 0 ? ((count / totalIncidents) * 100).toFixed(1) + '%' : '0%'
     ]);
     
     doc.autoTable({
@@ -279,7 +469,7 @@ export const generateMonthlyReportPDF = (incidents, emergencies, month = new Dat
   }
   
   // Incidents by Severity
-  if (incidents.length > 0) {
+  if (safeIncidents.length > 0) {
     doc.setFontSize(12);
     doc.setFont(undefined, 'bold');
     doc.setTextColor(50, 150, 255);
@@ -288,15 +478,15 @@ export const generateMonthlyReportPDF = (incidents, emergencies, month = new Dat
     yPosition += 8;
     
     const incidentsBySeverity = {};
-    incidents.forEach(incident => {
-      const severity = incident.severity || 'Unknown';
+    safeIncidents.forEach(incident => {
+      const severity = incident?.severity || 'Unknown';
       incidentsBySeverity[severity] = (incidentsBySeverity[severity] || 0) + 1;
     });
     
     const severityData = Object.entries(incidentsBySeverity).map(([severity, count]) => [
       severity.toUpperCase(),
       count,
-      ((count / totalIncidents) * 100).toFixed(1) + '%'
+      totalIncidents > 0 ? ((count / totalIncidents) * 100).toFixed(1) + '%' : '0%'
     ]);
     
     doc.autoTable({
@@ -328,9 +518,16 @@ export const generateMonthlyReportPDF = (incidents, emergencies, month = new Dat
 /**
  * Generate Annual Report PDF
  */
-export const generateAnnualReportPDF = (incidents, emergencies, year = new Date().getFullYear()) => {
+export const generateAnnualReportPDF = async (incidents = [], emergencies = [], year = new Date().getFullYear()) => {
+  // Ensure logo is loaded
+  await loadLogo();
+  
   const doc = new jsPDF();
   let pageNumber = 1;
+  
+  // Ensure arrays
+  const safeIncidents = incidents || [];
+  const safeEmergencies = emergencies || [];
   
   // Title Page
   let yPosition = addReportHeader(doc, 'Annual Traffic Report', `Year ${year}`);
@@ -349,10 +546,10 @@ export const generateAnnualReportPDF = (incidents, emergencies, year = new Date(
   
   yPosition += 15;
   
-  const totalIncidents = incidents.length;
-  const totalEmergencies = emergencies.length;
-  const criticalIncidents = incidents.filter(i => i.severity === 'critical' || i.severity === 'high').length;
-  const resolvedIncidents = incidents.filter(i => i.status === 'resolved').length;
+  const totalIncidents = safeIncidents.length;
+  const totalEmergencies = safeEmergencies.length;
+  const criticalIncidents = safeIncidents.filter(i => i?.severity === 'critical' || i?.severity === 'high').length;
+  const resolvedIncidents = safeIncidents.filter(i => i?.status === 'resolved').length;
   const resolutionRate = totalIncidents > 0 ? ((resolvedIncidents / totalIncidents) * 100).toFixed(1) : 0;
   
   doc.setFontSize(10);
@@ -393,14 +590,15 @@ Key Highlights:
   
   yPosition += 10;
   
+  const aiDetected = safeIncidents.filter(i => i?.source === 'ai' || i?.detected_by === 'ai').length;
   const statsData = [
     ['Total Incidents', totalIncidents],
     ['Total Emergencies', totalEmergencies],
     ['Critical/High Severity', criticalIncidents],
     ['Resolved Incidents', resolvedIncidents],
     ['Resolution Rate', resolutionRate + '%'],
-    ['AI Detected Incidents', incidents.filter(i => i.source === 'ai').length],
-    ['Manual Reports', incidents.filter(i => i.source !== 'ai').length]
+    ['AI Detected Incidents', aiDetected],
+    ['Manual Reports', totalIncidents - aiDetected]
   ];
   
   doc.autoTable({
@@ -425,7 +623,7 @@ Key Highlights:
   yPosition = doc.lastAutoTable.finalY + 15;
   
   // Incidents by Type
-  if (incidents.length > 0) {
+  if (safeIncidents.length > 0) {
     if (yPosition > pageHeight - 60) {
       doc.addPage();
       pageNumber++;
@@ -440,8 +638,8 @@ Key Highlights:
     yPosition += 10;
     
     const incidentsByType = {};
-    incidents.forEach(incident => {
-      const type = incident.type || 'Unknown';
+    safeIncidents.forEach(incident => {
+      const type = incident?.type || incident?.incident_type || 'Unknown';
       incidentsByType[type] = (incidentsByType[type] || 0) + 1;
     });
     
@@ -450,7 +648,7 @@ Key Highlights:
       .map(([type, count]) => [
         type,
         count,
-        ((count / totalIncidents) * 100).toFixed(1) + '%'
+        totalIncidents > 0 ? ((count / totalIncidents) * 100).toFixed(1) + '%' : '0%'
       ]);
     
     doc.autoTable({
@@ -476,7 +674,7 @@ Key Highlights:
   }
   
   // Incidents by Severity
-  if (incidents.length > 0) {
+  if (safeIncidents.length > 0) {
     if (yPosition > pageHeight - 60) {
       doc.addPage();
       pageNumber++;
@@ -491,8 +689,8 @@ Key Highlights:
     yPosition += 10;
     
     const incidentsBySeverity = {};
-    incidents.forEach(incident => {
-      const severity = incident.severity || 'Unknown';
+    safeIncidents.forEach(incident => {
+      const severity = incident?.severity || 'Unknown';
       incidentsBySeverity[severity] = (incidentsBySeverity[severity] || 0) + 1;
     });
     
@@ -501,7 +699,7 @@ Key Highlights:
       .map(([severity, count]) => [
         severity.toUpperCase(),
         count,
-        ((count / totalIncidents) * 100).toFixed(1) + '%'
+        totalIncidents > 0 ? ((count / totalIncidents) * 100).toFixed(1) + '%' : '0%'
       ]);
     
     doc.autoTable({
@@ -527,7 +725,7 @@ Key Highlights:
   }
   
   // Incidents by Status
-  if (incidents.length > 0) {
+  if (safeIncidents.length > 0) {
     if (yPosition > pageHeight - 60) {
       doc.addPage();
       pageNumber++;
@@ -542,8 +740,8 @@ Key Highlights:
     yPosition += 10;
     
     const incidentsByStatus = {};
-    incidents.forEach(incident => {
-      const status = incident.status || 'Unknown';
+    safeIncidents.forEach(incident => {
+      const status = incident?.status || 'Unknown';
       incidentsByStatus[status] = (incidentsByStatus[status] || 0) + 1;
     });
     
@@ -552,7 +750,7 @@ Key Highlights:
       .map(([status, count]) => [
         status.toUpperCase(),
         count,
-        ((count / totalIncidents) * 100).toFixed(1) + '%'
+        totalIncidents > 0 ? ((count / totalIncidents) * 100).toFixed(1) + '%' : '0%'
       ]);
     
     doc.autoTable({

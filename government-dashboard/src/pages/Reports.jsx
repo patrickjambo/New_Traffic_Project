@@ -1,66 +1,128 @@
-import React, { useState, useMemo } from 'react';
-import { FileText, Download, BarChart2, Calendar, FileBarChart, Activity, Zap } from 'lucide-react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { FileText, Download, BarChart2, Calendar, FileBarChart, Activity, Zap, RefreshCw } from 'lucide-react';
 import { useData } from '../context/DataContext';
 import axios from '../config/axios';
 import toast from 'react-hot-toast';
 import {
   generateEmergencyReportPDF,
+  generateIncidentReportPDF,
   generateMonthlyReportPDF,
   generateAnnualReportPDF,
   downloadPDF
 } from '../services/pdfReportGenerator';
 
 const Reports = () => {
-  const { incidents, emergencies, loading } = useData();
+  const { incidents, emergencies, loading, fetchIncidents, fetchEmergencies } = useData();
   const [generating, setGenerating] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState(new Date());
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [showMonthlyModal, setShowMonthlyModal] = useState(false);
   const [showAnnualModal, setShowAnnualModal] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState(new Date());
 
-  // Calculate real metrics from data
+  // Auto-refresh data every 10 seconds for real-time updates
+  useEffect(() => {
+    const refreshData = async () => {
+      try {
+        await Promise.all([fetchIncidents?.(), fetchEmergencies?.()]);
+        setLastUpdated(new Date());
+      } catch (error) {
+        console.error('Error refreshing reports data:', error);
+      }
+    };
+
+    // Initial refresh
+    refreshData();
+
+    // Set up interval for real-time updates
+    const interval = setInterval(refreshData, 10000);
+    return () => clearInterval(interval);
+  }, [fetchIncidents, fetchEmergencies]);
+
+  // Format time ago helper - defined before useMemo that uses it
+  const formatTimeAgo = (date) => {
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins} min ago`;
+    if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+    if (diffDays < 7) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+    return date.toLocaleDateString();
+  };
+
+  // Calculate real metrics from data - updates automatically when data changes
   const metrics = useMemo(() => {
-    const totalReports = incidents.length + emergencies.length;
-    const aiReports = incidents.filter(i => i.source === 'ai').length + emergencies.filter(e => e.automatic).length;
+    const totalReports = (incidents?.length || 0) + (emergencies?.length || 0);
+    const aiReports = (incidents?.filter(i => i.source === 'ai' || i.detected_by === 'ai').length || 0) + 
+                      (emergencies?.filter(e => e.automatic || e.source === 'ai').length || 0);
+    const manualReports = totalReports - aiReports;
+    
+    // Calculate data points (all individual data entries)
+    const dataPoints = (incidents || []).reduce((acc, inc) => {
+      return acc + (inc.vehicle_count || 0) + (inc.pedestrian_count || 0) + 1;
+    }, (emergencies?.length || 0));
+
+    // Get last generated time from most recent report
+    const allDates = [
+      ...(incidents || []).map(i => new Date(i.created_at || i.timestamp)),
+      ...(emergencies || []).map(e => new Date(e.created_at || e.timestamp))
+    ].filter(d => !isNaN(d.getTime()));
+    
+    const lastDate = allDates.length > 0 ? new Date(Math.max(...allDates)) : null;
+    const lastGenerated = lastDate ? formatTimeAgo(lastDate) : 'No reports yet';
 
     return {
       total: totalReports,
-      aiCount: aiReports > 1000 ? `${(aiReports / 1000).toFixed(1)}k` : aiReports,
-      lastGenerated: 'Today'
+      aiCount: aiReports,
+      manualCount: manualReports,
+      dataPoints: dataPoints > 1000 ? `${(dataPoints / 1000).toFixed(1)}k` : dataPoints,
+      lastGenerated
     };
   }, [incidents, emergencies]);
 
-  // Combine real emergencies with periodic analysis reports
+  // Combine real emergencies and incidents into reports - real-time
   const allReports = useMemo(() => {
-    const emergencyReports = emergencies.map(em => ({
+    if (!emergencies && !incidents) return [];
+    
+    // Emergency reports (both AI and Manual)
+    const emergencyReports = (emergencies || []).map(em => ({
       id: `em-${em.id}`,
       realId: em.id,
       type: 'emergency',
-      title: `${em.emergency_type.charAt(0).toUpperCase() + em.emergency_type.slice(1)} Emergency Report`,
-      date: new Date(em.created_at).toLocaleDateString(),
-      timestamp: new Date(em.created_at).getTime(),
-      source: em.automatic ? 'AI' : 'Manual',
-      severity: em.severity,
+      title: `${em.emergency_type?.charAt(0).toUpperCase() + em.emergency_type?.slice(1) || 'Emergency'} Report`,
+      date: new Date(em.created_at || em.timestamp).toLocaleDateString(),
+      timestamp: new Date(em.created_at || em.timestamp).getTime(),
+      source: em.automatic || em.source === 'ai' ? 'AI' : 'Manual',
+      severity: em.severity || 'medium',
       data: em
     }));
 
-    const analysisReports = [1, 2, 3].map(i => ({
-      id: `an-${i}`,
-      type: 'analysis',
-      title: `Traffic Analysis Report - Week ${52 - i}`,
-      date: new Date(Date.now() - i * 86400000 * 7).toLocaleDateString(),
-      timestamp: Date.now() - i * 86400000 * 7,
-      source: 'System'
+    // Incident reports (both AI and Manual)
+    const incidentReports = (incidents || []).map(inc => ({
+      id: `inc-${inc.id}`,
+      realId: inc.id,
+      type: 'incident',
+      title: `${inc.incident_type?.charAt(0).toUpperCase() + inc.incident_type?.slice(1) || 'Traffic'} Incident Report`,
+      date: new Date(inc.created_at || inc.timestamp).toLocaleDateString(),
+      timestamp: new Date(inc.created_at || inc.timestamp).getTime(),
+      source: inc.source === 'ai' || inc.detected_by === 'ai' ? 'AI' : 'Manual',
+      severity: inc.severity || 'low',
+      data: inc
     }));
 
-    return [...emergencyReports, ...analysisReports].sort((a, b) => b.timestamp - a.timestamp);
-  }, [emergencies]);
+    return [...emergencyReports, ...incidentReports]
+      .sort((a, b) => b.timestamp - a.timestamp); // Show all reports, sorted by date
+  }, [emergencies, incidents]);
 
   // Generate Monthly Report
   const handleGenerateMonthlyReport = async () => {
     try {
       setGenerating(true);
-      const doc = generateMonthlyReportPDF(incidents, emergencies, selectedMonth);
+      const doc = await generateMonthlyReportPDF(incidents, emergencies, selectedMonth);
       const monthName = selectedMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
       downloadPDF(doc, `RNP_Traffic_Report_${monthName.replace(' ', '_')}.pdf`);
       toast.success('Monthly report generated successfully');
@@ -77,7 +139,7 @@ const Reports = () => {
   const handleGenerateAnnualReport = async () => {
     try {
       setGenerating(true);
-      const doc = generateAnnualReportPDF(incidents, emergencies, selectedYear);
+      const doc = await generateAnnualReportPDF(incidents, emergencies, selectedYear);
       downloadPDF(doc, `RNP_Traffic_Annual_Report_${selectedYear}.pdf`);
       toast.success('Annual report generated successfully');
       setShowAnnualModal(false);
@@ -91,23 +153,79 @@ const Reports = () => {
 
   // Download Emergency Report
   const handleDownloadEmergencyReport = async (emergency) => {
+    console.log('Download emergency report called with:', emergency);
+    if (!emergency) {
+      toast.error('No emergency data available');
+      return;
+    }
     try {
       setGenerating(true);
-      const doc = generateEmergencyReportPDF(emergency, incidents);
-      downloadPDF(doc, `RNP_Emergency_Report_${emergency.id}.pdf`);
+      toast.loading('Generating emergency report...', { id: 'generating' });
+      console.log('Calling generateEmergencyReportPDF...');
+      const doc = await generateEmergencyReportPDF(emergency, incidents || []);
+      console.log('PDF generated, downloading...');
+      downloadPDF(doc, `RNP_Emergency_Report_${emergency.id || Date.now()}.pdf`);
+      toast.dismiss('generating');
       toast.success('Emergency report downloaded successfully');
     } catch (error) {
       console.error('Error downloading emergency report:', error);
-      toast.error('Failed to download emergency report');
+      toast.dismiss('generating');
+      toast.error('Failed to download emergency report: ' + (error.message || 'Unknown error'));
     } finally {
       setGenerating(false);
+    }
+  };
+
+  // Download Incident Report
+  const handleDownloadIncidentReport = async (incident) => {
+    console.log('Download incident report called with:', incident);
+    if (!incident) {
+      toast.error('No incident data available');
+      return;
+    }
+    try {
+      setGenerating(true);
+      toast.loading('Generating incident report...', { id: 'generating' });
+      console.log('Calling generateIncidentReportPDF...');
+      const doc = await generateIncidentReportPDF(incident);
+      console.log('PDF generated, downloading...');
+      downloadPDF(doc, `RNP_Incident_Report_${incident.id || Date.now()}.pdf`);
+      toast.dismiss('generating');
+      toast.success('Incident report downloaded successfully');
+    } catch (error) {
+      console.error('Error downloading incident report:', error);
+      toast.dismiss('generating');
+      toast.error('Failed to download incident report: ' + (error.message || 'Unknown error'));
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  // Download any report based on type
+  const handleDownloadReport = async (report) => {
+    console.log('handleDownloadReport called with:', report);
+    console.log('Report type:', report?.type);
+    console.log('Report data:', report?.data);
+    
+    if (!report || !report.data) {
+      console.error('Missing report or report.data');
+      toast.error('No report data available');
+      return;
+    }
+    if (report.type === 'emergency') {
+      await handleDownloadEmergencyReport(report.data);
+    } else if (report.type === 'incident') {
+      await handleDownloadIncidentReport(report.data);
+    } else {
+      console.error('Unknown report type:', report.type);
+      toast.error('Unknown report type');
     }
   };
 
   if (loading) {
     return (
       <div className="flex justify-center py-12">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-500"></div>
       </div>
     );
   }
@@ -117,22 +235,27 @@ const Reports = () => {
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-            <FileText className="w-8 h-8 text-blue-500" />
+            <FileText className="w-8 h-8 text-cyan-500" />
             Reports & Analytics
           </h1>
-          <p className="text-gray-400 mt-1">Generate comprehensive reports and analyze traffic patterns</p>
+          <p className="text-gray-400 mt-1">
+            Generate comprehensive reports and analyze traffic patterns
+            <span className="ml-2 text-xs text-cyan-400">
+              • Live updates every 10s • Last: {lastUpdated.toLocaleTimeString()}
+            </span>
+          </p>
         </div>
         <div className="flex gap-3">
           <button
             onClick={() => setShowMonthlyModal(true)}
-            className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-xl font-medium transition-all flex items-center gap-2 shadow-lg shadow-green-600/20 hover:scale-105"
+            className="bg-cyan-600 hover:bg-cyan-700 text-white px-6 py-3 rounded-xl font-medium transition-all flex items-center gap-2 shadow-lg shadow-cyan-600/20 hover:scale-105"
           >
             <Calendar className="w-5 h-5" />
             Monthly Report
           </button>
           <button
             onClick={() => setShowAnnualModal(true)}
-            className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-xl font-medium transition-all flex items-center gap-2 shadow-lg shadow-purple-600/20 hover:scale-105"
+            className="bg-cyan-700 hover:bg-cyan-800 text-white px-6 py-3 rounded-xl font-medium transition-all flex items-center gap-2 shadow-lg shadow-cyan-700/20 hover:scale-105"
           >
             <Zap className="w-5 h-5" />
             Annual Report
@@ -143,28 +266,28 @@ const Reports = () => {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="bg-slate-800/50 backdrop-blur-md border border-white/5 rounded-xl p-6">
           <div className="flex items-center gap-4 mb-4">
-            <div className="p-3 bg-blue-500/20 rounded-lg">
-              <FileBarChart className="w-6 h-6 text-blue-400" />
+            <div className="p-3 bg-cyan-500/20 rounded-lg">
+              <FileBarChart className="w-6 h-6 text-cyan-400" />
             </div>
             <div>
               <h3 className="text-lg font-bold text-white">Total Reports</h3>
-              <p className="text-sm text-gray-400">Generated this month</p>
+              <p className="text-sm text-gray-400">AI: {metrics.aiCount} • Manual: {metrics.manualCount}</p>
             </div>
           </div>
-          <p className="text-3xl font-bold text-white">{metrics.total}</p>
+          <p className="text-3xl font-bold text-cyan-400">{metrics.total}</p>
         </div>
 
         <div className="bg-slate-800/50 backdrop-blur-md border border-white/5 rounded-xl p-6">
           <div className="flex items-center gap-4 mb-4">
-            <div className="p-3 bg-green-500/20 rounded-lg">
-              <Calendar className="w-6 h-6 text-green-400" />
+            <div className="p-3 bg-cyan-500/20 rounded-lg">
+              <Calendar className="w-6 h-6 text-cyan-400" />
             </div>
             <div>
               <h3 className="text-lg font-bold text-white">Last Generated</h3>
               <p className="text-sm text-gray-400">Most recent report</p>
             </div>
           </div>
-          <p className="text-xl font-bold text-white">{metrics.lastGenerated}</p>
+          <p className="text-xl font-bold text-cyan-400">{metrics.lastGenerated}</p>
         </div>
 
         <div className="bg-slate-800/50 backdrop-blur-md border border-white/5 rounded-xl p-6">
@@ -177,49 +300,57 @@ const Reports = () => {
               <p className="text-sm text-gray-400">Processed in reports</p>
             </div>
           </div>
-          <p className="text-3xl font-bold text-white">{metrics.aiCount}</p>
+          <p className="text-3xl font-bold text-cyan-400">{metrics.dataPoints}</p>
         </div>
       </div>
 
       <div className="bg-slate-800/50 backdrop-blur-md border border-white/5 rounded-xl p-6">
-        <h3 className="text-xl font-bold text-white mb-6">Recent Reports</h3>
+        <div className="flex items-center justify-between mb-6">
+          <h3 className="text-xl font-bold text-white">Recent Reports</h3>
+          <div className="flex items-center gap-2 text-xs text-gray-400">
+            <RefreshCw className="w-3 h-3 animate-spin" />
+            <span>Auto-updating</span>
+          </div>
+        </div>
         <div className="space-y-4">
           {allReports.length > 0 ? (
             allReports.map((report) => (
-              <div key={report.id} className="flex items-center justify-between p-4 bg-slate-900/50 rounded-lg border border-white/5 hover:border-blue-500/30 transition-colors group">
+              <div key={report.id} className="flex items-center justify-between p-4 bg-slate-900/50 rounded-lg border border-white/5 hover:border-cyan-500/30 transition-colors group">
                 <div className="flex items-center gap-4">
-                  <div className="p-2 bg-slate-800 rounded text-gray-400 group-hover:text-blue-400 transition-colors">
+                  <div className="p-2 bg-slate-800 rounded text-gray-400 group-hover:text-cyan-400 transition-colors">
                     <FileText className="w-5 h-5" />
                   </div>
                   <div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <h4 className="font-medium text-white">{report.title}</h4>
-                      <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${report.source === 'AI' ? 'bg-cyan-500/20 text-cyan-300' :
-                          report.source === 'Manual' ? 'bg-blue-500/20 text-blue-300' : 'bg-slate-500/20 text-slate-300'
+                      <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${
+                        report.source === 'AI' 
+                          ? 'bg-cyan-500/20 text-cyan-300' 
+                          : 'bg-cyan-700/20 text-cyan-400'
                         }`}>
                         {report.source}
                       </span>
                       {report.severity && (
-                        <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${report.severity === 'critical' ? 'bg-red-500 text-white' :
-                            report.severity === 'high' ? 'bg-orange-500 text-white' : 'bg-yellow-500 text-white'
+                        <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${
+                          report.severity === 'critical' 
+                            ? 'bg-cyan-400 text-gray-900' 
+                            : report.severity === 'high' 
+                              ? 'bg-cyan-500 text-white' 
+                              : report.severity === 'medium'
+                                ? 'bg-cyan-600 text-white'
+                                : 'bg-cyan-700 text-white'
                           }`}>
                           {report.severity.toUpperCase()}
                         </span>
                       )}
                     </div>
-                    <p className="text-xs text-gray-500">Generated on {report.date}</p>
+                    <p className="text-xs text-gray-500">Generated on {report.date} • {report.type}</p>
                   </div>
                 </div>
                 <button
-                  onClick={() => {
-                    if (report.type === 'emergency') {
-                      handleDownloadEmergencyReport(report.data);
-                    } else {
-                      toast.success('Downloading analysis report...');
-                    }
-                  }}
+                  onClick={() => handleDownloadReport(report)}
                   disabled={generating}
-                  className="text-sm text-blue-400 hover:text-blue-300 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-50"
+                  className="text-sm text-cyan-400 hover:text-cyan-300 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-50"
                 >
                   <Download className="w-4 h-4" /> Download
                 </button>
@@ -229,6 +360,7 @@ const Reports = () => {
             <div className="text-center py-12 text-gray-500">
               <Activity className="w-12 h-12 mx-auto mb-2 opacity-20" />
               <p>No reports available yet</p>
+              <p className="text-xs mt-1">Reports will appear here in real-time</p>
             </div>
           )}
         </div>
@@ -246,7 +378,7 @@ const Reports = () => {
                 type="month"
                 value={selectedMonth.toISOString().slice(0, 7)}
                 onChange={(e) => setSelectedMonth(new Date(e.target.value + '-01'))}
-                className="w-full px-4 py-2 bg-slate-700 border border-white/10 rounded-lg text-white focus:outline-none focus:border-blue-500"
+                className="w-full px-4 py-2 bg-slate-700 border border-white/10 rounded-lg text-white focus:outline-none focus:border-cyan-500"
               />
             </div>
 
@@ -260,7 +392,7 @@ const Reports = () => {
               <button
                 onClick={handleGenerateMonthlyReport}
                 disabled={generating}
-                className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                className="flex-1 px-4 py-2 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 {generating ? (
                   <>
@@ -290,9 +422,9 @@ const Reports = () => {
               <select
                 value={selectedYear}
                 onChange={(e) => setSelectedYear(parseInt(e.target.value))}
-                className="w-full px-4 py-2 bg-slate-700 border border-white/10 rounded-lg text-white focus:outline-none focus:border-blue-500"
+                className="w-full px-4 py-2 bg-slate-700 border border-white/10 rounded-lg text-white focus:outline-none focus:border-cyan-500"
               >
-                {[2024, 2023, 2022, 2021, 2020].map(year => (
+                {[2026, 2025, 2024, 2023, 2022, 2021, 2020].map(year => (
                   <option key={year} value={year}>{year}</option>
                 ))}
               </select>
@@ -308,7 +440,7 @@ const Reports = () => {
               <button
                 onClick={handleGenerateAnnualReport}
                 disabled={generating}
-                className="flex-1 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                className="flex-1 px-4 py-2 bg-cyan-700 hover:bg-cyan-800 text-white rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 {generating ? (
                   <>

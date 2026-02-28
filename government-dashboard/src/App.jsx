@@ -77,7 +77,7 @@ function AppContent() {
                 <Route path="/settings" element={<Settings />} />
                 <Route path="/profile" element={<Profile />} />
                 <Route path="/deployments" element={<ErrorBoundary><DeploymentsPage /></ErrorBoundary>} />
-                <Route path="/geofencing" element={<GeoFencingPage />} />
+                <Route path="/geofencing" element={<ErrorBoundary><GeoFencingPage /></ErrorBoundary>} />
                 <Route path="/officers" element={<OfficerManagement />} />
                 <Route path="*" element={<Navigate to="/dashboard" replace />} />
               </Routes>

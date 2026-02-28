@@ -182,19 +182,39 @@ export const DataProvider = ({ children }) => {
     };
     
     setEmergencies(prev => {
-      const exists = prev.some(e => e.id === normalizedEmergency.id);
-      if (exists) {
+      // Check if this emergency already exists (by real ID)
+      const existsById = prev.some(e => e.id === normalizedEmergency.id && !e._isOptimistic);
+      if (existsById) {
         return prev.map(e => e.id === normalizedEmergency.id ? { ...e, ...normalizedEmergency } : e);
       }
+      
+      // Check if there's an optimistic entry that matches (remove it and add real one)
+      const hasOptimistic = prev.some(e => e._isOptimistic);
+      if (hasOptimistic) {
+        // Remove optimistic entries and add the real one
+        const withoutOptimistic = prev.filter(e => !e._isOptimistic);
+        return [normalizedEmergency, ...withoutOptimistic];
+      }
+      
       return [normalizedEmergency, ...prev];
     });
 
-    // Critical alert (only once per emergency)
-    toast.error(`🚨 EMERGENCY: ${normalizedEmergency.emergency_type} - ${normalizedEmergency.severity}`, {
-      icon: '🚨',
-      duration: 8000,
-      id: `emergency-${emergencyId}`, // Prevent duplicate toasts
-    });
+    // Only show alert toast on admin pages (not on public reporting pages)
+    // Check if we're on an admin route (Dashboard, Emergency, etc.)
+    const isAdminPage = window.location.pathname.includes('/dashboard') || 
+                        window.location.pathname.includes('/emergency') ||
+                        window.location.pathname.includes('/incidents') ||
+                        window.location.pathname.includes('/reports') ||
+                        window.location.pathname.includes('/deployments') ||
+                        window.location.pathname.includes('/officers');
+    
+    if (isAdminPage) {
+      toast.error(`🚨 EMERGENCY: ${normalizedEmergency.emergency_type} - ${normalizedEmergency.severity}`, {
+        icon: '🚨',
+        duration: 8000,
+        id: `emergency-${emergencyId}`, // Prevent duplicate toasts
+      });
+    }
   }, []);
 
   // Handle emergency update
@@ -320,12 +340,20 @@ export const DataProvider = ({ children }) => {
     }
   };
 
-  // Fetch emergencies
+  // Fetch emergencies - preserves optimistic entries
   const fetchEmergencies = async () => {
     try {
       const response = await axios.get('/api/emergency');
       if (response.data.success) {
-        setEmergencies(response.data.data || []);
+        const serverEmergencies = response.data.data || [];
+        // Preserve any optimistic entries that haven't been confirmed yet
+        setEmergencies(prev => {
+          const optimisticEntries = prev.filter(em => em._isOptimistic);
+          // Merge: server data + optimistic entries not yet in server data
+          const serverIds = new Set(serverEmergencies.map(em => em.id));
+          const pendingOptimistic = optimisticEntries.filter(em => !serverIds.has(em.id));
+          return [...pendingOptimistic, ...serverEmergencies];
+        });
       }
     } catch (error) {
       console.error('❌ Error fetching emergencies:', error);
@@ -428,8 +456,9 @@ export const DataProvider = ({ children }) => {
 
   // Report new emergency with optimistic update and rollback
   const reportEmergency = async (emergencyData) => {
-    // Create optimistic emergency with temp ID
+    // Create optimistic emergency with temp ID and current timestamp
     const tempId = `temp_${Date.now()}`;
+    const currentTimestamp = new Date().toISOString();
     const optimisticEmergency = {
       id: tempId,
       emergency_type: emergencyData.emergencyType,
@@ -438,8 +467,9 @@ export const DataProvider = ({ children }) => {
       latitude: emergencyData.latitude,
       longitude: emergencyData.longitude,
       description: emergencyData.description,
+      contact_phone: emergencyData.contactPhone,
       status: 'pending',
-      created_at: new Date().toISOString(),
+      created_at: currentTimestamp,
       _isOptimistic: true,
     };
 
@@ -450,6 +480,14 @@ export const DataProvider = ({ children }) => {
       const response = await axios.post('/api/emergency', emergencyData);
       if (response.data.success) {
         const newEmergency = response.data.data;
+        // Ensure created_at is set (fallback to current time if missing)
+        if (!newEmergency.created_at) {
+          newEmergency.created_at = currentTimestamp;
+        }
+        // Mark as confirmed (not optimistic)
+        newEmergency._isOptimistic = false;
+        newEmergency.source = newEmergency.source || 'manual';
+        
         // Replace optimistic entry with real data
         setEmergencies(prev => prev.map(em => 
           em.id === tempId ? newEmergency : em
@@ -710,19 +748,19 @@ export const DataProvider = ({ children }) => {
 
     loadData();
 
-    // Refresh critical data periodically (backup to WebSocket)
+    // Refresh critical data every 10 seconds for real-time feel
+    // This is a backup to WebSocket - if WS is working, these will just confirm data
     const quickRefresh = setInterval(() => {
-      // Refresh statistics every 30 seconds for real-time feel
       fetchStatistics();
-    }, 30000);
-
-    // Full data refresh every 2 minutes as fallback
-    const fullRefresh = setInterval(() => {
       fetchIncidents();
       fetchEmergencies();
+    }, 10000);
+
+    // Full data refresh every 30 seconds as fallback for deployments
+    const fullRefresh = setInterval(() => {
       fetchDeployments();
       fetchAvailableOfficers();
-    }, 120000);
+    }, 30000);
 
     return () => {
       clearInterval(quickRefresh);

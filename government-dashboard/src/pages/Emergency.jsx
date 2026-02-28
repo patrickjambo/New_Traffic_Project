@@ -249,10 +249,12 @@ const Emergency = () => {
                 <div className="flex flex-col md:flex-row justify-between gap-6">
                   <div className="flex-1">
                     <div className="flex items-center gap-3 mb-3">
-                      <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${emergency.severity === 'critical' ? 'bg-red-500 text-white animate-pulse' :
-                        emergency.severity === 'high' ? 'bg-orange-500 text-white' :
-                          'bg-yellow-500 text-white'
-                        }`}>
+                      <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider border ${
+                        emergency.severity === 'critical' ? 'bg-red-500/20 text-red-400 border-red-500/30' :
+                        emergency.severity === 'high' ? 'bg-orange-500/20 text-orange-400 border-orange-500/30' :
+                        emergency.severity === 'medium' ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' :
+                        'bg-green-500/20 text-green-400 border-green-500/30'
+                      }`}>
                         {emergency.severity} Priority
                       </span>
                       {emergency.source === 'ai' ? (
@@ -266,7 +268,14 @@ const Emergency = () => {
                       )}
                       <span className={`text-xs font-mono text-gray-400 flex items-center gap-1`}>
                         <Clock className="w-3 h-3" />
-                        {new Date(emergency.created_at).toLocaleString()}
+                        {emergency.created_at ? new Date(emergency.created_at).toLocaleString('en-GB', { 
+                          day: '2-digit', 
+                          month: '2-digit', 
+                          year: 'numeric', 
+                          hour: '2-digit', 
+                          minute: '2-digit',
+                          hour12: false 
+                        }) : 'Just now'}
                       </span>
                     </div>
 
@@ -408,7 +417,14 @@ const Emergency = () => {
                 </div>
                 <div className="flex items-center gap-2 text-gray-300">
                   <Clock className="w-4 h-4 text-gray-400" />
-                  {new Date(selectedEmergency.created_at).toLocaleTimeString()}
+                  {selectedEmergency.created_at ? new Date(selectedEmergency.created_at).toLocaleString('en-GB', { 
+                    day: '2-digit', 
+                    month: '2-digit', 
+                    year: 'numeric', 
+                    hour: '2-digit', 
+                    minute: '2-digit',
+                    hour12: false 
+                  }) : 'Just now'}
                 </div>
               </div>
               <p className="text-gray-400 text-sm mt-2">{selectedEmergency.description}</p>

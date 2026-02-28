@@ -59,14 +59,42 @@ class _DeploymentsScreenState extends State<DeploymentsScreen>
       setState(() {
         if (deployment.needsAcknowledgment) {
           _pendingDeployments.insert(0, deployment);
+          // Switch to Pending tab to show new deployment
+          _tabController.animateTo(0);
         } else {
           _activeDeployments.insert(0, deployment);
+          // Switch to Active tab
+          _tabController.animateTo(1);
         }
       });
       _showDeploymentNotification(deployment);
     };
 
     _deploymentService.onDeploymentUpdated = (deployment) {
+      // REAL-TIME UPDATE: Update UI instantly
+      setState(() {
+        // Remove from pending if it was there
+        _pendingDeployments.removeWhere((d) => d.id == deployment.id);
+        
+        // Check if deployment is now acknowledged/active
+        if (deployment.acknowledged && deployment.status != 'completed') {
+          // Update or add to active list
+          final existingIndex = _activeDeployments.indexWhere((d) => d.id == deployment.id);
+          if (existingIndex >= 0) {
+            _activeDeployments[existingIndex] = deployment;
+          } else {
+            _activeDeployments.insert(0, deployment);
+          }
+          // Switch to Active tab
+          _tabController.animateTo(1);
+        } else if (deployment.status == 'completed') {
+          // Move to completed
+          _activeDeployments.removeWhere((d) => d.id == deployment.id);
+          _completedDeployments.insert(0, deployment);
+        }
+      });
+      
+      // Refresh from server in background
       _loadDeployments();
     };
 
@@ -957,6 +985,43 @@ class _DeploymentsScreenState extends State<DeploymentsScreen>
           ElevatedButton(
             onPressed: () async {
               Navigator.pop(context);
+              
+              // Instantly update UI for real-time feel
+              final updatedDeployment = Deployment(
+                id: deployment.id,
+                incidentId: deployment.incidentId,
+                officerId: deployment.officerId,
+                assignedBy: deployment.assignedBy,
+                officerStatus: 'completed',
+                deployedAt: deployment.deployedAt,
+                acknowledgedAt: deployment.acknowledgedAt,
+                completedAt: DateTime.now(),
+                notes: notesController.text.isNotEmpty ? notesController.text : deployment.notes,
+                latitude: deployment.latitude,
+                longitude: deployment.longitude,
+                incidentType: deployment.incidentType,
+                incidentLocation: deployment.incidentLocation,
+                incidentDescription: deployment.incidentDescription,
+                officerName: deployment.officerName,
+                assignerName: deployment.assignerName,
+                priority: deployment.priority,
+                incidentLatitude: deployment.incidentLatitude,
+                incidentLongitude: deployment.incidentLongitude,
+              );
+              
+              setState(() {
+                final activeIndex = _activeDeployments.indexWhere((d) => d.id == deployment.id);
+                if (activeIndex != -1) {
+                  _activeDeployments.removeAt(activeIndex);
+                  _completedDeployments.insert(0, updatedDeployment);
+                  // Switch to History tab
+                  _tabController.animateTo(2);
+                }
+              });
+              
+              _showSnackBar('Deployment completed');
+              
+              // Call API in background
               final result = await _deploymentService.markCompleted(
                 deployment.id,
                 notes: notesController.text.isNotEmpty
@@ -965,7 +1030,9 @@ class _DeploymentsScreenState extends State<DeploymentsScreen>
               );
 
               if (result['success'] == true) {
-                _showSnackBar('Deployment completed');
+                _loadDeployments();
+              } else {
+                // Revert on failure
                 _loadDeployments();
               }
             },
@@ -1062,13 +1129,60 @@ class _DeploymentsScreenState extends State<DeploymentsScreen>
               }
 
               Navigator.pop(context);
+              
+              // Instantly update UI for real-time feel
+              final updatedDeployment = Deployment(
+                id: deployment.id,
+                incidentId: deployment.incidentId,
+                officerId: deployment.officerId,
+                assignedBy: deployment.assignedBy,
+                officerStatus: 'unable',
+                deployedAt: deployment.deployedAt,
+                acknowledgedAt: deployment.acknowledgedAt,
+                completedAt: DateTime.now(),
+                notes: reasonController.text,
+                latitude: deployment.latitude,
+                longitude: deployment.longitude,
+                incidentType: deployment.incidentType,
+                incidentLocation: deployment.incidentLocation,
+                incidentDescription: deployment.incidentDescription,
+                officerName: deployment.officerName,
+                assignerName: deployment.assignerName,
+                priority: deployment.priority,
+                incidentLatitude: deployment.incidentLatitude,
+                incidentLongitude: deployment.incidentLongitude,
+              );
+              
+              setState(() {
+                // Remove from active or pending
+                final activeIndex = _activeDeployments.indexWhere((d) => d.id == deployment.id);
+                if (activeIndex != -1) {
+                  _activeDeployments.removeAt(activeIndex);
+                  _completedDeployments.insert(0, updatedDeployment);
+                  // Switch to History tab
+                  _tabController.animateTo(2);
+                } else {
+                  final pendingIndex = _pendingDeployments.indexWhere((d) => d.id == deployment.id);
+                  if (pendingIndex != -1) {
+                    _pendingDeployments.removeAt(pendingIndex);
+                    _completedDeployments.insert(0, updatedDeployment);
+                    _tabController.animateTo(2);
+                  }
+                }
+              });
+              
+              _showSnackBar('Status updated', isWarning: true);
+              
+              // Call API in background
               final result = await _deploymentService.markUnable(
                 deployment.id,
                 reasonController.text,
               );
 
               if (result['success'] == true) {
-                _showSnackBar('Status updated', isWarning: true);
+                _loadDeployments();
+              } else {
+                // Revert on failure
                 _loadDeployments();
               }
             },
@@ -1434,6 +1548,41 @@ class _DeploymentsScreenState extends State<DeploymentsScreen>
 
     if (result['success'] == true) {
       _showSnackBar('Deployment acknowledged successfully');
+      
+      // INSTANT UI UPDATE: Move deployment from pending to active
+      setState(() {
+        _pendingDeployments.removeWhere((d) => d.id == deployment.id);
+        // Create updated deployment with acknowledged status using correct fields
+        final acknowledgedDeployment = Deployment(
+          id: deployment.id,
+          unitName: deployment.unitName,
+          address: deployment.address,
+          latitude: deployment.latitude,
+          longitude: deployment.longitude,
+          status: 'acknowledged',
+          priority: deployment.priority,
+          instructions: deployment.instructions,
+          scheduledTime: deployment.scheduledTime,
+          estimatedDuration: deployment.estimatedDuration,
+          createdAt: deployment.createdAt,
+          acknowledged: true,
+          acknowledgedAt: DateTime.now(),
+          officerStatus: deployment.officerStatus,
+          officerNotes: deployment.officerNotes,
+          incidentType: deployment.incidentType,
+          incidentSeverity: deployment.incidentSeverity,
+          incidentDescription: deployment.incidentDescription,
+          emergencyType: deployment.emergencyType,
+          emergencySeverity: deployment.emergencySeverity,
+          emergencyDescription: deployment.emergencyDescription,
+        );
+        _activeDeployments.insert(0, acknowledgedDeployment);
+      });
+      
+      // SWITCH TO ACTIVE TAB IMMEDIATELY
+      _tabController.animateTo(1); // Index 1 = Active tab
+      
+      // Refresh from server in background (for any other updates)
       _loadDeployments();
     } else {
       _showSnackBar(result['message'] ?? 'Failed to acknowledge', isError: true);
@@ -1441,6 +1590,49 @@ class _DeploymentsScreenState extends State<DeploymentsScreen>
   }
 
   Future<void> _updateStatus(Deployment deployment, String newStatus) async {
+    // Instantly update UI before API call for real-time feel
+    final updatedDeployment = Deployment(
+      id: deployment.id,
+      incidentId: deployment.incidentId,
+      officerId: deployment.officerId,
+      assignedBy: deployment.assignedBy,
+      officerStatus: newStatus,
+      deployedAt: deployment.deployedAt,
+      acknowledgedAt: deployment.acknowledgedAt,
+      completedAt: newStatus == 'completed' ? DateTime.now() : deployment.completedAt,
+      notes: deployment.notes,
+      latitude: deployment.latitude,
+      longitude: deployment.longitude,
+      incidentType: deployment.incidentType,
+      incidentLocation: deployment.incidentLocation,
+      incidentDescription: deployment.incidentDescription,
+      officerName: deployment.officerName,
+      assignerName: deployment.assignerName,
+      priority: deployment.priority,
+      incidentLatitude: deployment.incidentLatitude,
+      incidentLongitude: deployment.incidentLongitude,
+    );
+    
+    setState(() {
+      // Update in active list
+      final activeIndex = _activeDeployments.indexWhere((d) => d.id == deployment.id);
+      if (activeIndex != -1) {
+        if (newStatus == 'completed') {
+          // Move to completed/history
+          _activeDeployments.removeAt(activeIndex);
+          _completedDeployments.insert(0, updatedDeployment);
+          // Switch to History tab
+          _tabController.animateTo(2);
+        } else {
+          // Update in place
+          _activeDeployments[activeIndex] = updatedDeployment;
+        }
+      }
+    });
+    
+    _showSnackBar('Status updated to: ${_getStatusLabel(newStatus)}');
+    
+    // Get position and call API in background
     Position? position;
     try {
       position = await Geolocator.getCurrentPosition(
@@ -1458,11 +1650,13 @@ class _DeploymentsScreenState extends State<DeploymentsScreen>
     );
 
     if (result['success'] == true) {
-      _showSnackBar('Status updated to: ${_getStatusLabel(newStatus)}');
+      // Refresh to get server-confirmed data
       _loadDeployments();
     } else {
+      // Revert on failure
       _showSnackBar(result['message'] ?? 'Failed to update status',
           isError: true);
+      _loadDeployments();
     }
   }
 

@@ -59,9 +59,10 @@ const DashboardPage = () => {
       severity: inc.severity || 'medium',
       source: inc.source || 'manual',
       reportType: 'incident',
-      color: inc.severity === 'critical' ? 'bg-red-500' :
-        inc.severity === 'high' ? 'bg-orange-500' :
-          inc.severity === 'medium' ? 'bg-yellow-500' : 'bg-blue-500'
+      // Consistent cyan color scheme throughout
+      color: inc.severity === 'critical' ? 'bg-cyan-700' :
+        inc.severity === 'high' ? 'bg-cyan-600' :
+          inc.severity === 'medium' ? 'bg-cyan-500' : 'bg-cyan-400'
     }));
 
     const formattedEmergencies = emergencies.map(em => ({
@@ -74,7 +75,7 @@ const DashboardPage = () => {
       severity: em.severity || 'high',
       source: 'emergency',
       reportType: 'emergency',
-      color: 'bg-red-600'
+      color: 'bg-cyan-600' // Consistent cyan for emergencies too
     }));
 
     return [...formattedIncidents, ...formattedEmergencies]
@@ -87,7 +88,7 @@ const DashboardPage = () => {
     return emergencies.filter(em => em.status === 'pending' || em.status === 'active');
   }, [emergencies]);
 
-  // Stats Data - now using real data
+  // Stats Data - now using real data with consistent cyan color scheme
   const stats = [
     {
       id: 1,
@@ -95,10 +96,10 @@ const DashboardPage = () => {
       value: loading ? '...' : String(realTimeStats.activeIncidents),
       subtitle: `${realTimeStats.criticalCount} Critical`,
       icon: AlertTriangle,
-      color: 'bg-red-500',
+      color: 'bg-cyan-500',
       iconColor: 'text-white',
       trend: realTimeStats.activeIncidents > 0 ? 'Active' : 'Clear',
-      trendColor: realTimeStats.activeIncidents > 0 ? 'bg-red-500/20 text-red-300' : 'bg-green-500/20 text-green-300'
+      trendColor: realTimeStats.activeIncidents > 0 ? 'bg-cyan-500/20 text-cyan-300' : 'bg-cyan-500/20 text-cyan-300'
     },
     {
       id: 2,
@@ -106,10 +107,10 @@ const DashboardPage = () => {
       value: loading ? '...' : String(activeEmergencies.length),
       subtitle: 'Active alerts',
       icon: Activity,
-      color: 'bg-orange-600',
+      color: activeEmergencies.length > 0 ? 'bg-red-500' : 'bg-cyan-500',
       iconColor: 'text-white',
       trend: activeEmergencies.length > 0 ? 'URGENT' : 'None',
-      trendColor: activeEmergencies.length > 0 ? 'bg-red-500 animate-pulse text-white' : 'bg-green-500/20 text-green-300'
+      trendColor: activeEmergencies.length > 0 ? 'bg-red-500/20 text-red-300' : 'bg-cyan-500/20 text-cyan-300'
     },
     {
       id: 3,
@@ -117,10 +118,10 @@ const DashboardPage = () => {
       value: loading ? '...' : String(realTimeStats.resolvedToday),
       subtitle: 'Incidents cleared',
       icon: Shield,
-      color: 'bg-green-500',
+      color: 'bg-cyan-600',
       iconColor: 'text-white',
       trend: '+' + realTimeStats.resolvedToday,
-      trendColor: 'bg-green-500/20 text-green-300'
+      trendColor: 'bg-cyan-500/20 text-cyan-300'
     },
     {
       id: 4,
@@ -128,38 +129,45 @@ const DashboardPage = () => {
       value: wsConnected ? 'Online' : 'Offline',
       subtitle: wsConnected ? 'Real-time updates active' : 'Reconnecting...',
       icon: wsConnected ? Wifi : WifiOff,
-      color: wsConnected ? 'bg-green-500' : 'bg-yellow-500',
+      color: wsConnected ? 'bg-cyan-500' : 'bg-cyan-600',
       iconColor: 'text-white',
       trend: connectionStatus,
-      trendColor: wsConnected ? 'bg-green-500/20 text-green-300' : 'bg-yellow-500/20 text-yellow-300'
+      trendColor: wsConnected ? 'bg-cyan-500/20 text-cyan-300' : 'bg-cyan-500/20 text-cyan-300'
     }
   ];
 
-  // District mapping for Kigali
+  // District mapping for Kigali - consistent cyan color scheme
   const kigaliDistricts = {
-    1: { name: 'Nyarugenge', color: 'bg-blue-500' },
-    2: { name: 'Gasabo', color: 'bg-green-500' },
-    3: { name: 'Kicukiro', color: 'bg-cyan-500' },
+    1: { name: 'Nyarugenge', color: 'bg-cyan-500' },
+    2: { name: 'Gasabo', color: 'bg-cyan-600' },
+    3: { name: 'Kicukiro', color: 'bg-cyan-400' },
   };
 
-  // Regions - show only user's district for district admins, all regions for super admin
+  // Calculate total officers from deployments
+  const totalOfficersDeployed = useMemo(() => {
+    return realDeployments.reduce((sum, d) => {
+      const officers = d.officers;
+      if (Array.isArray(officers)) {
+        return sum + officers.length;
+      }
+      return sum + (d.officer_count || officers || 0);
+    }, 0);
+  }, [realDeployments]);
+
+  // Regions - calculated from real-time data
   const regions = useMemo(() => {
     if (isDistrictAdmin && userDistrictId) {
       // District admin sees only their district
       const district = kigaliDistricts[userDistrictId] || { name: userDistrictName, color: 'bg-blue-500' };
       const districtIncidents = incidents.length;
       // Count officers - handle both array and number formats
-      const officerCount = realDeployments.reduce((sum, d) => {
-        const officers = d.officers;
-        if (Array.isArray(officers)) {
-          return sum + officers.length;
-        }
-        return sum + (d.officer_count || officers || 0);
-      }, 0);
+      const officerCount = totalOfficersDeployed;
+      // Calculate load based on incidents/capacity ratio
+      const load = districtIncidents > 0 ? Math.min(100, Math.round((districtIncidents / Math.max(10, districtIncidents)) * 100)) : 0;
       return [
         { 
           name: district.name + ' District', 
-          load: Math.min(100, Math.round((districtIncidents / 10) * 100)), 
+          load: load, 
           incidents: districtIncidents, 
           officers: officerCount,
           color: district.color 
@@ -167,37 +175,39 @@ const DashboardPage = () => {
       ];
     }
     
-    // Super admin sees all regions
+    // Super admin sees real-time aggregated data for Kigali
+    const activeIncidents = incidents.filter(i => i.status !== 'resolved').length;
+    const totalIncidents = incidents.length;
+    const load = totalIncidents > 0 ? Math.min(100, Math.round((activeIncidents / Math.max(10, totalIncidents)) * 100)) : 0;
+    
     return [
-      { name: 'Kigali City', load: 67, incidents: incidents.filter(i => i.location?.toLowerCase().includes('kigali')).length || 0, officers: 89, color: 'bg-blue-500' },
-      { name: 'Northern Province', load: 45, incidents: 0, officers: 45, color: 'bg-teal-500' },
-      { name: 'Southern Province', load: 38, incidents: 0, officers: 52, color: 'bg-indigo-500' },
-      { name: 'Eastern Province', load: 52, incidents: 0, officers: 61, color: 'bg-cyan-500' },
-      { name: 'Western Province', load: 41, incidents: 0, officers: 48, color: 'bg-emerald-500' },
+      { 
+        name: 'Kigali City', 
+        load: load || 0, 
+        incidents: totalIncidents, 
+        officers: totalOfficersDeployed, 
+        color: 'bg-cyan-500' 
+      },
     ];
-  }, [isDistrictAdmin, userDistrictId, userDistrictName, incidents, realDeployments]);
+  }, [isDistrictAdmin, userDistrictId, userDistrictName, incidents, totalOfficersDeployed]);
 
   // Use real deployments from DataContext (already filtered for district admins)
+  // No hardcoded fallback - show actual real-time data only
   const deployments = useMemo(() => {
-    if (realDeployments && realDeployments.length > 0) {
-      return realDeployments.map(d => ({
-        name: d.title || d.name || d.unit_name || `Deployment #${d.id}`,
-        location: d.location || d.area || d.address || 'Unknown',
-        officers: Array.isArray(d.officers) ? d.officers.length : (d.officer_count || d.officers || 0),
-        time: formatTimeAgo(d.created_at),
-        status: d.status === 'Active' || d.status === 'active' ? 'Active' : 
-                d.status === 'Completed' || d.status === 'completed' ? 'Completed' : 'Standby',
-        statusColor: d.status === 'Active' || d.status === 'active' ? 'bg-green-500/20 text-green-400' : 
-                     d.status === 'Completed' || d.status === 'completed' ? 'bg-gray-500/20 text-gray-400' : 
-                     'bg-yellow-500/20 text-yellow-400'
-      }));
+    if (!realDeployments || realDeployments.length === 0) {
+      return []; // Return empty array - no fake data
     }
-    // Fallback to default if no deployments
-    return [
-      { name: 'Unit Alpha', location: 'Kigali CBD', officers: 12, time: '3h 20m', status: 'Active', statusColor: 'bg-green-500/20 text-green-400' },
-      { name: 'Unit Bravo', location: 'Nyabugogo', officers: 8, time: '2h 45m', status: 'Active', statusColor: 'bg-green-500/20 text-green-400' },
-      { name: 'Unit Charlie', location: 'Remera', officers: 6, time: '1h 15m', status: 'Standby', statusColor: 'bg-yellow-500/20 text-yellow-400' },
-    ];
+    return realDeployments.map(d => ({
+      name: d.title || d.name || d.unit_name || `Deployment #${d.id}`,
+      location: d.location || d.area || d.address || 'Unknown',
+      officers: Array.isArray(d.officers) ? d.officers.length : (d.officer_count || d.officers || 0),
+      time: formatTimeAgo(d.created_at),
+      status: d.status === 'Active' || d.status === 'active' ? 'Active' : 
+              d.status === 'Completed' || d.status === 'completed' ? 'Completed' : 'Standby',
+      statusColor: d.status === 'Active' || d.status === 'active' ? 'bg-cyan-500/20 text-cyan-400' : 
+                   d.status === 'Completed' || d.status === 'completed' ? 'bg-slate-500/20 text-slate-400' : 
+                   'bg-cyan-600/20 text-cyan-300'
+    }));
   }, [realDeployments]);
 
   return (
@@ -209,9 +219,9 @@ const DashboardPage = () => {
 
       {/* District Admin Banner */}
       {isDistrictAdmin && (
-        <div className="mb-6 bg-gradient-to-r from-blue-600/20 to-cyan-600/20 border border-blue-500/30 rounded-2xl p-4">
+        <div className="mb-6 bg-gradient-to-r from-cyan-600/20 to-cyan-500/20 border border-cyan-500/30 rounded-2xl p-4">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-blue-500 rounded-lg">
+            <div className="p-2 bg-cyan-500 rounded-lg">
               <Building2 className="w-5 h-5 text-white" />
             </div>
             <div>
@@ -223,11 +233,11 @@ const DashboardPage = () => {
       )}
       {/* Real-time Connection Indicator */}
       <div className="mb-4 flex items-center gap-2">
-        <div className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-green-500 animate-pulse' : 'bg-yellow-500'}`}></div>
+        <div className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-cyan-400 animate-pulse' : 'bg-cyan-600'}`}></div>
         <span className="text-xs text-gray-400">
           {wsConnected ? 'Live updates active' : `${connectionStatus}...`}
         </span>
-        {loading && <span className="text-xs text-blue-400 ml-2">Loading data...</span>}
+        {loading && <span className="text-xs text-cyan-400 ml-2">Loading data...</span>}
       </div>
 
       {/* Emergency Alerts Section */}
@@ -243,7 +253,7 @@ const DashboardPage = () => {
             </div>
             <button
               onClick={() => navigate('/emergency')}
-              className="text-sm text-blue-400 hover:text-blue-300 font-medium"
+              className="text-sm text-cyan-400 hover:text-cyan-300 font-medium"
             >
               View All Emergencies →
             </button>
@@ -272,14 +282,14 @@ const DashboardPage = () => {
                               AI
                             </span>
                           ) : (
-                            <span className="bg-blue-500/20 text-blue-400 border border-blue-500/30 px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider">
+                            <span className="bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider">
                               Manual
                             </span>
                           )}
                         </div>
                       </div>
                     </div>
-                    <span className={`text-[10px] font-bold px-2 py-1 rounded uppercase tracking-wider ${emergency.severity === 'critical' ? 'bg-red-500 text-white' : 'bg-orange-500 text-white'
+                    <span className={`text-[10px] font-bold px-2 py-1 rounded uppercase tracking-wider ${emergency.severity === 'critical' ? 'bg-red-500 text-white' : 'bg-cyan-500 text-white'
                       }`}>
                       {emergency.severity}
                     </span>
@@ -341,13 +351,13 @@ const DashboardPage = () => {
         <div className={`${isDistrictAdmin ? 'lg:col-span-1' : 'lg:col-span-2'} bg-slate-800/50 backdrop-blur-md border border-white/5 rounded-2xl p-6`}>
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-2">
-              <MapPin className="w-5 h-5 text-blue-400" />
+              <MapPin className="w-5 h-5 text-cyan-400" />
               <h2 className="text-lg font-bold text-white">
                 {isDistrictAdmin ? `${userDistrictName} Overview` : 'Regional Overview'}
               </h2>
             </div>
             {!isDistrictAdmin && (
-              <button className="text-sm text-blue-400 hover:text-blue-300 flex items-center gap-1">
+              <button className="text-sm text-cyan-400 hover:text-cyan-300 flex items-center gap-1">
                 View All <ChevronRight className="w-4 h-4" />
               </button>
             )}
@@ -358,7 +368,7 @@ const DashboardPage = () => {
               <div key={idx} className="bg-slate-900/50 rounded-xl p-4 border border-white/5">
                 <div className="flex justify-between items-center mb-3">
                   <span className="font-bold text-white">{region.name}</span>
-                  <span className="text-xs text-blue-300 font-mono">{region.load}% Load</span>
+                  <span className="text-xs text-cyan-300 font-mono">{region.load}% Load</span>
                 </div>
                 <div className="w-full bg-slate-700 rounded-full h-2 mb-4">
                   <div
@@ -379,7 +389,7 @@ const DashboardPage = () => {
         <div className={`${isDistrictAdmin ? 'lg:col-span-2' : ''} bg-slate-800/50 backdrop-blur-md border border-white/5 rounded-2xl p-6`}>
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-2">
-              <Shield className="w-5 h-5 text-green-400" />
+              <Shield className="w-5 h-5 text-cyan-400" />
               <h2 className="text-lg font-bold text-white">
                 {isDistrictAdmin ? `${userDistrictName} Deployments` : 'Active Deployments'}
               </h2>
@@ -417,7 +427,7 @@ const DashboardPage = () => {
 
           <button
             onClick={() => navigate('/deployments')}
-            className="w-full mt-6 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-medium transition-colors"
+            className="w-full mt-6 bg-cyan-600 hover:bg-cyan-700 text-white py-3 rounded-xl font-medium transition-colors"
           >
             Manage Deployments
           </button>
@@ -429,20 +439,20 @@ const DashboardPage = () => {
         <div className="lg:col-span-2 bg-slate-800/50 backdrop-blur-md border border-white/5 rounded-2xl p-6">
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-2">
-              <Activity className="w-5 h-5 text-blue-400" />
+              <Activity className="w-5 h-5 text-cyan-400" />
               <h2 className="text-lg font-bold text-white">Recent Reports</h2>
-              <span className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-green-500 animate-pulse' : 'bg-gray-500'}`}></span>
+              <span className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-cyan-400 animate-pulse' : 'bg-gray-500'}`}></span>
             </div>
             <div className="flex gap-4">
               <button
                 onClick={() => navigate('/incidents')}
-                className="text-sm text-blue-400 hover:text-blue-300"
+                className="text-sm text-cyan-400 hover:text-cyan-300"
               >
                 Incidents →
               </button>
               <button
                 onClick={() => navigate('/emergency')}
-                className="text-sm text-orange-400 hover:text-orange-300"
+                className="text-sm text-cyan-400 hover:text-cyan-300"
               >
                 Emergencies →
               </button>
@@ -467,13 +477,13 @@ const DashboardPage = () => {
                         <h3 className="font-bold text-white flex items-center gap-2">
                           {report.type}
                           {report.reportType === 'emergency' && (
-                            <span className="text-[10px] bg-red-600 text-white px-2 py-0.5 rounded font-bold">EMERGENCY</span>
+                            <span className="text-[10px] bg-cyan-600 text-white px-2 py-0.5 rounded font-bold">EMERGENCY</span>
                           )}
                           {report.source === 'ai' && (
                             <span className="text-xs bg-cyan-500/20 text-cyan-300 px-2 py-0.5 rounded">🤖 AI</span>
                           )}
                           {report.source === 'mobile_app' && (
-                            <span className="text-xs bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded">📱 Mobile</span>
+                            <span className="text-xs bg-cyan-500/20 text-cyan-300 px-2 py-0.5 rounded">📱 Mobile</span>
                           )}
                         </h3>
                         <p className="text-xs text-gray-400 flex items-center gap-1">
@@ -483,9 +493,9 @@ const DashboardPage = () => {
                     </div>
                     <div className="text-right">
                       <p className="text-xs text-gray-500 mb-1">{report.time}</p>
-                      <span className={`text-xs px-2 py-1 rounded-lg ${report.status === 'resolved' ? 'bg-green-500/20 text-green-400' :
-                        report.status === 'in_progress' || report.status === 'active' ? 'bg-blue-500/20 text-blue-400' :
-                          'bg-red-500/20 text-red-400'
+                      <span className={`text-xs px-2 py-1 rounded-lg ${report.status === 'resolved' ? 'bg-cyan-500/20 text-cyan-400' :
+                        report.status === 'in_progress' || report.status === 'active' ? 'bg-cyan-600/20 text-cyan-300' :
+                          'bg-cyan-700/20 text-cyan-200'
                         }`}>
                         {report.status.replace('_', ' ')}
                       </span>
@@ -497,24 +507,24 @@ const DashboardPage = () => {
           )}
         </div>
 
-        <div className="bg-gradient-to-br from-blue-600 to-cyan-600 rounded-2xl p-6 text-white relative overflow-hidden">
+        <div className="bg-gradient-to-br from-cyan-600 to-cyan-500 rounded-2xl p-6 text-white relative overflow-hidden">
           <div className="relative z-10">
             <h2 className="text-lg font-bold mb-6">System Status</h2>
             <div className="space-y-4">
               <div className="flex justify-between items-center">
-                <span className="text-blue-100">WebSocket</span>
+                <span className="text-cyan-100">WebSocket</span>
                 <span className="font-bold">{wsConnected ? 'Connected' : 'Disconnected'}</span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-blue-100">Database</span>
+                <span className="text-cyan-100">Database</span>
                 <span className="font-bold">Healthy</span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-blue-100">Total Incidents</span>
+                <span className="text-cyan-100">Total Incidents</span>
                 <span className="font-bold">{realTimeStats.totalIncidents}</span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-blue-100">Emergencies</span>
+                <span className="text-cyan-100">Emergencies</span>
                 <span className="font-bold">{emergencies.length}</span>
               </div>
             </div>
@@ -534,15 +544,19 @@ const formatTimeAgo = (timestamp) => {
   if (!timestamp) return 'Just now';
   try {
     const date = new Date(timestamp);
-    const now = new Date();
-    const diff = Math.floor((now - date) / 1000);
+    if (isNaN(date.getTime())) return 'Just now';
+    
+    // Use Date.now() for current time in milliseconds (handles timezone automatically)
+    const now = Date.now();
+    const diff = Math.floor((now - date.getTime()) / 1000);
 
+    if (diff < 0) return 'Just now'; // Future time, show as just now
     if (diff < 60) return 'Just now';
     if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
     if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
     return `${Math.floor(diff / 86400)}d ago`;
   } catch {
-    return 'Recently';
+    return 'Just now';
   }
 };
 

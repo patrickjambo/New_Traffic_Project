@@ -36,6 +36,7 @@ const createEmergency = async (req, res) => {
             contactName,
             contactPhone,
             images,
+            reportedAt,
         } = req.body;
 
         // Map frontend types to backend types
@@ -53,14 +54,17 @@ const createEmergency = async (req, res) => {
         const finalEmergencyType = typeMapping[emergencyType] || (['accident', 'fire', 'medical', 'crime', 'natural_disaster', 'hazard', 'other'].includes(emergencyType) ? emergencyType : 'other');
 
         const userId = req.user ? req.user.id : null;
+        
+        // Use frontend timestamp or current server time
+        const createdAt = reportedAt ? new Date(reportedAt) : new Date();
 
         // Insert emergency into database
         const result = await db.query(
             `INSERT INTO emergencies (
                 user_id, type, emergency_type, severity, location_name, location_description,
                 latitude, longitude, description, casualties_count, vehicles_involved,
-                services_needed, contact_name, contact_phone, images, status, source
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+                services_needed, contact_name, contact_phone, images, status, source, created_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
             RETURNING *`,
             [
                 userId,
@@ -79,7 +83,8 @@ const createEmergency = async (req, res) => {
                 contactPhone,
                 JSON.stringify(images || []),
                 'pending',
-                'manual'
+                'manual',
+                createdAt
             ]
         );
 
@@ -146,8 +151,10 @@ const createEmergency = async (req, res) => {
 
         // 🎯 AUTOMATIC GEO-FENCED ALERT TO NEARBY OFFICERS
         try {
-            // Determine if this is critical/high severity (triggers emergency alarm)
-            const isEmergencyAlert = severity === 'critical' || severity === 'high';
+            // ALL emergencies trigger alerts - every report matters!
+            // Critical/High get emergency alarm (red screen, vibration)
+            // Medium/Low get standard alert notification
+            const isEmergencyAlert = true; // All reports trigger alerts to nearby officers
 
             // Create targeted geo-fenced alert to nearby officers
             const alertResult = await geoFencingService.createTargetedAlert({
@@ -265,16 +272,8 @@ const getEmergencies = async (req, res) => {
             paramIndex++;
         }
 
-        // Order by severity and creation time
-        query += ` ORDER BY 
-            CASE e.severity 
-                WHEN 'critical' THEN 1 
-                WHEN 'high' THEN 2 
-                WHEN 'medium' THEN 3 
-                WHEN 'low' THEN 4 
-            END,
-            e.created_at DESC
-        `;
+        // Order by creation time (newest first) - all emergencies are important
+        query += ` ORDER BY e.created_at DESC`;
 
         // Add pagination
         query += ` LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;

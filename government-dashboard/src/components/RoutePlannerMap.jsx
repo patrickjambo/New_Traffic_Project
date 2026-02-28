@@ -6,6 +6,37 @@ import { MapPin, Navigation, AlertTriangle, Clock, Route, ChevronRight, Loader2,
 import { searchKigaliLocation, getLocationCoordinates, kigaliLocations } from '../data/kigaliLocations';
 import toast from 'react-hot-toast';
 
+// CSS styles for custom markers - ensure popups work on click
+const markerStyles = `
+    .custom-incident-marker {
+        background: transparent !important;
+        border: none !important;
+    }
+    .custom-incident-marker div {
+        pointer-events: auto !important;
+        cursor: pointer !important;
+    }
+    .user-location-marker {
+        background: transparent !important;
+        border: none !important;
+    }
+    @keyframes pulse-ring {
+        0% { transform: scale(0.8); opacity: 1; }
+        100% { transform: scale(2); opacity: 0; }
+    }
+`;
+
+// Inject styles into document head
+if (typeof document !== 'undefined') {
+    const styleId = 'route-planner-styles';
+    if (!document.getElementById(styleId)) {
+        const styleElement = document.createElement('style');
+        styleElement.id = styleId;
+        styleElement.textContent = markerStyles;
+        document.head.appendChild(styleElement);
+    }
+}
+
 // Fix for default marker icons
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -33,20 +64,78 @@ const endIcon = new L.Icon({
     shadowSize: [41, 41]
 });
 
-// Custom icon for incidents - creates different icons based on incident type
+// Custom icon for user's current location during navigation
+const createUserLocationIcon = () => {
+    return L.divIcon({
+        className: 'user-location-marker',
+        html: `
+            <div style="
+                position: relative;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            ">
+                <div style="
+                    position: absolute;
+                    width: 48px;
+                    height: 48px;
+                    background: rgba(59, 130, 246, 0.2);
+                    border-radius: 50%;
+                    animation: pulse-ring 1.5s ease-out infinite;
+                "></div>
+                <div style="
+                    width: 24px;
+                    height: 24px;
+                    background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+                    border: 4px solid white;
+                    border-radius: 50%;
+                    box-shadow: 0 2px 10px rgba(59, 130, 246, 0.5);
+                    z-index: 10;
+                "></div>
+                <div style="
+                    position: absolute;
+                    width: 0;
+                    height: 0;
+                    border-left: 8px solid transparent;
+                    border-right: 8px solid transparent;
+                    border-bottom: 12px solid #3b82f6;
+                    top: -18px;
+                    transform: rotate(0deg);
+                    filter: drop-shadow(0 2px 2px rgba(0,0,0,0.3));
+                "></div>
+            </div>
+        `,
+        iconSize: [48, 48],
+        iconAnchor: [24, 24],
+    });
+};
+
+// Custom icon for incidents - uses consistent cyan color scheme
 const createIncidentIcon = (type = 'unknown', severity = 'medium') => {
-    const iconConfig = {
-        accident: { emoji: '🚗💥', color: '#dc2626', label: 'Accident' },
-        congestion: { emoji: '🚦', color: '#f59e0b', label: 'Traffic Jam' },
-        road_blockage: { emoji: '🚧', color: '#ef4444', label: 'Road Blocked' },
-        construction: { emoji: '🏗️', color: '#f97316', label: 'Construction' },
-        police_activity: { emoji: '👮', color: '#3b82f6', label: 'Police Activity' },
-        weather: { emoji: '🌧️', color: '#6366f1', label: 'Weather Issue' },
-        hazard: { emoji: '⚠️', color: '#eab308', label: 'Road Hazard' },
-        unknown: { emoji: '⚡', color: '#6b7280', label: 'Incident' }
+    // Emoji mapping for incident types
+    const emojiMap = {
+        // Emergency types from public reporting
+        accident: '🚗',
+        fire: '🔥',
+        traffic_jam: '🚦',
+        damaged_road: '🛣️',
+        tree_fall: '🌳',
+        // AI/system detected types
+        congestion: '🚦',
+        road_blockage: '🚧',
+        construction: '🏗️',
+        police_activity: '👮',
+        weather: '🌧️',
+        hazard: '⚠️',
+        medical: '🚑',
+        crime: '🚨',
+        unknown: '⚡'
     };
 
-    const config = iconConfig[type?.toLowerCase()] || iconConfig.unknown;
+    const emoji = emojiMap[type?.toLowerCase()] || emojiMap.unknown;
+    
+    // Use consistent cyan color for all incidents
+    const color = '#06b6d4'; // cyan-500
     const severitySize = severity === 'critical' ? 36 : severity === 'high' ? 32 : 28;
 
     return L.divIcon({
@@ -58,14 +147,14 @@ const createIncidentIcon = (type = 'unknown', severity = 'medium') => {
                 justify-content: center;
                 width: ${severitySize}px;
                 height: ${severitySize}px;
-                background: ${config.color};
+                background: ${color};
                 border: 3px solid white;
                 border-radius: 50%;
-                box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+                box-shadow: 0 2px 8px rgba(6, 182, 212, 0.4);
                 font-size: ${severitySize * 0.5}px;
                 cursor: pointer;
             ">
-                <span style="filter: drop-shadow(0 1px 1px rgba(0,0,0,0.3));">${config.emoji.split(' ')[0]}</span>
+                <span style="filter: drop-shadow(0 1px 1px rgba(0,0,0,0.3));">${emoji}</span>
             </div>
         `,
         iconSize: [severitySize, severitySize],
@@ -76,13 +165,17 @@ const createIncidentIcon = (type = 'unknown', severity = 'medium') => {
 
 // Incident type configuration for legend
 const INCIDENT_TYPES = {
+    // Main emergency types (from public reporting)
     accident: { emoji: '🚗💥', color: '#dc2626', label: 'Accident', description: 'Vehicle collision or crash' },
-    congestion: { emoji: '🚦', color: '#f59e0b', label: 'Traffic Jam', description: 'Heavy traffic, slow movement' },
-    road_blockage: { emoji: '🚧', color: '#ef4444', label: 'Road Blocked', description: 'Road completely blocked' },
-    construction: { emoji: '🏗️', color: '#f97316', label: 'Construction', description: 'Road work in progress' },
-    police_activity: { emoji: '👮', color: '#3b82f6', label: 'Police Activity', description: 'Police checkpoint or activity' },
-    weather: { emoji: '🌧️', color: '#6366f1', label: 'Weather Issue', description: 'Flooding, fog, or storm' },
-    hazard: { emoji: '⚠️', color: '#eab308', label: 'Road Hazard', description: 'Debris, potholes, or danger' }
+    fire: { emoji: '🔥', color: '#f97316', label: 'Fire', description: 'Fire emergency reported' },
+    traffic_jam: { emoji: '🚦', color: '#f59e0b', label: 'Traffic Jam', description: 'Heavy traffic, slow movement' },
+    damaged_road: { emoji: '�️', color: '#eab308', label: 'Damaged Road', description: 'Potholes or road damage' },
+    tree_fall: { emoji: '🌳', color: '#22c55e', label: 'Tree Fall', description: 'Fallen tree blocking road' },
+    // AI/system types
+    congestion: { emoji: '🚦', color: '#f59e0b', label: 'Congestion', description: 'AI detected traffic buildup' },
+    road_blockage: { emoji: '�', color: '#ef4444', label: 'Road Blocked', description: 'Road completely blocked' },
+    construction: { emoji: '�️', color: '#f97316', label: 'Construction', description: 'Road work in progress' },
+    hazard: { emoji: '⚠️', color: '#eab308', label: 'Road Hazard', description: 'Debris or danger on road' }
 };
 
 // Route color configurations
@@ -105,77 +198,6 @@ const getRouteBaseColor = (index) => {
         '#8b5cf6', // Violet - alternative 5
     ];
     return colors[index % colors.length];
-};
-
-// Create a floating label icon for routes (like Google Maps)
-const createRouteLabelIcon = (duration, distance, color, isSelected, hasIncidents, incidentCount) => {
-    const formattedDuration = duration < 60 ? '<1 min' :
-        duration < 3600 ? `${Math.round(duration / 60)} min` :
-            `${Math.floor(duration / 3600)}h ${Math.round((duration % 3600) / 60)}m`;
-    const formattedDistance = distance < 1000 ? `${Math.round(distance)} m` : `${(distance / 1000).toFixed(1)} km`;
-
-    const selectedStyles = isSelected ? `
-        transform: scale(1.1);
-        box-shadow: 0 4px 12px rgba(0,0,0,0.3), 0 0 0 3px ${color}40;
-        z-index: 1000;
-    ` : `
-        box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-    `;
-
-    const incidentBadge = hasIncidents ? `
-        <div style="
-            position: absolute;
-            top: -8px;
-            right: -8px;
-            background: #ef4444;
-            color: white;
-            font-size: 10px;
-            font-weight: bold;
-            width: 18px;
-            height: 18px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            border: 2px solid white;
-        ">⚠</div>
-    ` : '';
-
-    return L.divIcon({
-        className: 'route-label-marker',
-        html: `
-            <div style="
-                position: relative;
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                background: white;
-                border-left: 4px solid ${color};
-                border-radius: 8px;
-                padding: 6px 10px;
-                cursor: pointer;
-                white-space: nowrap;
-                font-family: system-ui, -apple-system, sans-serif;
-                ${selectedStyles}
-                transition: all 0.2s ease;
-            ">
-                ${incidentBadge}
-                <div style="
-                    font-size: 14px;
-                    font-weight: 700;
-                    color: ${color};
-                    line-height: 1.2;
-                ">${formattedDuration}</div>
-                <div style="
-                    font-size: 11px;
-                    color: #6b7280;
-                    line-height: 1.2;
-                ">${formattedDistance}</div>
-            </div>
-        `,
-        iconSize: [80, 50],
-        iconAnchor: [40, 25],
-    });
 };
 
 // Decode OSRM polyline (polyline5 format)
@@ -274,6 +296,20 @@ const FitBounds = ({ bounds }) => {
     return null;
 };
 
+// Component to follow user location during navigation
+const FollowUserLocation = ({ userLocation, isNavigating }) => {
+    const map = useMap();
+    useEffect(() => {
+        if (isNavigating && userLocation) {
+            map.setView([userLocation.lat, userLocation.lng], map.getZoom(), {
+                animate: true,
+                duration: 0.5
+            });
+        }
+    }, [userLocation, isNavigating, map]);
+    return null;
+};
+
 // Format duration in minutes/hours
 const formatDuration = (seconds) => {
     if (seconds < 60) return '< 1 min';
@@ -290,8 +326,40 @@ const formatDistance = (meters) => {
 };
 
 const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
-    // Ensure incidents is always an array
-    const incidents = Array.isArray(rawIncidents) ? rawIncidents : [];
+    // 4 hours in milliseconds for auto-expiry
+    const INCIDENT_EXPIRY_MS = 4 * 60 * 60 * 1000; // 4 hours
+    
+    // Ensure incidents is always an array and filter only ACTIVE incidents (not resolved)
+    // Also auto-expire incidents older than 4 hours
+    const incidents = React.useMemo(() => {
+        const rawArray = Array.isArray(rawIncidents) ? rawIncidents : [];
+        const now = Date.now();
+        
+        return rawArray.filter(inc => {
+            // Only show active incidents (pending, active, in_progress, responding)
+            const status = (inc.status || 'pending').toLowerCase();
+            const isActive = !['resolved', 'closed', 'completed', 'cancelled'].includes(status);
+            
+            // Must have valid coordinates
+            const hasCoords = inc.latitude && inc.longitude;
+            
+            // Auto-expire incidents older than 4 hours
+            const createdAt = inc.created_at || inc.createdAt;
+            let isNotExpired = true;
+            if (createdAt) {
+                const incidentTime = new Date(createdAt).getTime();
+                const age = now - incidentTime;
+                isNotExpired = age < INCIDENT_EXPIRY_MS;
+            }
+            
+            return isActive && hasCoords && isNotExpired;
+        }).map(inc => ({
+            ...inc,
+            // Normalize the incident type
+            incident_type: inc.incident_type || inc.emergency_type || inc.type || 'unknown',
+            location: inc.location || inc.location_name || inc.address || 'Unknown location',
+        }));
+    }, [rawIncidents]);
 
     const [start, setStart] = useState('');
     const [destination, setDestination] = useState('');
@@ -306,8 +374,69 @@ const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
     const [routes, setRoutes] = useState([]);
     const [selectedRouteIndex, setSelectedRouteIndex] = useState(0);
     const [mapBounds, setMapBounds] = useState(null);
+    const [lastIncidentCount, setLastIncidentCount] = useState(0);
+    const [expandedIncidents, setExpandedIncidents] = useState({}); // Track which routes have expanded incident lists
+    
+    // Navigation state
+    const [isNavigating, setIsNavigating] = useState(false);
+    const [userLocation, setUserLocation] = useState(null);
+    const [watchId, setWatchId] = useState(null);
+    const [remainingDistance, setRemainingDistance] = useState(null);
+    const [remainingTime, setRemainingTime] = useState(null);
+    const [navigationError, setNavigationError] = useState(null);
 
     const kigaliCenter = [-1.9536, 30.0606];
+
+    // Toggle incident list expansion for a route
+    const toggleIncidentList = (routeIndex, e) => {
+        e.stopPropagation(); // Prevent selecting the route when clicking expand
+        setExpandedIncidents(prev => ({
+            ...prev,
+            [routeIndex]: !prev[routeIndex]
+        }));
+    };
+
+    // Force re-render every minute to check for expired incidents
+    const [refreshTrigger, setRefreshTrigger] = useState(0);
+    useEffect(() => {
+        const interval = setInterval(() => {
+            setRefreshTrigger(prev => prev + 1);
+        }, 60000); // Check every minute
+        return () => clearInterval(interval);
+    }, []);
+
+    // Real-time incident monitoring - update route incidents when data changes
+    // This effect runs whenever incidents array changes (new emergency reported or resolved)
+    useEffect(() => {
+        // Log current incident count for debugging
+        console.log(`📍 Route Planner: ${incidents.length} active incidents on map`);
+        
+        if (routes.length > 0) {
+            // Re-analyze routes with current active incidents
+            const updatedRoutes = routes.map(route => {
+                const incidentsOnRoute = incidents.filter(inc =>
+                    isIncidentNearRoute(inc, route.points)
+                );
+                return {
+                    ...route,
+                    incidents: incidentsOnRoute,
+                    hasIncidents: incidentsOnRoute.length > 0,
+                };
+            });
+            
+            // Re-sort routes (fewest incidents first, then fastest)
+            updatedRoutes.sort((a, b) => {
+                if (a.incidents.length !== b.incidents.length) {
+                    return a.incidents.length - b.incidents.length;
+                }
+                return a.duration - b.duration;
+            });
+            
+            setRoutes(updatedRoutes);
+        }
+        
+        setLastIncidentCount(incidents.length);
+    }, [incidents, refreshTrigger]); // Triggered when incidents change or by periodic refresh
 
     // Handle location search
     const handleStartChange = (value) => {
@@ -376,7 +505,7 @@ const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
         );
     };
 
-    // Fetch routes from OSRM API
+    // Fetch routes from OSRM API - FAST version with alternatives
     const findRoutes = async () => {
         // Validate inputs
         let startPoint = startCoords;
@@ -398,81 +527,62 @@ const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
         setRoutes([]);
 
         try {
-            // OSRM public API with explicit alternatives request
-            // Use alternatives=3 to request up to 3 alternative routes
-            const url = `https://router.project-osrm.org/route/v1/driving/${startPoint.lng},${startPoint.lat};${endPoint.lng},${endPoint.lat}?overview=full&alternatives=3&steps=true&geometries=polyline&annotations=true`;
+            // Calculate waypoints for alternative routes (in parallel)
+            const midLat = (startPoint.lat + endPoint.lat) / 2;
+            const midLng = (startPoint.lng + endPoint.lng) / 2;
+            const dLat = endPoint.lat - startPoint.lat;
+            const dLng = endPoint.lng - startPoint.lng;
 
-            console.log('Fetching routes from OSRM:', url);
-            const response = await fetch(url);
-            const data = await response.json();
+            // Create waypoint offsets for alternative routes
+            const waypoints = [
+                null, // Direct route (no waypoint)
+                { lat: midLat + dLng * 0.015, lng: midLng - dLat * 0.015 }, // Side A
+                { lat: midLat - dLng * 0.015, lng: midLng + dLat * 0.015 }, // Side B
+            ];
 
-            console.log('OSRM Response:', data);
+            // Fetch all routes in parallel (much faster!)
+            const routePromises = waypoints.map((wp, idx) => {
+                let url;
+                if (wp === null) {
+                    // Direct route with alternatives
+                    url = `https://router.project-osrm.org/route/v1/driving/${startPoint.lng},${startPoint.lat};${endPoint.lng},${endPoint.lat}?overview=full&alternatives=true&steps=false&geometries=polyline`;
+                } else {
+                    // Route via waypoint
+                    url = `https://router.project-osrm.org/route/v1/driving/${startPoint.lng},${startPoint.lat};${wp.lng},${wp.lat};${endPoint.lng},${endPoint.lat}?overview=full&steps=false&geometries=polyline`;
+                }
+                
+                return fetch(url, { signal: AbortSignal.timeout(8000) })
+                    .then(res => res.json())
+                    .catch(() => null);
+            });
 
-            if (data.code !== 'Ok' || !data.routes || data.routes.length === 0) {
+            const results = await Promise.all(routePromises);
+            
+            // Collect all unique routes
+            const allRoutes = [];
+            const routeSignatures = new Set();
+
+            results.forEach((data) => {
+                if (data?.code === 'Ok' && data.routes) {
+                    data.routes.forEach(route => {
+                        // Create a signature to avoid duplicates
+                        const sig = `${Math.round(route.distance / 100)}-${Math.round(route.duration / 30)}`;
+                        if (!routeSignatures.has(sig)) {
+                            routeSignatures.add(sig);
+                            allRoutes.push(route);
+                        }
+                    });
+                }
+            });
+
+            if (allRoutes.length === 0) {
                 toast.error('Could not find routes between these locations');
                 setLoadingRoutes(false);
                 return;
             }
 
-            let allRoutes = [...data.routes];
-
-            // Always attempt to find more alternatives via waypoints if we have fewer than 4 routes
-            if (allRoutes.length < 4) {
-                console.log(`Found ${allRoutes.length} routes, attempting to find more alternatives via waypoints...`);
-
-                // Calculate midpoint and direction
-                const midLat = (startPoint.lat + endPoint.lat) / 2;
-                const midLng = (startPoint.lng + endPoint.lng) / 2;
-                const dLat = endPoint.lat - startPoint.lat;
-                const dLng = endPoint.lng - startPoint.lng;
-
-                // Multiple offsets for diversity (1km and 2.5km approximately)
-                const offsets = [0.01, 0.025];
-
-                const waypoints = [];
-                offsets.forEach(scale => {
-                    waypoints.push({ lat: midLat + dLng * scale, lng: midLng - dLat * scale }); // Perpendicular side A
-                    waypoints.push({ lat: midLat - dLng * scale, lng: midLng + dLat * scale }); // Perpendicular side B
-                });
-
-                // Fetch routes via each waypoint
-                for (let i = 0; i < waypoints.length; i++) {
-                    if (allRoutes.length >= 5) break; // Limit to 5 total routes to avoid clutter
-
-                    try {
-                        const wp = waypoints[i];
-                        const altUrl = `https://router.project-osrm.org/route/v1/driving/${startPoint.lng},${startPoint.lat};${wp.lng},${wp.lat};${endPoint.lng},${endPoint.lat}?overview=full&steps=true&geometries=polyline`;
-
-                        const altResponse = await fetch(altUrl);
-                        const altData = await altResponse.json();
-
-                        if (altData.code === 'Ok' && altData.routes && altData.routes.length > 0) {
-                            const altRoute = altData.routes[0];
-
-                            // Check if this route is significantly different
-                            // 1. Distance difference > 5%
-                            // 2. Duration difference > 5%
-                            const isDifferent = allRoutes.every(r => {
-                                const distDiff = Math.abs(r.distance - altRoute.distance) / r.distance;
-                                const durDiff = Math.abs(r.duration - altRoute.duration) / r.duration;
-                                return distDiff > 0.05 || durDiff > 0.05;
-                            });
-
-                            if (isDifferent) {
-                                allRoutes.push(altRoute);
-                                console.log(`Added diverse alternative route via waypoint ${i + 1}`);
-                            }
-                        }
-                    } catch (err) {
-                        console.warn('Failed to fetch alternative route via waypoint:', err);
-                    }
-                }
-            }
-
-            console.log(`Total diverse routes found: ${allRoutes.length}`);
-
             // Process routes
-            const processedRoutes = allRoutes.map((route, index) => {
+            const processedRoutes = allRoutes.slice(0, 4).map((route, index) => {
                 const points = decodePolyline(route.geometry);
 
                 // Find incidents along this route
@@ -509,18 +619,16 @@ const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
             }
 
             // Show toast with results
+            const bestRoute = processedRoutes[0];
             if (processedRoutes.length > 1) {
-                toast.success(`Found ${processedRoutes.length} diverse routes! Compare and choose the best one.`);
+                toast.success(`Found ${processedRoutes.length} routes!`, { duration: 2000 });
+            } else if (bestRoute?.hasIncidents) {
+                toast(`⚠️ Route has ${bestRoute.incidents.length} incident(s)`, {
+                    icon: '🚧',
+                    duration: 3000
+                });
             } else {
-                const bestRoute = processedRoutes[0];
-                if (bestRoute?.hasIncidents) {
-                    toast(`⚠️ Found 1 route with ${bestRoute.incidents.length} incident(s).`, {
-                        icon: '🚧',
-                        duration: 4000
-                    });
-                } else {
-                    toast.success(`Found 1 route. Route is clear!`);
-                }
+                toast.success('Route found!', { duration: 2000 });
             }
 
         } catch (error) {
@@ -541,15 +649,9 @@ const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
         };
     };
 
-    // Get the midpoint of a route for placing the label
-    const getRouteMidpoint = (points) => {
-        if (!points || points.length === 0) return null;
-        const midIndex = Math.floor(points.length / 2);
-        return points[midIndex];
-    };
-
     // Clear the route planner
     const clearRoutes = () => {
+        stopNavigation();
         setStart('');
         setDestination('');
         setStartCoords(null);
@@ -559,18 +661,177 @@ const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
         setMapBounds(null);
     };
 
+    // Calculate distance between two points (Haversine formula)
+    const calculateDistance = (lat1, lon1, lat2, lon2) => {
+        const R = 6371e3; // Earth's radius in meters
+        const φ1 = lat1 * Math.PI / 180;
+        const φ2 = lat2 * Math.PI / 180;
+        const Δφ = (lat2 - lat1) * Math.PI / 180;
+        const Δλ = (lon2 - lon1) * Math.PI / 180;
+
+        const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+            Math.cos(φ1) * Math.cos(φ2) *
+            Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+        return R * c; // Distance in meters
+    };
+
+    // Find closest point on route to user's current position
+    const findClosestPointOnRoute = (userLat, userLng, routePoints) => {
+        let minDistance = Infinity;
+        let closestIndex = 0;
+
+        routePoints.forEach((point, index) => {
+            const distance = calculateDistance(userLat, userLng, point[0], point[1]);
+            if (distance < minDistance) {
+                minDistance = distance;
+                closestIndex = index;
+            }
+        });
+
+        return { closestIndex, minDistance };
+    };
+
+    // Calculate remaining distance and time from current position
+    const calculateRemainingRoute = (userLat, userLng) => {
+        const selectedRoute = routes[selectedRouteIndex];
+        if (!selectedRoute) return;
+
+        const { closestIndex } = findClosestPointOnRoute(userLat, userLng, selectedRoute.points);
+        
+        // Calculate remaining distance from closest point to destination
+        let remainingDist = 0;
+        for (let i = closestIndex; i < selectedRoute.points.length - 1; i++) {
+            remainingDist += calculateDistance(
+                selectedRoute.points[i][0], selectedRoute.points[i][1],
+                selectedRoute.points[i + 1][0], selectedRoute.points[i + 1][1]
+            );
+        }
+
+        // Estimate remaining time (using average speed from original route)
+        const avgSpeed = selectedRoute.distance / selectedRoute.duration; // meters per second
+        const remainingTimeSeconds = remainingDist / avgSpeed;
+
+        setRemainingDistance(remainingDist);
+        setRemainingTime(remainingTimeSeconds);
+
+        // Check if arrived (within 50 meters of destination)
+        if (destCoords) {
+            const distToDestination = calculateDistance(userLat, userLng, destCoords.lat, destCoords.lng);
+            if (distToDestination < 50) {
+                toast.success('🎉 You have arrived at your destination!', { duration: 5000 });
+                stopNavigation();
+            }
+        }
+    };
+
+    // Start navigation
+    const startNavigation = () => {
+        if (!routes.length) {
+            toast.error('Please find a route first');
+            return;
+        }
+
+        if (!navigator.geolocation) {
+            toast.error('Geolocation is not supported by your browser');
+            return;
+        }
+
+        setIsNavigating(true);
+        setNavigationError(null);
+        toast.success('🧭 Navigation started! Follow the route.', { duration: 3000 });
+
+        // Start watching position
+        const id = navigator.geolocation.watchPosition(
+            (position) => {
+                const { latitude, longitude, accuracy } = position.coords;
+                setUserLocation({ lat: latitude, lng: longitude, accuracy });
+                calculateRemainingRoute(latitude, longitude);
+                setNavigationError(null);
+            },
+            (error) => {
+                console.error('Geolocation error:', error);
+                setNavigationError(error.message);
+                if (error.code === error.PERMISSION_DENIED) {
+                    toast.error('Location permission denied. Please enable location access.');
+                    stopNavigation();
+                }
+            },
+            {
+                enableHighAccuracy: true,
+                maximumAge: 5000,
+                timeout: 10000
+            }
+        );
+
+        setWatchId(id);
+    };
+
+    // Stop navigation
+    const stopNavigation = () => {
+        if (watchId !== null) {
+            navigator.geolocation.clearWatch(watchId);
+            setWatchId(null);
+        }
+        setIsNavigating(false);
+        setUserLocation(null);
+        setRemainingDistance(null);
+        setRemainingTime(null);
+        setNavigationError(null);
+    };
+
+    // Cleanup on unmount
+    useEffect(() => {
+        return () => {
+            if (watchId !== null) {
+                navigator.geolocation.clearWatch(watchId);
+            }
+        };
+    }, [watchId]);
+
     return (
         <div className="bg-slate-800 rounded-xl shadow-lg overflow-hidden border border-cyan-400/20">
             {/* Header - Secondary cyan color matching navigation */}
             <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 px-6 py-4 relative overflow-hidden">
                 <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-cyan-400 to-transparent opacity-60" />
-                <h2 className="text-xl font-bold text-cyan-50 flex items-center relative z-10">
-                    <Navigation className="w-6 h-6 mr-2 text-cyan-400" />
-                    Route Planner
-                </h2>
-                <p className="text-cyan-300/70 text-sm mt-1 relative z-10">
-                    Find the safest route with real-time incident alerts
-                </p>
+                <div className="flex items-center justify-between relative z-10">
+                    <div>
+                        <h2 className="text-xl font-bold text-cyan-50 flex items-center">
+                            <Navigation className="w-6 h-6 mr-2 text-cyan-400" />
+                            Route Planner
+                        </h2>
+                        <p className="text-cyan-300/70 text-sm mt-1 flex items-center gap-2">
+                            Real-time incident alerts • Auto-updates
+                            <span className="relative flex h-2 w-2">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                            </span>
+                            <span className="text-emerald-400 text-xs">LIVE</span>
+                        </p>
+                    </div>
+                    {/* Real-time incident badge */}
+                    <div className="flex items-center gap-3">
+                        {incidents.length > 0 ? (
+                            <div className="flex items-center gap-2 px-3 py-2 bg-cyan-500/20 border border-cyan-500/30 rounded-lg">
+                                <span className="relative flex h-2 w-2">
+                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500"></span>
+                                </span>
+                                <span className="text-cyan-400 text-sm font-semibold">
+                                    {incidents.length} Active
+                                </span>
+                            </div>
+                        ) : (
+                            <div className="flex items-center gap-2 px-3 py-2 bg-emerald-500/20 border border-emerald-500/30 rounded-lg">
+                                <Check className="w-4 h-4 text-emerald-400" />
+                                <span className="text-emerald-400 text-sm font-semibold">
+                                    All Clear
+                                </span>
+                            </div>
+                        )}
+                    </div>
+                </div>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-0">
@@ -672,7 +933,25 @@ const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
                                     </>
                                 )}
                             </button>
-                            {routes.length > 0 && (
+                            {routes.length > 0 && !isNavigating && (
+                                <button
+                                    onClick={startNavigation}
+                                    className="px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-500 transition-colors font-semibold flex items-center"
+                                    title="Start Navigation"
+                                >
+                                    <Navigation className="w-5 h-5" />
+                                </button>
+                            )}
+                            {isNavigating && (
+                                <button
+                                    onClick={stopNavigation}
+                                    className="px-4 py-3 bg-red-600 text-white rounded-lg hover:bg-red-500 transition-colors font-semibold flex items-center"
+                                    title="Stop Navigation"
+                                >
+                                    <X className="w-5 h-5" />
+                                </button>
+                            )}
+                            {routes.length > 0 && !isNavigating && (
                                 <button
                                     onClick={clearRoutes}
                                     className="px-4 py-3 bg-slate-700 text-slate-300 rounded-lg hover:bg-slate-600 border border-cyan-400/20 transition-colors"
@@ -681,6 +960,47 @@ const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
                                 </button>
                             )}
                         </div>
+
+                        {/* Navigation Status Panel */}
+                        {isNavigating && (
+                            <div className="mt-4 p-4 bg-gradient-to-r from-green-900/50 to-emerald-900/50 border border-green-500/30 rounded-xl">
+                                <div className="flex items-center gap-2 mb-3">
+                                    <div className="relative">
+                                        <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
+                                        <div className="absolute inset-0 w-3 h-3 bg-green-500 rounded-full animate-ping"></div>
+                                    </div>
+                                    <span className="text-green-400 font-semibold">Navigation Active</span>
+                                </div>
+                                
+                                {userLocation ? (
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div className="bg-slate-800/50 p-3 rounded-lg text-center">
+                                            <p className="text-2xl font-bold text-white">
+                                                {remainingDistance ? formatDistance(remainingDistance) : '--'}
+                                            </p>
+                                            <p className="text-xs text-slate-400">Remaining</p>
+                                        </div>
+                                        <div className="bg-slate-800/50 p-3 rounded-lg text-center">
+                                            <p className="text-2xl font-bold text-white">
+                                                {remainingTime ? formatDuration(remainingTime) : '--'}
+                                            </p>
+                                            <p className="text-xs text-slate-400">Est. Time</p>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="flex items-center gap-2 text-yellow-400">
+                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                        <span className="text-sm">Acquiring GPS signal...</span>
+                                    </div>
+                                )}
+                                
+                                {navigationError && (
+                                    <div className="mt-2 p-2 bg-red-900/30 border border-red-500/30 rounded text-red-400 text-xs">
+                                        ⚠️ {navigationError}
+                                    </div>
+                                )}
+                            </div>
+                        )}
                     </div>
 
                     {/* Route Options - Scrollable Area */}
@@ -747,16 +1067,59 @@ const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
                                                 </div>
                                             )}
 
-                                            {/* Incident status badge */}
+                                            {/* Incident status badge - collapsible */}
                                             {route.hasIncidents ? (
-                                                <div className="flex items-center gap-1 text-xs text-orange-300 bg-orange-500/20 px-2 py-1.5 rounded-md border border-orange-500/30">
-                                                    <AlertTriangle className="w-3.5 h-3.5" />
-                                                    <span className="font-medium">
-                                                        {route.incidents.length} incident{route.incidents.length > 1 ? 's' : ''} on this route
-                                                    </span>
+                                                <div className="mt-2">
+                                                    <button
+                                                        onClick={(e) => toggleIncidentList(index, e)}
+                                                        className={`w-full flex items-center justify-between gap-1 text-xs text-cyan-300 bg-cyan-500/20 px-2 py-1.5 border border-cyan-500/30 hover:bg-cyan-500/30 transition-colors ${
+                                                            expandedIncidents[index] ? 'rounded-t-md border-b-0' : 'rounded-md'
+                                                        }`}
+                                                    >
+                                                        <div className="flex items-center gap-1">
+                                                            <AlertTriangle className="w-3.5 h-3.5" />
+                                                            <span className="font-medium">
+                                                                {route.incidents.length} incident{route.incidents.length > 1 ? 's' : ''} on this route
+                                                            </span>
+                                                        </div>
+                                                        <ChevronRight className={`w-4 h-4 transition-transform ${expandedIncidents[index] ? 'rotate-90' : ''}`} />
+                                                    </button>
+                                                    {/* Expandable list of incident types */}
+                                                    {expandedIncidents[index] && (
+                                                        <div className="bg-slate-800/50 rounded-b-md border border-cyan-500/30 border-t-0 p-2 space-y-1 max-h-40 overflow-y-auto">
+                                                            {route.incidents.slice(0, 10).map((inc, idx) => {
+                                                                const incType = (inc.incident_type || inc.type || 'unknown').toLowerCase();
+                                                                const typeConfig = INCIDENT_TYPES[incType] || INCIDENT_TYPES.hazard || { emoji: '⚠️', label: 'Incident', color: '#06b6d4' };
+                                                                return (
+                                                                    <div 
+                                                                        key={`inc-${inc.id || idx}`}
+                                                                        className="flex items-center gap-2 text-xs p-1.5 rounded bg-slate-700/50 hover:bg-slate-700 cursor-pointer transition-colors"
+                                                                        title={inc.description || inc.location || 'Click to see on map'}
+                                                                    >
+                                                                        <span 
+                                                                            className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] bg-cyan-500"
+                                                                        >
+                                                                            {typeConfig.emoji?.split(' ')[0] || '⚠️'}
+                                                                        </span>
+                                                                        <span className="text-slate-300 font-medium flex-1 truncate">
+                                                                            {typeConfig.label}
+                                                                        </span>
+                                                                        <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-cyan-500/30 text-cyan-300">
+                                                                            {(inc.severity || 'medium').toUpperCase()}
+                                                                        </span>
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                            {route.incidents.length > 10 && (
+                                                                <div className="text-center text-xs text-slate-400 py-1">
+                                                                    +{route.incidents.length - 10} more incidents
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    )}
                                                 </div>
                                             ) : (
-                                                <div className="flex items-center gap-1 text-xs text-green-300 bg-green-500/20 px-2 py-1.5 rounded-md border border-green-500/30">
+                                                <div className="flex items-center gap-1 text-xs text-green-300 bg-green-500/20 px-2 py-1.5 rounded-md border border-green-500/30 mt-2">
                                                     <Check className="w-3.5 h-3.5" />
                                                     <span className="font-medium">Route is clear</span>
                                                 </div>
@@ -785,12 +1148,10 @@ const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
                         {/* Fit map to route bounds */}
                         {mapBounds && <FitBounds bounds={mapBounds} />}
 
-                        {/* Draw ALL routes simultaneously with labels - like Google Maps */}
+                        {/* Draw ALL routes simultaneously - like Google Maps */}
                         {routes.map((route, index) => {
                             const isSelected = index === selectedRouteIndex;
-                            const baseColor = getRouteBaseColor(index);
                             const style = getRouteStyle(index, isSelected);
-                            const midpoint = getRouteMidpoint(route.points);
 
                             return (
                                 <React.Fragment key={`route-group-${index}`}>
@@ -816,66 +1177,38 @@ const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
                                             click: () => setSelectedRouteIndex(index),
                                         }}
                                     />
-
-                                    {/* Route duration/distance label at midpoint */}
-                                    {midpoint && (
-                                        <Marker
-                                            position={midpoint}
-                                            icon={createRouteLabelIcon(
-                                                route.duration,
-                                                route.distance,
-                                                baseColor,
-                                                isSelected,
-                                                route.hasIncidents,
-                                                route.incidents.length
-                                            )}
-                                            eventHandlers={{
-                                                click: () => setSelectedRouteIndex(index),
-                                            }}
-                                            zIndexOffset={isSelected ? 1000 : 0}
-                                        >
-                                            <Popup>
-                                                <div className="p-2 min-w-[180px]">
-                                                    <div className="flex items-center gap-2 mb-2">
-                                                        <div
-                                                            className="w-4 h-4 rounded-full"
-                                                            style={{ backgroundColor: baseColor }}
-                                                        />
-                                                        <span className="font-bold text-gray-800">
-                                                            {index === 0 ? '🥇 Recommended' : index === 1 ? '🥈 Alternative 1' : '🥉 Alternative 2'}
-                                                        </span>
-                                                    </div>
-                                                    <div className="text-sm text-gray-600 space-y-1">
-                                                        <div>⏱️ {formatDuration(route.duration)}</div>
-                                                        <div>📏 {formatDistance(route.distance)}</div>
-                                                        {route.hasIncidents ? (
-                                                            <div className="text-orange-600 font-medium">
-                                                                ⚠️ {route.incidents.length} incident(s)
-                                                            </div>
-                                                        ) : (
-                                                            <div className="text-green-600 font-medium">
-                                                                ✅ Route is clear
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                    {!isSelected && (
-                                                        <button
-                                                            className="mt-2 w-full py-1.5 bg-blue-600 text-white text-sm rounded font-medium hover:bg-blue-700"
-                                                            onClick={() => setSelectedRouteIndex(index)}
-                                                        >
-                                                            Select This Route
-                                                        </button>
-                                                    )}
-                                                </div>
-                                            </Popup>
-                                        </Marker>
-                                    )}
                                 </React.Fragment>
                             );
                         })}
 
+                        {/* User's current location during navigation */}
+                        {isNavigating && userLocation && (
+                            <Marker
+                                position={[userLocation.lat, userLocation.lng]}
+                                icon={createUserLocationIcon()}
+                                zIndexOffset={2000}
+                            >
+                                <Popup>
+                                    <div className="p-2 text-center">
+                                        <div className="font-bold text-blue-700 mb-1">📍 Your Location</div>
+                                        <div className="text-xs text-gray-500">
+                                            Accuracy: ±{Math.round(userLocation.accuracy || 0)}m
+                                        </div>
+                                        {remainingDistance && (
+                                            <div className="mt-2 text-sm">
+                                                <span className="font-semibold">{formatDistance(remainingDistance)}</span> remaining
+                                            </div>
+                                        )}
+                                    </div>
+                                </Popup>
+                            </Marker>
+                        )}
+
+                        {/* Follow user location during navigation */}
+                        <FollowUserLocation userLocation={userLocation} isNavigating={isNavigating} />
+
                         {/* Start marker */}
-                        {startCoords && (
+                        {startCoords && !isNavigating && (
                             <Marker position={[startCoords.lat, startCoords.lng]} icon={startIcon}>
                                 <Popup>
                                     <div className="font-semibold text-green-700">
@@ -896,10 +1229,11 @@ const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
                             </Marker>
                         )}
 
-                        {/* Incident markers along selected route */}
-                        {routes[selectedRouteIndex]?.incidents.map((incident, idx) => {
+                        {/* All incidents on map - always visible */}
+                        {incidents.filter(inc => inc.latitude && inc.longitude).map((incident, idx) => {
                             const incidentType = incident.incident_type || incident.type || 'unknown';
-                            const typeConfig = INCIDENT_TYPES[incidentType.toLowerCase()] || INCIDENT_TYPES.hazard;
+                            const typeConfig = INCIDENT_TYPES[incidentType.toLowerCase()] || INCIDENT_TYPES.hazard || { emoji: '⚠️', label: 'Incident', color: '#06b6d4', description: 'Reported incident' };
+                            const isOnRoute = routes[selectedRouteIndex]?.incidents?.some(ri => ri.id === incident.id);
                             return (
                                 <Marker
                                     key={`incident-${incident.id || idx}`}
@@ -907,82 +1241,43 @@ const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
                                     icon={createIncidentIcon(incidentType, incident.severity)}
                                 >
                                     <Popup>
-                                        <div className="p-2 min-w-[200px]">
-                                            <div className="flex items-center gap-2 mb-2">
+                                        <div className="p-3 min-w-[220px]">
+                                            <div className="flex items-center gap-2 mb-3 pb-2 border-b border-gray-200">
                                                 <span
-                                                    className="w-8 h-8 rounded-full flex items-center justify-center text-lg"
-                                                    style={{ backgroundColor: typeConfig.color }}
+                                                    className="w-10 h-10 rounded-full flex items-center justify-center text-xl bg-cyan-500"
                                                 >
-                                                    {typeConfig.emoji.split(' ')[0]}
+                                                    {typeConfig.emoji?.split(' ')[0] || '⚠️'}
                                                 </span>
                                                 <div>
-                                                    <div className="font-bold text-gray-800">{typeConfig.label}</div>
-                                                    <div className="text-xs text-gray-500">{typeConfig.description}</div>
+                                                    <div className="font-bold text-gray-800 text-base">{typeConfig.label || 'Incident'}</div>
+                                                    <div className="text-xs text-gray-500">{typeConfig.description || 'Reported incident'}</div>
                                                 </div>
                                             </div>
-                                            <div className="text-sm text-gray-600 mb-2">
-                                                📍 {incident.location || 'Unknown location'}
-                                            </div>
-                                            {incident.description && (
-                                                <div className="text-xs text-gray-500 mb-2 p-2 bg-gray-50 rounded">
-                                                    {incident.description}
+                                            <div className="space-y-2">
+                                                <div className="text-sm text-gray-700 flex items-start gap-2">
+                                                    <span className="text-cyan-500">📍</span>
+                                                    <span>{incident.location || incident.location_name || 'Unknown location'}</span>
                                                 </div>
-                                            )}
-                                            <div className={`text-xs px-2 py-1 rounded inline-block font-semibold ${incident.severity === 'critical' ? 'bg-red-100 text-red-800' :
-                                                incident.severity === 'high' ? 'bg-orange-100 text-orange-800' :
-                                                    incident.severity === 'medium' ? 'bg-yellow-100 text-yellow-800' :
-                                                        'bg-blue-100 text-blue-800'
-                                                }`}>
-                                                {(incident.severity || 'medium').toUpperCase()} SEVERITY
-                                            </div>
-                                            <div className="text-xs text-red-600 mt-2 font-medium">
-                                                ⚠️ This incident is on your selected route
-                                            </div>
-                                        </div>
-                                    </Popup>
-                                </Marker>
-                            );
-                        })}
-
-                        {/* All other incidents on map */}
-                        {incidents.filter(inc =>
-                            inc.latitude && inc.longitude &&
-                            !routes[selectedRouteIndex]?.incidents.some(ri => ri.id === inc.id)
-                        ).map((incident, idx) => {
-                            const incidentType = incident.incident_type || incident.type || 'unknown';
-                            const typeConfig = INCIDENT_TYPES[incidentType.toLowerCase()] || INCIDENT_TYPES.hazard;
-                            return (
-                                <Marker
-                                    key={`all-incident-${incident.id || idx}`}
-                                    position={[incident.latitude, incident.longitude]}
-                                    icon={createIncidentIcon(incidentType, incident.severity)}
-                                    opacity={0.6}
-                                >
-                                    <Popup>
-                                        <div className="p-2 min-w-[200px]">
-                                            <div className="flex items-center gap-2 mb-2">
-                                                <span
-                                                    className="w-8 h-8 rounded-full flex items-center justify-center text-lg"
-                                                    style={{ backgroundColor: typeConfig.color }}
-                                                >
-                                                    {typeConfig.emoji.split(' ')[0]}
-                                                </span>
-                                                <div>
-                                                    <div className="font-bold text-gray-800">{typeConfig.label}</div>
-                                                    <div className="text-xs text-gray-500">{typeConfig.description}</div>
+                                                {incident.description && (
+                                                    <div className="text-xs text-gray-600 p-2 bg-gray-50 rounded-lg border border-gray-100">
+                                                        {incident.description.length > 100 ? incident.description.substring(0, 100) + '...' : incident.description}
+                                                    </div>
+                                                )}
+                                                <div className="flex items-center justify-between pt-2">
+                                                    <span className="text-xs px-2 py-1 rounded-full font-semibold bg-cyan-100 text-cyan-800">
+                                                        {(incident.severity || 'medium').toUpperCase()}
+                                                    </span>
+                                                    {isOnRoute ? (
+                                                        <span className="text-xs text-red-600 font-medium">⚠️ On your route</span>
+                                                    ) : routes.length > 0 ? (
+                                                        <span className="text-xs text-green-600">✓ Not on route</span>
+                                                    ) : null}
                                                 </div>
-                                            </div>
-                                            <div className="text-sm text-gray-600 mb-2">
-                                                📍 {incident.location || 'Unknown location'}
-                                            </div>
-                                            <div className={`text-xs px-2 py-1 rounded inline-block font-semibold ${incident.severity === 'critical' ? 'bg-red-100 text-red-800' :
-                                                incident.severity === 'high' ? 'bg-orange-100 text-orange-800' :
-                                                    'bg-yellow-100 text-yellow-800'
-                                                }`}>
-                                                {(incident.severity || 'medium').toUpperCase()} SEVERITY
-                                            </div>
-                                            <div className="text-xs text-green-600 mt-2">
-                                                ✓ Not on your current route
+                                                {incident.source && (
+                                                    <div className="text-xs text-gray-400 pt-1">
+                                                        Source: {incident.source === 'manual' ? 'Public Report' : 'AI Detected'}
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
                                     </Popup>
@@ -1009,7 +1304,7 @@ const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
                                 <span className="text-slate-300">Alt 1</span>
                             </div>
                             <div className="flex items-center text-xs">
-                                <div className="w-4 h-1.5 bg-orange-500 rounded mr-1.5" />
+                                <div className="w-4 h-1.5 bg-cyan-500 rounded mr-1.5" />
                                 <span className="text-slate-300">Alt 2</span>
                             </div>
                             <div className="flex items-center text-xs">
@@ -1042,12 +1337,21 @@ const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
                 </div>
             </div>
 
-            {/* Footer with incident count */}
+            {/* Footer with incident count - Real-time status */}
             <div className="bg-slate-900/80 px-6 py-3 flex items-center justify-between text-sm border-t border-cyan-400/10">
-                <span className="text-slate-400">
-                    <AlertTriangle className="w-4 h-4 inline mr-1 text-orange-400" />
-                    {incidents.length} active incident{incidents.length !== 1 ? 's' : ''} in Kigali
-                </span>
+                <div className="flex items-center gap-4">
+                    <span className="flex items-center gap-2 text-slate-400">
+                        <span className="relative flex h-3 w-3">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-3 w-3 bg-cyan-500"></span>
+                        </span>
+                        <span className="text-cyan-400 font-semibold">LIVE</span>
+                    </span>
+                    <span className="text-slate-400">
+                        <AlertTriangle className="w-4 h-4 inline mr-1 text-orange-400" />
+                        {incidents.length} active incident{incidents.length !== 1 ? 's' : ''} in Kigali
+                    </span>
+                </div>
                 <span className="text-slate-500">
                     Powered by OSRM & OpenStreetMap
                 </span>

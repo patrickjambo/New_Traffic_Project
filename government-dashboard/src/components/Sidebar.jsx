@@ -39,9 +39,9 @@ const Sidebar = ({ isOpen }) => {
   );
 
   return (
-    <div className={`fixed inset-y-0 left-0 z-50 w-56 bg-gradient-to-b from-slate-900 via-blue-950 to-slate-900 transform ${isOpen ? 'translate-x-0' : '-translate-x-full'} transition-transform duration-300 ease-in-out lg:translate-x-0 lg:static lg:inset-0 border-r border-blue-900/30`}>
+    <div className={`fixed inset-y-0 left-0 z-50 w-56 bg-gradient-to-b from-slate-900 via-slate-900 to-slate-900 transform ${isOpen ? 'translate-x-0' : '-translate-x-full'} transition-transform duration-300 ease-in-out lg:translate-x-0 lg:static lg:inset-0 border-r border-cyan-900/30`}>
       {/* Logo Section */}
-      <div className="flex items-center gap-3 px-4 py-5 border-b border-blue-900/30">
+      <div className="flex items-center gap-3 px-4 py-5 border-b border-cyan-900/30">
         <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center overflow-hidden">
           <img
             src="/assets/rnp-logo.png"
@@ -57,7 +57,7 @@ const Sidebar = ({ isOpen }) => {
         <div>
           <h1 className="text-white text-sm font-bold leading-tight">Rwanda National</h1>
           <h1 className="text-white text-sm font-bold leading-tight">Police</h1>
-          <p className="text-blue-400 text-xs">
+          <p className="text-cyan-400 text-xs">
             {isDistrictAdmin ? `${user?.districtName?.toUpperCase() || 'DISTRICT'} ADMIN` : 'TRAFFIC ADMIN'}
           </p>
         </div>
@@ -75,14 +75,14 @@ const Sidebar = ({ isOpen }) => {
                 key={item.path}
                 to={item.path}
                 className={`flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-xl transition-all duration-200 ${isActive
-                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30'
+                  ? 'bg-cyan-600 text-white shadow-lg shadow-cyan-600/30'
                   : 'text-gray-400 hover:bg-slate-800/50 hover:text-white'
                   }`}
               >
                 <Icon className="w-5 h-5" />
                 <span className="flex-1">{item.label}</span>
                 {item.badge && (
-                  <span className="px-2 py-0.5 text-xs font-bold bg-green-500 text-white rounded-full animate-pulse">
+                  <span className="px-2 py-0.5 text-xs font-bold bg-cyan-500 text-white rounded-full animate-pulse">
                     {item.badge}
                   </span>
                 )}

@@ -9,7 +9,7 @@ import '../services/emergency_service.dart';
 import '../services/notification_service.dart';
 import '../services/incident_monitor_service.dart';
 import '../services/fcm_service.dart';
-import '../config/app_config.dart';  // 🔥 ADD THIS LINE
+import '../config/app_config.dart';  // ADD THIS LINE
 
 /// Auto Monitor Screen - Continuous AI-powered monitoring
 /// - Records video continuously in 5-second clips
@@ -53,7 +53,7 @@ class _AutoMonitorScreenState extends State<AutoMonitorScreen> {
     try {
       final cameras = await availableCameras();
       if (cameras.isEmpty) {
-        _addLog('❌ No cameras available');
+        _addLog('[ERROR] No cameras available');
         return;
       }
 
@@ -72,10 +72,10 @@ class _AutoMonitorScreenState extends State<AutoMonitorScreen> {
       await _controller!.initialize();
       if (mounted) {
         setState(() {});
-        _addLog('✅ Camera initialized');
+        _addLog('[OK] Camera initialized');
       }
     } catch (e) {
-      _addLog('❌ Camera error: $e');
+      _addLog('[ERROR] Camera error: $e');
     }
   }
 
@@ -84,7 +84,7 @@ class _AutoMonitorScreenState extends State<AutoMonitorScreen> {
     try {
       // Initialize Firebase Cloud Messaging (100% FREE)
       await _fcmService.initialize();
-      _addLog('✅ Firebase FCM initialized (FREE)');
+      _addLog('[OK] Firebase FCM initialized (FREE)');
       
       // Subscribe to police alerts if user is police officer
       // await _fcmService.subscribeToPoliceAlerts();
@@ -96,14 +96,14 @@ class _AutoMonitorScreenState extends State<AutoMonitorScreen> {
           locationData['latitude'] ?? AppConfig.defaultLatitude,
           locationData['longitude'] ?? AppConfig.defaultLongitude,
         );
-        _addLog('📍 Subscribed to location-based alerts');
+        _addLog('[LOC] Subscribed to location-based alerts');
       }
       
       // Start incident monitor service (100% FREE)
       _incidentMonitor.start();
-      _addLog('✅ Incident tracker started (FREE)');
+      _addLog('[OK] Incident tracker started (FREE)');
     } catch (e) {
-      _addLog('⚠️  Services initialization: $e');
+      _addLog('[WARN] Services initialization: $e');
     }
   }
 
@@ -146,14 +146,14 @@ class _AutoMonitorScreenState extends State<AutoMonitorScreen> {
       setState(() {
         _isRecording = true;
       });
-      _addLog('📹 Recording clip ${_clipsProcessed + 1}...');
+      _addLog('[REC] Recording clip ${_clipsProcessed + 1}...');
 
       // Record for 5 seconds
       _clipTimer = Timer(const Duration(seconds: 5), () async {
         await _stopAndProcessClip();
       });
     } catch (e) {
-      _addLog('❌ Recording error: $e');
+      _addLog('[ERROR] Recording error: $e');
       setState(() {
         _isRecording = false;
       });
@@ -171,7 +171,7 @@ class _AutoMonitorScreenState extends State<AutoMonitorScreen> {
         _clipsProcessed++;
       });
 
-      _addLog('✅ Clip ${_clipsProcessed} captured (${(File(videoFile.path).lengthSync() / 1024).toStringAsFixed(1)} KB)');
+      _addLog('[OK] Clip ${_clipsProcessed} captured (${(File(videoFile.path).lengthSync() / 1024).toStringAsFixed(1)} KB)');
 
       // Send to AI for analysis
       await _analyzeClip(videoFile);
@@ -182,7 +182,7 @@ class _AutoMonitorScreenState extends State<AutoMonitorScreen> {
         _startRecordingCycle();
       }
     } catch (e) {
-      _addLog('❌ Stop recording error: $e');
+      _addLog('[ERROR] Stop recording error: $e');
       setState(() {
         _isRecording = false;
       });
@@ -214,7 +214,7 @@ class _AutoMonitorScreenState extends State<AutoMonitorScreen> {
         final confidence = data['confidence'] ?? 0.0;
 
         if (hasIncident) {
-          _addLog('⚠️  Incident detected! Type: $incidentType, Severity: $severity, Confidence: ${(confidence * 100).toStringAsFixed(1)}%');
+          _addLog('[WARN] Incident detected! Type: $incidentType, Severity: $severity, Confidence: ${(confidence * 100).toStringAsFixed(1)}%');
           
           setState(() {
             _incidentsDetected++;
@@ -224,11 +224,11 @@ class _AutoMonitorScreenState extends State<AutoMonitorScreen> {
           // Get current location
           final locationData = await _getCurrentLocation();
           if (locationData == null) {
-            _addLog('❌ Location unavailable, skipping incident');
+            _addLog('[ERROR] Location unavailable, skipping incident');
             return;
           }
 
-          // 🔥 NEW: Check if this is a new incident or update to existing one
+          // NEW: Check if this is a new incident or update to existing one
           final decision = await _incidentMonitor.processClipAnalysis(
             latitude: locationData['latitude'] ?? AppConfig.defaultLatitude,
             longitude: locationData['longitude'] ?? AppConfig.defaultLongitude,
@@ -238,24 +238,24 @@ class _AutoMonitorScreenState extends State<AutoMonitorScreen> {
 
           if (decision.shouldCreateNew) {
             // Create new incident report
-            _addLog('🆕 Creating new incident report...');
+            _addLog('[NEW] Creating new incident report...');
             await _createIncidentReport(data, videoFile.path);
 
             // If critical, auto-create emergency
             if (severity == 'critical' || severity == 'high') {
-              _addLog('🚨 Critical incident - Creating emergency report...');
+              _addLog('[ALERT] Critical incident - Creating emergency report...');
               await _createEmergencyReport(data, videoFile.path);
             }
           } else {
             // Update existing incident
-            _addLog('🔄 Updated existing incident #${decision.matchedIncidentId}');
+            _addLog('[UPDATE] Updated existing incident #${decision.matchedIncidentId}');
             setState(() {
               _duplicatesPrevented++;
             });
             
             // If severity increased, send alert
             if (decision.severityChanged) {
-              _addLog('⚠️  Severity increased for incident #${decision.matchedIncidentId}!');
+              _addLog('[WARN] Severity increased for incident #${decision.matchedIncidentId}!');
               // TODO: Send severity update notification
             }
             
@@ -263,19 +263,19 @@ class _AutoMonitorScreenState extends State<AutoMonitorScreen> {
             await File(videoFile.path).delete();
           }
         } else {
-          _addLog('✓ No incident in clip ${_clipsProcessed}');
+          _addLog('[OK] No incident in clip ${_clipsProcessed}');
           // Delete clip to save storage
           await File(videoFile.path).delete();
         }
       } else {
-        _addLog('❌ AI analysis failed: ${result['message']}');
+        _addLog('[ERROR] AI analysis failed: ${result['message']}');
       }
 
       setState(() {
         _status = 'Monitoring active - Clip ${_clipsProcessed} processed';
       });
     } catch (e) {
-      _addLog('❌ Analysis error: $e');
+      _addLog('[ERROR] Analysis error: $e');
       setState(() {
         _status = 'Monitoring active - Analysis error';
       });
@@ -291,9 +291,9 @@ class _AutoMonitorScreenState extends State<AutoMonitorScreen> {
 
       if (reportResult['success']) {
         final incidentId = reportResult['data']['id'];
-        _addLog('✅ Incident report created (ID: $incidentId)');
+        _addLog('[OK] Incident report created (ID: $incidentId)');
         
-        // 🔥 NEW: Register incident with monitor to prevent duplicates
+        // NEW: Register incident with monitor to prevent duplicates
         final locationData = await _getCurrentLocation();
         if (locationData != null) {
           _incidentMonitor.registerIncident(
@@ -304,7 +304,7 @@ class _AutoMonitorScreenState extends State<AutoMonitorScreen> {
             severity: aiData['severity'] ?? 'low',
             aiAnalysis: aiData,
           );
-          _addLog('📝 Incident registered for tracking');
+          _addLog('[LOG] Incident registered for tracking');
         }
         
         // Send notification to public
@@ -314,12 +314,12 @@ class _AutoMonitorScreenState extends State<AutoMonitorScreen> {
           severity: aiData['severity'] ?? 'low',
         );
         
-        _addLog('📢 Public notification sent');
+        _addLog('[NOTIFY] Public notification sent');
       } else {
-        _addLog('❌ Report creation failed: ${reportResult['message']}');
+        _addLog('[ERROR] Report creation failed: ${reportResult['message']}');
       }
     } catch (e) {
-      _addLog('❌ Report error: $e');
+      _addLog('[ERROR] Report error: $e');
     }
   }
 
@@ -362,20 +362,20 @@ class _AutoMonitorScreenState extends State<AutoMonitorScreen> {
         setState(() {
           _emergenciesCreated++;
         });
-        _addLog('🚨 Emergency created (ID: $emergencyId)');
-        _addLog('📞 Police & Admin notified');
+        _addLog('[ALERT] Emergency created (ID: $emergencyId)');
+        _addLog('[CALL] Police & Admin notified');
 
         // Show critical alert
         _showCriticalAlert(emergencyId, aiData);
       } else {
-        _addLog('❌ Emergency creation failed: ${result['message']}');
+        _addLog('[ERROR] Emergency creation failed: ${result['message']}');
       }
 
       setState(() {
         _status = 'Monitoring active - Emergency reported';
       });
     } catch (e) {
-      _addLog('❌ Emergency error: $e');
+      _addLog('[ERROR] Emergency error: $e');
     }
   }
 
@@ -555,8 +555,8 @@ class _AutoMonitorScreenState extends State<AutoMonitorScreen> {
       _status = 'Monitoring stopped';
     });
 
-    _addLog('🛑 Auto-monitoring stopped');
-    _addLog('📊 Session summary: ${_clipsProcessed} clips, ${_incidentsDetected} incidents, ${_emergenciesCreated} emergencies');
+    _addLog('[STOP] Auto-monitoring stopped');
+    _addLog('[STATS] Session summary: ${_clipsProcessed} clips, ${_incidentsDetected} incidents, ${_emergenciesCreated} emergencies');
   }
 
   @override

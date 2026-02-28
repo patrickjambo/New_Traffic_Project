@@ -14,7 +14,7 @@ const GeoFencingPage = () => {
       {/* Page Header */}
       <div className="mb-6">
         <div className="flex items-center gap-3 mb-2">
-          <div className="p-2 bg-blue-600/20 rounded-lg">
+          <div className="p-2 bg-cyan-600/20 rounded-lg">
             <span className="text-2xl">🗺️</span>
           </div>
           <div>
@@ -27,10 +27,10 @@ const GeoFencingPage = () => {
       </div>
 
       {/* Connection Status Banner */}
-      <div className="mb-6 p-4 bg-gradient-to-r from-blue-900/50 to-cyan-900/50 rounded-xl border border-blue-700/50">
+      <div className="mb-6 p-4 bg-gradient-to-r from-cyan-900/50 to-cyan-800/50 rounded-xl border border-cyan-700/50">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
+            <div className="w-3 h-3 bg-cyan-400 rounded-full animate-pulse"></div>
             <span className="text-white font-medium">Real-Time Tracking Active</span>
           </div>
           <div className="flex items-center gap-4 text-sm text-gray-400">
@@ -49,15 +49,15 @@ const GeoFencingPage = () => {
         <h4 className="text-white font-medium mb-2">ℹ️ How Geo-Fencing Works</h4>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-gray-400">
           <div>
-            <p className="text-blue-400 font-medium mb-1">1. Location Tracking</p>
+            <p className="text-cyan-400 font-medium mb-1">1. Location Tracking</p>
             <p>Officer mobile apps continuously report GPS location to the system.</p>
           </div>
           <div>
-            <p className="text-yellow-400 font-medium mb-1">2. Incident Detection</p>
+            <p className="text-cyan-400 font-medium mb-1">2. Incident Detection</p>
             <p>When AI or manual reports create incidents, the system identifies the district.</p>
           </div>
           <div>
-            <p className="text-green-400 font-medium mb-1">3. Targeted Alerts</p>
+            <p className="text-cyan-400 font-medium mb-1">3. Targeted Alerts</p>
             <p>Only officers within the geo-fence radius receive notifications.</p>
           </div>
         </div>

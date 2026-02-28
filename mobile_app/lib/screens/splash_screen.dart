@@ -46,21 +46,22 @@ class _SplashScreenState extends State<SplashScreen>
   }
 
   void _initializeAnimations() {
+    // 🚀 OPTIMIZED: Faster animations for quicker perceived startup
     // Logo animation controller (scale + opacity)
     _logoAnimationController = AnimationController(
-      duration: const Duration(milliseconds: 1200),
+      duration: const Duration(milliseconds: 600), // Was 1200ms
       vsync: this,
     );
 
     // Fade animation controller for text elements
     _fadeAnimationController = AnimationController(
-      duration: const Duration(milliseconds: 800),
+      duration: const Duration(milliseconds: 400), // Was 800ms
       vsync: this,
     );
 
     // Pulse animation for loading indicator
     _pulseAnimationController = AnimationController(
-      duration: const Duration(milliseconds: 1500),
+      duration: const Duration(milliseconds: 1000), // Was 1500ms
       vsync: this,
     )..repeat(reverse: true);
 
@@ -112,8 +113,8 @@ class _SplashScreenState extends State<SplashScreen>
     // Start logo animation immediately
     _logoAnimationController.forward();
 
-    // Start text fade after logo animation begins
-    await Future.delayed(const Duration(milliseconds: 600));
+    // 🚀 OPTIMIZED: Start text fade sooner (was 600ms)
+    await Future.delayed(const Duration(milliseconds: 300));
     if (mounted) {
       _fadeAnimationController.forward();
     }
@@ -128,8 +129,8 @@ class _SplashScreenState extends State<SplashScreen>
   }
 
   Future<void> _checkAuthentication() async {
-    // Wait for animations to complete
-    await Future.delayed(const Duration(seconds: 3));
+    // 🚀 OPTIMIZED: Reduced delay from 3s to 1.5s (just enough for branding)
+    await Future.delayed(const Duration(milliseconds: 1500));
 
     // Check if user is authenticated
     final isAuthenticated = await _authService.isAuthenticated();
@@ -146,24 +147,28 @@ class _SplashScreenState extends State<SplashScreen>
   }
 
   /// Start location tracking if user is a police officer
-  Future<void> _startLocationTrackingIfPolice() async {
-    try {
-      final userData = await _authService.getUserData();
-      if (userData != null && userData['role'] == 'police') {
-        final locationService = LocationTrackingService();
-        final initialized = await locationService.initialize();
-        if (initialized) {
-          await locationService.startTracking(
-            streamIntervalSeconds: 30,
-            highAccuracy: true,
-            streamToServer: true,
-          );
-          debugPrint('Location tracking auto-started for police officer');
+  /// 🚀 OPTIMIZED: Non-blocking - runs in background after navigation
+  void _startLocationTrackingIfPolice() {
+    // Fire and forget - don't await, let it run in background
+    Future(() async {
+      try {
+        final userData = await _authService.getUserData();
+        if (userData != null && userData['role'] == 'police') {
+          final locationService = LocationTrackingService();
+          final initialized = await locationService.initialize();
+          if (initialized) {
+            await locationService.startTracking(
+              streamIntervalSeconds: 30,
+              highAccuracy: true,
+              streamToServer: true,
+            );
+            debugPrint('Location tracking auto-started for police officer');
+          }
         }
+      } catch (e) {
+        debugPrint('Auto location tracking error: $e');
       }
-    } catch (e) {
-      debugPrint('Auto location tracking error: $e');
-    }
+    });
   }
 
   @override
@@ -250,13 +255,13 @@ class _SplashScreenState extends State<SplashScreen>
           color: Colors.white,
           boxShadow: [
             BoxShadow(
-              color: AppColors.primary.withOpacity(0.15),
+              color: AppColors.primary.withValues(alpha: 0.15),
               blurRadius: 30,
               spreadRadius: 5,
               offset: const Offset(0, 10),
             ),
             BoxShadow(
-              color: Colors.black.withOpacity(0.05),
+              color: Colors.black.withValues(alpha: 0.05),
               blurRadius: 20,
               spreadRadius: 2,
               offset: const Offset(0, 5),
@@ -272,7 +277,7 @@ class _SplashScreenState extends State<SplashScreen>
               // Fallback to icon if image fails to load
               return Container(
                 decoration: BoxDecoration(
-                  color: AppColors.primary.withOpacity(0.1),
+                  color: AppColors.primary.withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                 ),
                 child: const Icon(
@@ -323,10 +328,10 @@ class _SplashScreenState extends State<SplashScreen>
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               decoration: BoxDecoration(
-                color: AppColors.primary.withOpacity(0.08),
+                color: AppColors.primary.withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(20),
                 border: Border.all(
-                  color: AppColors.primary.withOpacity(0.15),
+                  color: AppColors.primary.withValues(alpha: 0.15),
                   width: 1,
                 ),
               ),
@@ -336,7 +341,7 @@ class _SplashScreenState extends State<SplashScreen>
                   Icon(
                     Icons.shield_outlined,
                     size: 16,
-                    color: AppColors.primary.withOpacity(0.8),
+                    color: AppColors.primary.withValues(alpha: 0.8),
                   ),
                   const SizedBox(width: 8),
                   Text(
@@ -375,14 +380,14 @@ class _SplashScreenState extends State<SplashScreen>
               height: 4,
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(2),
-                color: AppColors.primary.withOpacity(0.2),
+                color: AppColors.primary.withValues(alpha: 0.2),
               ),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(2),
                 child: LinearProgressIndicator(
                   backgroundColor: Colors.transparent,
                   valueColor: AlwaysStoppedAnimation<Color>(
-                    AppColors.primary.withOpacity(0.6),
+                    AppColors.primary.withValues(alpha: 0.6),
                   ),
                 ),
               ),

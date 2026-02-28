@@ -56,9 +56,9 @@ class EmergencyAlertService {
       await _startLocationTracking();
       
       _initialized = true;
-      print('✅ EmergencyAlertService initialized');
+      print('[OK] EmergencyAlertService initialized');
     } catch (e) {
-      print('❌ EmergencyAlertService initialization error: $e');
+      print('[ERROR] EmergencyAlertService initialization error: $e');
     }
   }
 
@@ -159,7 +159,7 @@ class EmergencyAlertService {
       }
 
       if (permission == LocationPermission.deniedForever) {
-        print('⚠️ Location permission permanently denied');
+        print('[WARN] Location permission permanently denied');
         return;
       }
 
@@ -184,9 +184,9 @@ class EmergencyAlertService {
         _sendLocationToBackend(position);
       });
 
-      print('📍 Location tracking started');
+      print('[LOC] Location tracking started');
     } catch (e) {
-      print('❌ Location tracking error: $e');
+      print('[ERROR] Location tracking error: $e');
     }
   }
 
@@ -243,25 +243,30 @@ class EmergencyAlertService {
   }
 
   /// Public method to show emergency alert (called from WebSocket service)
+  /// OPTIMIZED: Immediately trigger all alerts in parallel for real-time response
   void showEmergencyAlert(Map<String, dynamic> data) {
+    // Fire everything immediately - no delays!
     _triggerEmergencyAlarm(data);
   }
 
-  /// Trigger full emergency alarm
+  /// Trigger full emergency alarm - OPTIMIZED FOR REAL-TIME
   void _triggerEmergencyAlarm(Map<String, dynamic> data) {
-    print('🚨 EMERGENCY ALARM TRIGGERED!');
+    print('[ALERT] EMERGENCY ALARM TRIGGERED!');
     
-    // 1. Show full-screen notification
-    _showEmergencyNotification(data);
+    // CRITICAL: Fire all effects SIMULTANEOUSLY for instant response
+    // Don't await - let them run in parallel
     
-    // 2. Play emergency siren
-    _playEmergencySiren();
+    // 1. Trigger callback for full-screen UI FIRST (most important)
+    onEmergencyAlarm?.call(data);
     
-    // 3. Start strong vibration pattern
+    // 2. Start vibration immediately (most noticeable)
     _startEmergencyVibration();
     
-    // 4. Trigger callback for full-screen UI
-    onEmergencyAlarm?.call(data);
+    // 3. Play emergency siren
+    _playEmergencySiren();
+    
+    // 4. Show notification (can be slightly delayed)
+    _showEmergencyNotification(data);
     
     // Auto-stop alarm after 30 seconds if not acknowledged
     Timer(const Duration(seconds: 30), () {
@@ -308,18 +313,26 @@ class EmergencyAlertService {
 
     await _localNotifications.show(
       999, // Fixed ID for emergency
-      '🚨 ${data['title'] ?? 'EMERGENCY ALERT'}',
+      data['title'] ?? 'EMERGENCY ALERT',
       data['message'] ?? 'Immediate response required!',
       details,
       payload: jsonEncode(data),
     );
   }
 
-  /// Play emergency siren sound
-  Future<void> _playEmergencySiren() async {
+  /// Play emergency siren sound - OPTIMIZED FOR INSTANT START
+  void _playEmergencySiren() {
+    _isAlarmPlaying = true;
+    
+    // Play system alert immediately (don't await)
+    SystemSound.play(SystemSoundType.alert);
+    
+    // Then start the continuous siren in background
+    _doPlaySiren();
+  }
+  
+  Future<void> _doPlaySiren() async {
     try {
-      _isAlarmPlaying = true;
-      
       // Use built-in alarm sound or custom asset
       // For production, add a custom siren.mp3 to assets
       await _audioPlayer.setReleaseMode(ReleaseMode.loop);
@@ -330,22 +343,30 @@ class EmergencyAlertService {
       // await _audioPlayer.play(AssetSource('sounds/emergency_siren.mp3'));
       
       // Fallback: Use system notification sound repeatedly
-      for (int i = 0; i < 5 && _isAlarmPlaying; i++) {
-        await SystemSound.play(SystemSoundType.alert);
-        await Future.delayed(const Duration(milliseconds: 500));
+      for (int i = 0; i < 10 && _isAlarmPlaying; i++) {
+        SystemSound.play(SystemSoundType.alert);
+        await Future.delayed(const Duration(milliseconds: 400));
       }
       
-      print('🔊 Emergency siren playing');
+      print('[AUDIO] Emergency siren playing');
     } catch (e) {
       print('Error playing siren: $e');
     }
   }
 
-  /// Start emergency vibration pattern
-  Future<void> _startEmergencyVibration() async {
+  /// Start emergency vibration pattern - OPTIMIZED FOR INSTANT START
+  void _startEmergencyVibration() {
+    // Fire and forget - don't await
+    _doVibration();
+  }
+  
+  Future<void> _doVibration() async {
     try {
       final hasVibrator = await Vibration.hasVibrator() ?? false;
       if (!hasVibrator) return;
+
+      // INSTANT: Vibrate immediately before starting pattern
+      Vibration.vibrate(duration: 500, amplitude: 255);
 
       // Strong, continuous vibration pattern
       // Pattern: vibrate 500ms, pause 200ms, repeat
@@ -360,7 +381,7 @@ class EmergencyAlertService {
         );
       });
       
-      print('📳 Emergency vibration started');
+      print('[VIBRATE] Emergency vibration started');
     } catch (e) {
       print('Error with vibration: $e');
     }
@@ -383,7 +404,7 @@ class EmergencyAlertService {
     // Cancel notification
     await _localNotifications.cancel(999);
     
-    print('✅ Emergency alarm stopped');
+    print('[OK] Emergency alarm stopped');
   }
 
   /// Show standard (non-emergency) notification
@@ -441,7 +462,7 @@ class EmergencyAlertService {
         body: jsonEncode({'status': status}),
       );
       
-      print('✅ Duty status set to: $status');
+      print('[OK] Duty status set to: $status');
     } catch (e) {
       print('Error setting duty status: $e');
     }

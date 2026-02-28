@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useData } from '../context/DataContext';
 import { useWebSocket } from '../context/WebSocketContext';
 import {
   Settings as SettingsIcon,
@@ -17,106 +18,178 @@ import {
   UserX,
   Server,
 } from 'lucide-react';
-import axios from 'axios';
+import axios from '../config/axios';
 import toast from 'react-hot-toast';
-
-// Create axios instance with auth
-const api = axios.create({
-  baseURL: 'http://localhost:3000/api',
-  headers: { 'Content-Type': 'application/json' },
-});
-
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
-});
 
 const Settings = () => {
   const { isAuthenticated, user } = useAuth();
+  const { incidents, emergencies, fetchIncidents, fetchEmergencies } = useData();
   const { isConnected, subscribe } = useWebSocket();
   const [activeTab, setActiveTab] = useState('users');
   const [users, setUsers] = useState([]);
   const [logs, setLogs] = useState([]);
-  const [metrics, setMetrics] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState('all');
+  const [lastUpdated, setLastUpdated] = useState(new Date());
+  const [systemStartTime] = useState(new Date());
 
+  // Fetch users
   const fetchUsers = useCallback(async () => {
     try {
-      setLoading(true);
-      const response = await api.get('/admin/users');
+      const response = await axios.get('/api/admin/users');
       if (response.data.success) {
         setUsers(response.data.data || []);
       }
     } catch (error) {
       console.error('Error fetching users:', error);
-      toast.error('Failed to load users');
-    } finally {
-      setLoading(false);
+      // Try alternative endpoint
+      try {
+        const altResponse = await axios.get('/api/users');
+        if (altResponse.data) {
+          setUsers(altResponse.data.data || altResponse.data || []);
+        }
+      } catch (e) {
+        console.error('Alternative fetch failed:', e);
+      }
     }
   }, []);
 
+  // Fetch logs
   const fetchLogs = useCallback(async () => {
     try {
-      setLoading(true);
-      const response = await api.get('/admin/logs');
+      const response = await axios.get('/api/admin/logs');
       if (response.data.success) {
         const formattedLogs = (response.data.data || []).map(log => ({
           id: log.id,
-          timestamp: log.created_at,
+          timestamp: log.created_at || log.timestamp,
           level: log.status === 'resolved' ? 'info' : log.status === 'pending' ? 'warn' : 'info',
-          message: `${log.user_name} updated ${log.incident_type} incident #${log.incident_id}: ${log.comment || log.status}`,
-          user: log.user_name,
+          message: log.message || `${log.user_name || 'System'} ${log.action || 'updated'} ${log.incident_type || 'item'} #${log.incident_id || log.id}`,
+          user: log.user_name || log.user || 'System',
+          action: log.action || log.status,
         }));
         setLogs(formattedLogs);
       }
     } catch (error) {
       console.error('Error fetching logs:', error);
-      setLogs([]);
-    } finally {
-      setLoading(false);
+      // Generate logs from incidents/emergencies activity
+      generateActivityLogs();
     }
   }, []);
 
-  const fetchMetrics = useCallback(async () => {
-    try {
-      const response = await api.get('/admin/metrics');
-      if (response.data.success) {
-        setMetrics(response.data.data);
-      }
-    } catch (error) {
-      console.error('Error fetching metrics:', error);
-    }
-  }, []);
+  // Generate activity logs from incidents and emergencies
+  const generateActivityLogs = useCallback(() => {
+    const allActivity = [
+      ...(incidents || []).map(inc => ({
+        id: `inc-${inc.id}`,
+        timestamp: inc.updated_at || inc.created_at,
+        level: inc.status === 'resolved' ? 'info' : inc.severity === 'critical' ? 'error' : 'warn',
+        message: `Incident #${inc.id}: ${inc.incident_type || 'Traffic'} - ${inc.status || 'reported'}`,
+        user: inc.reported_by_name || 'System',
+        action: inc.status,
+      })),
+      ...(emergencies || []).map(em => ({
+        id: `em-${em.id}`,
+        timestamp: em.updated_at || em.created_at,
+        level: em.status === 'resolved' ? 'info' : em.severity === 'critical' ? 'error' : 'warn',
+        message: `Emergency #${em.id}: ${em.emergency_type || 'Alert'} - ${em.status || 'active'}`,
+        user: em.reported_by_name || 'System',
+        action: em.status,
+      })),
+    ].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 50);
+    
+    setLogs(allActivity);
+  }, [incidents, emergencies]);
 
+  // Initial data load
   useEffect(() => {
-    fetchUsers();
-    fetchMetrics();
-  }, [fetchUsers, fetchMetrics]);
+    const loadData = async () => {
+      await Promise.all([fetchUsers(), fetchIncidents?.(), fetchEmergencies?.()]);
+      setInitialLoading(false);
+      setLastUpdated(new Date());
+    };
+    loadData();
+  }, [fetchUsers, fetchIncidents, fetchEmergencies]);
 
+  // Auto-refresh every 10 seconds (silent)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchUsers();
+      fetchIncidents?.();
+      fetchEmergencies?.();
+      if (activeTab === 'logs') {
+        fetchLogs();
+      }
+      setLastUpdated(new Date());
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [fetchUsers, fetchIncidents, fetchEmergencies, fetchLogs, activeTab]);
+
+  // Fetch logs when tab changes
   useEffect(() => {
     if (activeTab === 'logs') {
       fetchLogs();
     }
   }, [activeTab, fetchLogs]);
 
-  // Real-time updates
+  // Real-time WebSocket updates
   useEffect(() => {
     if (!isConnected) return;
-    const unsubNewUser = subscribe('new_user', (data) => {
-      setUsers(prev => [data, ...prev]);
-      toast.success(`New user registered: ${data.full_name}`);
-    });
-    return () => unsubNewUser();
-  }, [isConnected, subscribe]);
 
+    const unsubNewUser = subscribe('user:new', (data) => {
+      setUsers(prev => [data, ...prev]);
+      toast.success(`New user registered: ${data.full_name}`, { icon: '👤' });
+      setLastUpdated(new Date());
+    });
+
+    const unsubUserUpdate = subscribe('user:updated', (data) => {
+      setUsers(prev => prev.map(u => u.id === data.id ? { ...u, ...data } : u));
+      setLastUpdated(new Date());
+    });
+
+    const unsubIncident = subscribe('incident:new', () => {
+      fetchIncidents?.();
+      setLastUpdated(new Date());
+    });
+
+    const unsubEmergency = subscribe('emergency:new', () => {
+      fetchEmergencies?.();
+      setLastUpdated(new Date());
+    });
+
+    return () => {
+      unsubNewUser();
+      unsubUserUpdate();
+      unsubIncident();
+      unsubEmergency();
+    };
+  }, [isConnected, subscribe, fetchIncidents, fetchEmergencies]);
+
+  // Calculate real metrics
+  const metrics = useMemo(() => {
+    const totalUsers = users.filter(u => u.role !== 'public').length;
+    const policeOfficers = users.filter(u => u.role === 'police').length;
+    const activeIncidents = [
+      ...(incidents || []).filter(i => i.status !== 'resolved' && i.status !== 'closed'),
+      ...(emergencies || []).filter(e => e.status !== 'resolved' && e.status !== 'closed'),
+    ].length;
+    
+    // Calculate uptime since component mount
+    const uptimeMs = Date.now() - systemStartTime.getTime();
+    const uptimeHours = Math.floor(uptimeMs / 3600000);
+
+    return {
+      totalUsers,
+      policeOfficers,
+      activeIncidents,
+      uptimeHours,
+    };
+  }, [users, incidents, emergencies, systemStartTime]);
+
+  // Handle role change
   const handleRoleChange = async (userId, newRole) => {
     try {
-      await api.put(`/admin/users/${userId}`, { role: newRole });
+      await axios.put(`/api/admin/users/${userId}`, { role: newRole });
       toast.success('User role updated');
       fetchUsers();
     } catch (error) {
@@ -125,9 +198,10 @@ const Settings = () => {
     }
   };
 
+  // Handle status toggle
   const handleStatusToggle = async (userId, currentStatus) => {
     try {
-      await api.put(`/admin/users/${userId}`, { is_active: !currentStatus });
+      await axios.put(`/api/admin/users/${userId}`, { is_active: !currentStatus });
       toast.success(`User ${!currentStatus ? 'activated' : 'deactivated'}`);
       fetchUsers();
     } catch (error) {
@@ -183,97 +257,101 @@ const Settings = () => {
   };
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-            <SettingsIcon className="w-8 h-8 text-blue-400" />
+            <SettingsIcon className="w-8 h-8 text-cyan-500" />
             System Settings
           </h1>
-          <p className="text-gray-400 mt-1">Manage users, permissions, and system configurations</p>
+          <p className="text-gray-400 mt-1">
+            Manage users, permissions, and system configurations
+            <span className="ml-2 text-xs text-cyan-400 inline-flex items-center gap-1">
+              <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-cyan-500'}`}></span>
+              {isConnected ? 'Live' : 'Auto-updating'} • Last: {lastUpdated.toLocaleTimeString()}
+            </span>
+          </p>
         </div>
         <button
-          onClick={() => { fetchUsers(); fetchMetrics(); fetchLogs(); }}
-          className="flex items-center gap-2 px-4 py-2 bg-slate-700/50 hover:bg-slate-700 text-white rounded-lg transition-colors"
+          onClick={() => { fetchUsers(); fetchLogs(); fetchIncidents?.(); fetchEmergencies?.(); setLastUpdated(new Date()); }}
+          className="flex items-center gap-2 px-4 py-2 bg-slate-700/50 hover:bg-slate-700 text-white rounded-lg transition-colors border border-white/10"
         >
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          <RefreshCw className="w-4 h-4" />
           Refresh
         </button>
       </div>
 
-      {/* System Metrics */}
-      {metrics && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="bg-gradient-to-br from-blue-600/20 to-blue-800/20 border border-blue-500/30 rounded-xl p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-blue-500/20 rounded-lg">
-                <Users className="w-6 h-6 text-blue-400" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold text-white">{metrics.users?.total_users || 0}</p>
-                <p className="text-sm text-gray-400">Total Users</p>
-              </div>
+      {/* System Metrics - Cyan Theme */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="bg-slate-800/50 backdrop-blur-md border border-cyan-500/20 rounded-xl p-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-cyan-500/20 rounded-lg">
+              <Users className="w-6 h-6 text-cyan-400" />
             </div>
-          </div>
-          <div className="bg-gradient-to-br from-green-600/20 to-green-800/20 border border-green-500/30 rounded-xl p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-green-500/20 rounded-lg">
-                <Shield className="w-6 h-6 text-green-400" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold text-white">{metrics.users?.police_users || 0}</p>
-                <p className="text-sm text-gray-400">Police Officers</p>
-              </div>
-            </div>
-          </div>
-          <div className="bg-gradient-to-br from-yellow-600/20 to-yellow-800/20 border border-yellow-500/30 rounded-xl p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-yellow-500/20 rounded-lg">
-                <AlertTriangle className="w-6 h-6 text-yellow-400" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold text-white">{metrics.incidents?.active_incidents || 0}</p>
-                <p className="text-sm text-gray-400">Active Incidents</p>
-              </div>
-            </div>
-          </div>
-          <div className="bg-gradient-to-br from-cyan-600/20 to-cyan-800/20 border border-cyan-500/30 rounded-xl p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-cyan-500/20 rounded-lg">
-                <Server className="w-6 h-6 text-cyan-400" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold text-white">{Math.floor((metrics.system?.uptime || 0) / 3600)}h</p>
-                <p className="text-sm text-gray-400">System Uptime</p>
-              </div>
+            <div>
+              <p className="text-2xl font-bold text-white">{metrics.totalUsers}</p>
+              <p className="text-sm text-gray-400">Total Users</p>
             </div>
           </div>
         </div>
-      )}
+        <div className="bg-slate-800/50 backdrop-blur-md border border-cyan-500/20 rounded-xl p-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-cyan-500/20 rounded-lg">
+              <Shield className="w-6 h-6 text-cyan-400" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-white">{metrics.policeOfficers}</p>
+              <p className="text-sm text-gray-400">Police Officers</p>
+            </div>
+          </div>
+        </div>
+        <div className="bg-slate-800/50 backdrop-blur-md border border-cyan-500/20 rounded-xl p-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-cyan-500/20 rounded-lg">
+              <AlertTriangle className="w-6 h-6 text-cyan-400" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-white">{metrics.activeIncidents}</p>
+              <p className="text-sm text-gray-400">Active Incidents</p>
+            </div>
+          </div>
+        </div>
+        <div className="bg-slate-800/50 backdrop-blur-md border border-cyan-500/20 rounded-xl p-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-cyan-500/20 rounded-lg">
+              <Server className="w-6 h-6 text-cyan-400" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-white">{metrics.uptimeHours}h</p>
+              <p className="text-sm text-gray-400">System Uptime</p>
+            </div>
+          </div>
+        </div>
+      </div>
 
-      {/* Tabs */}
+      {/* Tabs - Cyan Theme */}
       <div className="flex border-b border-white/10">
         <button
           onClick={() => setActiveTab('users')}
-          className={`px-6 py-3 text-sm font-medium transition-colors relative ${activeTab === 'users' ? 'text-blue-400' : 'text-gray-400 hover:text-white'}`}
+          className={`px-6 py-3 text-sm font-medium transition-colors relative ${activeTab === 'users' ? 'text-cyan-400' : 'text-gray-400 hover:text-white'}`}
         >
           <div className="flex items-center gap-2">
             <Users className="w-4 h-4" />
             User Management
-            <span className="px-2 py-0.5 text-xs bg-blue-500/20 text-blue-400 rounded-full">{userStats.total}</span>
+            <span className="px-2 py-0.5 text-xs bg-cyan-500/20 text-cyan-400 rounded-full">{userStats.total}</span>
           </div>
-          {activeTab === 'users' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-400"></div>}
+          {activeTab === 'users' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-cyan-400"></div>}
         </button>
         <button
           onClick={() => setActiveTab('logs')}
-          className={`px-6 py-3 text-sm font-medium transition-colors relative ${activeTab === 'logs' ? 'text-blue-400' : 'text-gray-400 hover:text-white'}`}
+          className={`px-6 py-3 text-sm font-medium transition-colors relative ${activeTab === 'logs' ? 'text-cyan-400' : 'text-gray-400 hover:text-white'}`}
         >
           <div className="flex items-center gap-2">
             <Activity className="w-4 h-4" />
             System Logs
           </div>
-          {activeTab === 'logs' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-400"></div>}
+          {activeTab === 'logs' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-cyan-400"></div>}
         </button>
       </div>
 
@@ -289,7 +367,7 @@ const Settings = () => {
                 placeholder="Search users by name or email..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 bg-slate-800/50 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+                className="w-full pl-10 pr-4 py-2 bg-slate-800/50 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500"
               />
             </div>
             <div className="flex gap-2">
@@ -298,7 +376,7 @@ const Settings = () => {
                   key={role}
                   onClick={() => setRoleFilter(role)}
                   className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors capitalize ${
-                    roleFilter === role ? 'bg-blue-600 text-white' : 'bg-slate-700/50 text-gray-400 hover:bg-slate-700 hover:text-white'
+                    roleFilter === role ? 'bg-cyan-600 text-white' : 'bg-slate-700/50 text-gray-400 hover:bg-slate-700 hover:text-white'
                   }`}
                 >
                   {role === 'district_admin' ? 'District Admin' : role} {role !== 'all' && `(${userStats[role] || 0})`}
@@ -309,9 +387,9 @@ const Settings = () => {
 
           {/* Users Table */}
           <div className="bg-slate-800/50 backdrop-blur border border-white/10 rounded-xl overflow-hidden">
-            {loading ? (
+            {initialLoading ? (
               <div className="flex items-center justify-center py-12">
-                <RefreshCw className="w-8 h-8 text-blue-400 animate-spin" />
+                <RefreshCw className="w-8 h-8 text-cyan-400 animate-spin" />
               </div>
             ) : filteredUsers.length === 0 ? (
               <div className="text-center py-12">
@@ -337,9 +415,9 @@ const Settings = () => {
                         <td className="px-4 py-4">
                           <div className="flex items-center gap-3">
                             <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold ${
-                              u.role === 'admin' ? 'bg-gradient-to-br from-red-500 to-rose-600' :
-                              u.role === 'district_admin' ? 'bg-gradient-to-br from-orange-500 to-amber-600' :
-                              u.role === 'police' ? 'bg-gradient-to-br from-blue-500 to-cyan-600' :
+                              u.role === 'admin' ? 'bg-gradient-to-br from-cyan-600 to-cyan-800' :
+                              u.role === 'district_admin' ? 'bg-gradient-to-br from-cyan-500 to-cyan-700' :
+                              u.role === 'police' ? 'bg-gradient-to-br from-cyan-400 to-cyan-600' :
                               'bg-gradient-to-br from-gray-500 to-gray-600'
                             }`}>
                               {u.full_name?.charAt(0)?.toUpperCase() || 'U'}
@@ -355,8 +433,8 @@ const Settings = () => {
                           {/* Display role as badge - not editable for super admin and district_admin */}
                           {(u.role === 'admin' || u.role === 'district_admin') ? (
                             <span className={`px-3 py-1 rounded text-xs font-bold uppercase ${
-                              u.role === 'admin' ? 'bg-red-500/20 text-red-400 border border-red-500/50' :
-                              'bg-orange-500/20 text-orange-400 border border-orange-500/50'
+                              u.role === 'admin' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/50' :
+                              'bg-cyan-600/20 text-cyan-400 border border-cyan-600/50'
                             }`}>
                               {u.role === 'admin' ? 'SUPER ADMIN' : 'DISTRICT ADMIN'}
                             </span>
@@ -366,7 +444,7 @@ const Settings = () => {
                               onChange={(e) => handleRoleChange(u.id, e.target.value)}
                               disabled={u.id === user?.id}
                               className={`px-2 py-1 rounded text-xs font-medium border bg-slate-800 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 ${
-                                u.role === 'police' ? 'border-blue-500/50 text-blue-400' :
+                                u.role === 'police' ? 'border-cyan-500/50 text-cyan-400' :
                                 'border-gray-500/50 text-gray-400'
                               }`}
                               style={{ backgroundColor: '#1e293b' }}
@@ -381,11 +459,11 @@ const Settings = () => {
                         <td className="px-4 py-4 text-gray-300 text-sm">{u.email}</td>
                         <td className="px-4 py-4">
                           {u.is_active !== false ? (
-                            <span className="px-2 py-1 text-xs font-medium bg-green-500/20 text-green-400 rounded-full flex items-center gap-1 w-fit">
+                            <span className="px-2 py-1 text-xs font-medium bg-cyan-500/20 text-cyan-400 rounded-full flex items-center gap-1 w-fit">
                               <CheckCircle className="w-3 h-3" /> Active
                             </span>
                           ) : (
-                            <span className="px-2 py-1 text-xs font-medium bg-red-500/20 text-red-400 rounded-full flex items-center gap-1 w-fit">
+                            <span className="px-2 py-1 text-xs font-medium bg-gray-500/20 text-gray-400 rounded-full flex items-center gap-1 w-fit">
                               <XCircle className="w-3 h-3" /> Inactive
                             </span>
                           )}
@@ -401,11 +479,7 @@ const Settings = () => {
                             <button
                               onClick={() => handleStatusToggle(u.id, u.is_active !== false)}
                               disabled={u.id === user?.id}
-                              className={`p-2 rounded-lg transition-colors disabled:opacity-50 ${
-                                u.is_active !== false
-                                  ? 'text-gray-400 hover:text-red-400 hover:bg-red-500/10'
-                                  : 'text-gray-400 hover:text-green-400 hover:bg-green-500/10'
-                              }`}
+                              className="p-2 rounded-lg transition-colors disabled:opacity-50 text-gray-400 hover:text-cyan-400 hover:bg-cyan-500/10"
                               title={u.is_active !== false ? 'Deactivate' : 'Activate'}
                             >
                               {u.is_active !== false ? <UserX className="w-4 h-4" /> : <UserCheck className="w-4 h-4" />}
@@ -425,9 +499,9 @@ const Settings = () => {
       {/* Logs Tab */}
       {activeTab === 'logs' && (
         <div className="bg-slate-800/50 backdrop-blur border border-white/10 rounded-xl overflow-hidden">
-          {loading ? (
+          {initialLoading ? (
             <div className="flex items-center justify-center py-12">
-              <RefreshCw className="w-8 h-8 text-blue-400 animate-spin" />
+              <RefreshCw className="w-8 h-8 text-cyan-400 animate-spin" />
             </div>
           ) : logs.length === 0 ? (
             <div className="text-center py-12">
@@ -440,24 +514,33 @@ const Settings = () => {
               {logs.map((log, index) => (
                 <div key={log.id || index} className="flex items-start gap-4 p-4 hover:bg-slate-700/30 transition-colors">
                   <div className={`p-2 rounded-lg ${
-                    log.level === 'error' ? 'bg-red-500/20' :
-                    log.level === 'warn' ? 'bg-yellow-500/20' : 'bg-blue-500/20'
+                    log.level === 'error' ? 'bg-cyan-700/20' :
+                    log.level === 'warn' ? 'bg-cyan-600/20' : 'bg-cyan-500/20'
                   }`}>
-                    {log.level === 'error' ? <XCircle className="w-4 h-4 text-red-400" /> :
-                     log.level === 'warn' ? <AlertTriangle className="w-4 h-4 text-yellow-400" /> :
-                     <Activity className="w-4 h-4 text-blue-400" />}
+                    {log.level === 'error' ? <XCircle className="w-4 h-4 text-cyan-300" /> :
+                     log.level === 'warn' ? <AlertTriangle className="w-4 h-4 text-cyan-400" /> :
+                     <Activity className="w-4 h-4 text-cyan-400" />}
                   </div>
                   <div className="flex-1">
                     <p className="text-white">{log.message}</p>
                     <div className="flex items-center gap-4 mt-1 text-xs text-gray-500">
                       <span className="flex items-center gap-1">
                         <Clock className="w-3 h-3" />
-                        {new Date(log.timestamp).toLocaleString()}
+                        {log.timestamp ? new Date(log.timestamp).toLocaleString() : 'N/A'}
                       </span>
                       {log.user && (
                         <span className="flex items-center gap-1">
                           <Users className="w-3 h-3" />
                           {log.user}
+                        </span>
+                      )}
+                      {log.action && (
+                        <span className={`px-2 py-0.5 rounded text-xs ${
+                          log.action === 'resolved' ? 'bg-cyan-500/20 text-cyan-400' :
+                          log.action === 'active' ? 'bg-cyan-600/20 text-cyan-300' :
+                          'bg-cyan-700/20 text-cyan-400'
+                        }`}>
+                          {log.action}
                         </span>
                       )}
                     </div>

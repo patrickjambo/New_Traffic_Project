@@ -116,7 +116,7 @@ const Header = ({ onMenuClick }) => {
             <h2 className="text-lg font-bold text-white leading-tight">
               RNP Traffic Command
             </h2>
-            <p className="text-xs text-blue-400">
+            <p className="text-xs text-cyan-400">
               National Traffic Management & Incident Control
             </p>
           </div>
@@ -126,9 +126,9 @@ const Header = ({ onMenuClick }) => {
           {/* Connection Status Indicator */}
           <div className={`hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full border transition-all ${
             connectionStatus === 'connected' 
-              ? 'bg-green-500/10 border-green-500/30 text-green-400' 
+              ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400' 
               : connectionStatus === 'connecting' 
-                ? 'bg-yellow-500/10 border-yellow-500/30 text-yellow-400 animate-pulse' 
+                ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-300 animate-pulse' 
                 : 'bg-red-500/10 border-red-500/30 text-red-400'
           }`} title={`Real-time: ${connectionStatus}`}>
             {connectionStatus === 'connected' ? (
@@ -145,7 +145,7 @@ const Header = ({ onMenuClick }) => {
 
           {/* Clock */}
           <div className="hidden md:flex items-center gap-2 bg-gray-800 px-4 py-2 rounded-full border border-gray-700">
-            <Clock className="w-4 h-4 text-blue-400" />
+            <Clock className="w-4 h-4 text-cyan-400" />
             <span className="text-sm font-mono font-bold text-white tracking-wider">
               {formatTime(currentTime)}
             </span>
@@ -159,7 +159,7 @@ const Header = ({ onMenuClick }) => {
             <input
               type="text"
               placeholder="Search incidents..."
-              className="block w-full pl-10 pr-3 py-2 bg-gray-800 border border-gray-700 rounded-full text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent transition-all"
+              className="block w-full pl-10 pr-3 py-2 bg-gray-800 border border-gray-700 rounded-full text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-transparent transition-all"
               value={searchQuery}
               onChange={(e) => handleSearch(e.target.value)}
               onFocus={() => searchQuery.length >= 2 && setShowSearchResults(true)}
@@ -186,8 +186,8 @@ const Header = ({ onMenuClick }) => {
                       </div>
                       <span className={`text-[10px] px-1.5 py-0.5 rounded border ${result.isCategory ? 'border-cyan-500 text-cyan-400' :
                         result.severity === 'critical' ? 'border-red-500 text-red-400' :
-                          result.severity === 'high' ? 'border-orange-500 text-orange-400' :
-                            'border-blue-500 text-blue-400'
+                          result.severity === 'high' ? 'border-cyan-600 text-cyan-400' :
+                            'border-cyan-500 text-cyan-400'
                         }`}>
                         {result.isCategory ? 'CATEGORY' : result.severity}
                       </span>
@@ -229,12 +229,12 @@ const Header = ({ onMenuClick }) => {
                     notifications.map((notification) => (
                       <div
                         key={notification.id}
-                        className={`p-3 border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors cursor-pointer ${!notification.is_read ? 'bg-blue-500/5' : ''}`}
+                        className={`p-3 border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors cursor-pointer ${!notification.is_read ? 'bg-cyan-500/5' : ''}`}
                         onClick={() => handleMarkAsRead(notification.id)}
                       >
                         <div className="flex gap-3">
                           <div className="mt-1">
-                            <div className={`w-2 h-2 rounded-full ${!notification.is_read ? 'bg-blue-400' : 'bg-slate-600'}`}></div>
+                            <div className={`w-2 h-2 rounded-full ${!notification.is_read ? 'bg-cyan-400' : 'bg-slate-600'}`}></div>
                           </div>
                           <div>
                             <p className="text-sm text-gray-200">{notification.message}</p>
@@ -269,7 +269,7 @@ const Header = ({ onMenuClick }) => {
                     className="w-full h-full object-cover"
                   />
                 ) : (
-                  <div className="w-full h-full bg-blue-600 flex items-center justify-center">
+                  <div className="w-full h-full bg-cyan-600 flex items-center justify-center">
                     {user?.full_name?.charAt(0)?.toUpperCase() || user?.fullName?.charAt(0)?.toUpperCase() || 'U'}
                   </div>
                 )}

@@ -57,11 +57,7 @@ class AboutScreen extends StatelessWidget {
                   width: 100,
                   height: 100,
                   decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [AppColors.primary, AppColors.primary.withValues(alpha: 0.7)],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
+                    color: Colors.white,
                     borderRadius: BorderRadius.circular(24),
                     boxShadow: [
                       BoxShadow(
@@ -71,22 +67,38 @@ class AboutScreen extends StatelessWidget {
                       ),
                     ],
                   ),
-                  child: const Icon(
-                    Icons.traffic,
-                    size: 50,
-                    color: Colors.white,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(24),
+                    child: Image.asset(
+                      'assets/images/rnp-logo.png',
+                      width: 80,
+                      height: 80,
+                      fit: BoxFit.contain,
+                      errorBuilder: (context, error, stackTrace) => const Icon(
+                        Icons.local_police,
+                        size: 50,
+                        color: AppColors.primary,
+                      ),
+                    ),
                   ),
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  AppConfig.appName,
+                  'Rwanda National Police',
                   style: AppTextStyles.titleLarge.copyWith(
                     color: AppColors.textPrimary,
                     fontSize: 24,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: 4),
+                Text(
+                  'Traffic Management System',
+                  style: AppTextStyles.bodyMedium.copyWith(
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 10),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                   decoration: BoxDecoration(
@@ -105,10 +117,10 @@ class AboutScreen extends StatelessWidget {
 
           // About Section
           _buildSectionCard(
-            title: 'About TrafficGuard AI',
+            title: 'About This App',
             icon: Icons.info_outline,
             child: Text(
-              'TrafficGuard AI is a smart traffic management platform that uses artificial intelligence to detect and report traffic incidents in real-time. Our mission is to make roads safer and traffic flow smoother for everyone in Kigali, Rwanda.',
+              'This is an official Rwanda National Police traffic management application that uses artificial intelligence to detect and report traffic incidents in real-time. Our mission is to make roads safer and traffic flow smoother for everyone in Kigali, Rwanda.',
               style: AppTextStyles.bodyMedium.copyWith(
                 color: AppColors.textSecondary,
                 height: 1.5,
@@ -198,7 +210,7 @@ class AboutScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 20),
                 Text(
-                  '© 2026 TrafficGuard AI Team',
+                  '© 2026 Rwanda National Police',
                   style: AppTextStyles.bodySmall.copyWith(color: AppColors.textTertiary),
                 ),
                 const SizedBox(height: 6),
@@ -206,7 +218,7 @@ class AboutScreen extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Text(
-                      'Made with ',
+                      'Serving with ',
                       style: AppTextStyles.bodySmall.copyWith(color: AppColors.textTertiary),
                     ),
                     const Icon(Icons.favorite, color: AppColors.error, size: 14),
@@ -225,7 +237,7 @@ class AboutScreen extends StatelessWidget {
                     border: Border.all(color: AppColors.border),
                   ),
                   child: Text(
-                    'Final Year Project',
+                    'Traffic Management System',
                     style: AppTextStyles.labelSmall.copyWith(color: AppColors.textTertiary),
                   ),
                 ),

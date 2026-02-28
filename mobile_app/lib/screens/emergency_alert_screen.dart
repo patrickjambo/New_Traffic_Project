@@ -163,7 +163,7 @@ class _EmergencyAlertScreenState extends State<EmergencyAlertScreen>
     _flashController.stop();
     _pulseController.stop();
     
-    // 🔥 Mark this emergency as accepted to prevent duplicate alerts
+    // Mark this emergency as accepted to prevent duplicate alerts
     _wsService.markEmergencyAccepted(emergencyId);
     
     // Call API to update database - this will trigger backend to emit to dashboard

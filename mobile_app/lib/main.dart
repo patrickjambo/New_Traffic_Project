@@ -18,7 +18,6 @@ import 'screens/about_screen.dart';
 import 'screens/emergency_report_screen.dart';
 import 'screens/auto_monitor_screen.dart';
 import 'screens/emergency_alert_screen.dart';
-import 'screens/emergency_response_screen.dart';
 import 'screens/deployments_screen.dart';
 import 'screens/ai_video_capture_screen.dart';
 import 'services/websocket_service.dart';
@@ -50,15 +49,16 @@ void main() async {
     return true;
   };
   
-  // Initialize services
+  // 🚀 OPTIMIZED: Initialize critical services in parallel (non-blocking)
+  // Only await ServerConfig as it's needed for API calls
   try {
-    // 🔥 Initialize ServerConfig FIRST (loads saved IP from storage)
     await ServerConfig.init();
     print('✅ ServerConfig initialized: ${ServerConfig.baseApiUrl}');
   } catch (e) {
     print('Failed to initialize ServerConfig: $e');
   }
   
+  // Initialize API service (sync, no await needed)
   try {
     final apiService = ApiService();
     apiService.initialize();
@@ -66,6 +66,36 @@ void main() async {
     print('Failed to initialize API Service: $e');
   }
   
+  // 🚀 OPTIMIZED: Initialize app state early (needed for theme)
+  await appState.initialize();
+  
+  // Set system UI overlay style
+  SystemChrome.setSystemUIOverlayStyle(
+    appState.theme.isDarkMode
+        ? SystemUiOverlayStyle.light.copyWith(
+            statusBarColor: Colors.transparent,
+            systemNavigationBarColor: const Color(0xFF1E1E1E),
+          )
+        : SystemUiOverlayStyle.dark.copyWith(
+            statusBarColor: Colors.transparent,
+            systemNavigationBarColor: Colors.white,
+          ),
+  );
+  
+  // 🚀 OPTIMIZED: Launch app immediately, defer heavy services
+  runApp(const TrafficGuardApp());
+  
+  // 🚀 DEFERRED: Initialize non-critical services AFTER app is running
+  _initializeDeferredServices();
+}
+
+/// Initialize non-critical services after the app UI is shown
+/// This prevents blocking the startup
+void _initializeDeferredServices() async {
+  // Small delay to let the first frame render
+  await Future.delayed(const Duration(milliseconds: 100));
+  
+  // Initialize notification service (can be deferred)
   try {
     final notificationService = NotificationService();
     await notificationService.initialize();
@@ -100,30 +130,13 @@ void main() async {
     print('Failed to initialize Deployment Alert Service: $e');
   }
   
+  // Initialize WebSocket (connect in background)
   try {
     final websocketService = WebSocketService();
     websocketService.connect();
   } catch (e) {
     print('Failed to initialize WebSocket Service: $e');
   }
-  
-  // Initialize app state (theme, alerts, connection)
-  await appState.initialize();
-  
-  // Set system UI overlay style
-  SystemChrome.setSystemUIOverlayStyle(
-    appState.theme.isDarkMode
-        ? SystemUiOverlayStyle.light.copyWith(
-            statusBarColor: Colors.transparent,
-            systemNavigationBarColor: const Color(0xFF1E1E1E),
-          )
-        : SystemUiOverlayStyle.dark.copyWith(
-            statusBarColor: Colors.transparent,
-            systemNavigationBarColor: Colors.white,
-          ),
-  );
-  
-  runApp(const TrafficGuardApp());
 }
 
 class TrafficGuardApp extends StatefulWidget {

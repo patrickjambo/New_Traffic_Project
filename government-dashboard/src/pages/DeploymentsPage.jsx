@@ -38,6 +38,8 @@ const DeploymentsPage = () => {
         total_officers_deployed: 0
     });
     const [loading, setLoading] = useState(true);
+    const [initialLoading, setInitialLoading] = useState(true);
+    const [lastUpdated, setLastUpdated] = useState(new Date());
     const [searchTerm, setSearchTerm] = useState('');
     const [filterStatus, setFilterStatus] = useState('All');
 
@@ -70,15 +72,17 @@ const DeploymentsPage = () => {
     const [showOfficerTracker, setShowOfficerTracker] = useState(true);
     const [officerLocations, setOfficerLocations] = useState(new Map());
 
-    const fetchDeployments = async () => {
+    const fetchDeployments = async (silent = false) => {
         try {
-            setLoading(true);
+            if (!silent) setLoading(true);
             const response = await deploymentService.getAll();
             setDeployments(response.data || []);
+            setLastUpdated(new Date());
         } catch (error) {
             console.error('Error fetching deployments:', error);
         } finally {
-            setLoading(false);
+            if (!silent) setLoading(false);
+            setInitialLoading(false);
         }
     };
 
@@ -96,7 +100,34 @@ const DeploymentsPage = () => {
     const fetchAvailableOfficers = async () => {
         try {
             const response = await deploymentService.getAvailableOfficers();
-            setAvailableOfficers(response.data || []);
+            const officers = response.data || [];
+            
+            // Remove duplicates based on officer id
+            const uniqueOfficersMap = new Map();
+            officers.forEach(officer => {
+                if (!uniqueOfficersMap.has(officer.id)) {
+                    uniqueOfficersMap.set(officer.id, officer);
+                }
+            });
+            const uniqueOfficers = Array.from(uniqueOfficersMap.values());
+            
+            // Sort officers: online/active first (by last_login time), then offline
+            const sortedOfficers = uniqueOfficers.sort((a, b) => {
+                // Check if officer is online/on duty
+                const aIsOnline = a.is_on_duty || a.status === 'Available' || a.is_online;
+                const bIsOnline = b.is_on_duty || b.status === 'Available' || b.is_online;
+                
+                // Online officers come first
+                if (aIsOnline && !bIsOnline) return -1;
+                if (!aIsOnline && bIsOnline) return 1;
+                
+                // If both have same online status, sort by last_login (most recent first)
+                const aLogin = a.last_login ? new Date(a.last_login).getTime() : 0;
+                const bLogin = b.last_login ? new Date(b.last_login).getTime() : 0;
+                return bLogin - aLogin;
+            });
+            
+            setAvailableOfficers(sortedOfficers);
         } catch (error) {
             console.error('Error fetching available officers:', error);
         }
@@ -144,6 +175,14 @@ const DeploymentsPage = () => {
             fetchDeployments();
             fetchStats();
             fetchAvailableOfficers(); // Load officers for tracker
+            
+            // Auto-refresh every 10 seconds
+            const refreshInterval = setInterval(() => {
+                fetchDeployments(true);
+                fetchStats();
+            }, 10000);
+
+            return () => clearInterval(refreshInterval);
         }
     }, [isAuthenticated]);
 
@@ -229,12 +268,50 @@ const DeploymentsPage = () => {
             });
         });
 
+        // Listen for new incidents in real-time
+        const unsubIncident = subscribe('incident:new', (data) => {
+            console.log('🚨 New incident reported:', data);
+            toast.error(`New Incident: ${data.incident_type || data.type}`, { icon: '🚨', duration: 5000 });
+            fetchActiveEvents();
+        });
+
+        // Listen for incident updates
+        const unsubIncidentUpdate = subscribe('incident:update', (data) => {
+            console.log('🔄 Incident updated:', data);
+            fetchActiveEvents();
+        });
+
+        // Listen for new emergencies in real-time
+        const unsubEmergency = subscribe('emergency:new', (data) => {
+            console.log('🆘 New emergency reported:', data);
+            toast.error(`New Emergency: ${data.emergency_type || 'Alert'}`, { icon: '🆘', duration: 5000 });
+            fetchActiveEvents();
+        });
+
+        // Listen for emergency updates
+        const unsubEmergencyUpdate = subscribe('emergency:update', (data) => {
+            console.log('🔄 Emergency updated:', data);
+            fetchActiveEvents();
+        });
+
+        // Listen for AI-detected incidents
+        const unsubAIIncident = subscribe('ai:incident_detected', (data) => {
+            console.log('🤖 AI detected incident:', data);
+            toast(`AI Detected: ${data.type || 'Traffic Event'}`, { icon: '🤖', duration: 5000 });
+            fetchActiveEvents();
+        });
+
         return () => {
             unsubAck();
             unsubStatus();
             unsubNew();
             unsubUpdate();
             unsubLocation();
+            unsubIncident();
+            unsubIncidentUpdate();
+            unsubEmergency();
+            unsubEmergencyUpdate();
+            unsubAIIncident();
         };
     }, [isAuthenticated, subscribe]);
 
@@ -249,6 +326,13 @@ const DeploymentsPage = () => {
                     const randomUnit = units[Math.floor(Math.random() * units.length)];
                     setFormData(prev => ({ ...prev, unitName: `Unit ${randomUnit}-${Math.floor(Math.random() * 99) + 1}` }));
                 }
+                
+                // Auto-refresh active events every 5 seconds when modal is open
+                const eventRefreshInterval = setInterval(() => {
+                    fetchActiveEvents();
+                }, 5000);
+                
+                return () => clearInterval(eventRefreshInterval);
             }
         }
     }, [isModalOpen, isManageOfficersOpen]);
@@ -401,9 +485,9 @@ const DeploymentsPage = () => {
     };
 
     const statCards = [
-        { label: 'Total Units', value: stats.total_deployments, icon: Shield, color: 'text-blue-400', bg: 'bg-blue-500/10' },
-        { label: 'Active Now', value: stats.active_deployments, icon: Activity, color: 'text-green-400', bg: 'bg-green-500/10' },
-        { label: 'Pending Ack', value: stats.pending_acknowledgments || 0, icon: Bell, color: 'text-orange-400', bg: 'bg-orange-500/10' },
+        { label: 'Total Units', value: stats.total_deployments, icon: Shield, color: 'text-cyan-400', bg: 'bg-cyan-500/10' },
+        { label: 'Active Now', value: stats.active_deployments, icon: Activity, color: 'text-cyan-400', bg: 'bg-cyan-500/10' },
+        { label: 'Pending Ack', value: stats.pending_acknowledgments || 0, icon: Bell, color: 'text-cyan-400', bg: 'bg-cyan-500/10' },
         { label: 'Total Officers', value: stats.total_officers_deployed, icon: Users, color: 'text-cyan-400', bg: 'bg-cyan-500/10' },
     ];
 
@@ -423,15 +507,25 @@ const DeploymentsPage = () => {
                         </Link>
                         <div>
                             <h1 className="text-4xl font-bold tracking-tight">Deployment Management</h1>
-                            <p className="text-blue-400/80 font-medium">Real-time police unit coordination & oversight</p>
+                            <p className="text-cyan-400/80 font-medium">Real-time police unit coordination & oversight</p>
                         </div>
                     </div>
                     <div className="flex items-center gap-3">
+                        {/* Real-time status indicator */}
+                        <div className="flex items-center gap-2 px-3 py-2 bg-cyan-500/10 rounded-xl border border-cyan-500/20">
+                            <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-cyan-400 animate-pulse' : 'bg-gray-400'}`}></div>
+                            <span className="text-xs font-medium text-cyan-400">
+                                {isConnected ? 'Live' : 'Offline'}
+                            </span>
+                            <span className="text-xs text-gray-500">
+                                {lastUpdated.toLocaleTimeString()}
+                            </span>
+                        </div>
                         <button
                             onClick={() => setShowOfficerTracker(!showOfficerTracker)}
                             className={`flex items-center justify-center gap-2 px-4 py-3.5 ${
                                 showOfficerTracker 
-                                    ? 'bg-indigo-600 hover:bg-indigo-500' 
+                                    ? 'bg-cyan-600 hover:bg-cyan-500' 
                                     : 'bg-white/5 hover:bg-white/10'
                             } rounded-2xl transition-all font-bold active:scale-95`}
                             title="Toggle Live Officer Tracking"
@@ -441,7 +535,7 @@ const DeploymentsPage = () => {
                         </button>
                         <button
                             onClick={() => setIsModalOpen(true)}
-                            className="flex items-center justify-center gap-2 px-6 py-3.5 bg-blue-600 hover:bg-blue-500 rounded-2xl transition-all font-bold shadow-lg shadow-blue-600/25 active:scale-95"
+                            className="flex items-center justify-center gap-2 px-6 py-3.5 bg-cyan-600 hover:bg-cyan-500 rounded-2xl transition-all font-bold shadow-lg shadow-cyan-600/25 active:scale-95"
                         >
                             <Plus className="w-5 h-5" />
                             New Deployment
@@ -519,9 +613,9 @@ const DeploymentsPage = () => {
                 </div>
 
                 {/* Deployments Grid */}
-                {loading ? (
+                {initialLoading ? (
                     <div className="flex flex-col items-center justify-center py-24">
-                        <div className="w-12 h-12 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin mb-4"></div>
+                        <div className="w-12 h-12 border-4 border-cyan-500/20 border-t-cyan-500 rounded-full animate-spin mb-4"></div>
                         <p className="text-gray-400 font-medium animate-pulse">Synchronizing deployment data...</p>
                     </div>
                 ) : filteredDeployments.length === 0 ? (
@@ -535,7 +629,7 @@ const DeploymentsPage = () => {
                 ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                         {filteredDeployments.map((deployment) => (
-                            <div key={deployment.id} className="bg-slate-800/40 backdrop-blur-md rounded-3xl p-6 border border-white/5 hover:border-blue-500/30 transition-all hover:translate-y-[-4px] group relative">
+                            <div key={deployment.id} className="bg-slate-800/40 backdrop-blur-md rounded-3xl p-6 border border-white/5 hover:border-cyan-500/30 transition-all hover:translate-y-[-4px] group relative">
                                 {/* Status Indicator Line */}
                                 <div className={`absolute top-0 left-0 right-0 h-1 ${deployment.status === 'Active' ? 'bg-green-500' :
                                     deployment.status === 'Standby' ? 'bg-yellow-500' :
@@ -544,11 +638,11 @@ const DeploymentsPage = () => {
 
                                 <div className="flex justify-between items-start mb-6">
                                     <div className="flex items-center gap-4 flex-1 min-w-0">
-                                        <div className="w-12 h-12 bg-blue-500/10 rounded-2xl flex items-center justify-center text-blue-400 group-hover:bg-blue-600 group-hover:text-white transition-all flex-shrink-0">
+                                        <div className="w-12 h-12 bg-cyan-500/10 rounded-2xl flex items-center justify-center text-cyan-400 group-hover:bg-cyan-600 group-hover:text-white transition-all flex-shrink-0">
                                             <Users className="w-6 h-6" />
                                         </div>
                                         <div className="min-w-0">
-                                            <h3 className="font-bold text-xl text-white group-hover:text-blue-400 transition-colors truncate">{deployment.unit_name || 'Unnamed Unit'}</h3>
+                                            <h3 className="font-bold text-xl text-white group-hover:text-cyan-400 transition-colors truncate">{deployment.unit_name || 'Unnamed Unit'}</h3>
                                             <div className={`text-[10px] px-2 py-0.5 rounded-full border font-black uppercase tracking-tighter mt-1 inline-block ${getStatusColor(deployment.status)}`}>
                                                 {deployment.status}
                                             </div>
@@ -564,7 +658,7 @@ const DeploymentsPage = () => {
                                                 });
                                                 setIsManageOfficersOpen(true);
                                             }}
-                                            className="p-2 hover:bg-white/10 rounded-xl transition-colors text-blue-400 group/btn"
+                                            className="p-2 hover:bg-white/10 rounded-xl transition-colors text-cyan-400 group/btn"
                                             title="Manage Officers"
                                         >
                                             <Users className="w-4 h-4 group-hover/btn:scale-110 transition-transform" />
@@ -592,7 +686,7 @@ const DeploymentsPage = () => {
 
                                 <div className="space-y-4 mb-8">
                                     <div className="flex items-start gap-3 text-gray-400">
-                                        <MapPin className="w-4 h-4 mt-0.5 text-blue-500/50" />
+                                        <MapPin className="w-4 h-4 mt-0.5 text-cyan-500/50" />
                                         <span className="text-sm font-medium leading-tight">{deployment.address || 'No location specified'}</span>
                                     </div>
                                     <div className="flex items-center gap-3 text-gray-400">
@@ -692,12 +786,12 @@ const DeploymentsPage = () => {
                             {/* Quick Link Section */}
                             <div className="space-y-5">
                                 <div className="flex justify-between items-center px-1">
-                                    <label className="text-xs font-black uppercase tracking-[0.2em] text-blue-400/80 flex items-center gap-2">
-                                        <Activity className="w-4 h-4" /> Active Events Needing Support
+                                    <label className="text-xs font-black uppercase tracking-[0.2em] text-cyan-400/80 flex items-center gap-2">
+                                        <Activity className="w-4 h-4 animate-pulse" /> Active Events Needing Support
                                     </label>
                                     <div className="flex items-center gap-2">
-                                        <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-                                        <span className="text-[10px] font-black text-white bg-blue-600/20 px-3 py-1 rounded-full border border-blue-500/20">
+                                        <span className="w-2 h-2 rounded-full bg-cyan-500 animate-pulse" />
+                                        <span className="text-[10px] font-black text-white bg-cyan-600/20 px-3 py-1 rounded-full border border-cyan-500/20">
                                             {activeEvents.length} LIVE EVENTS
                                         </span>
                                     </div>
@@ -705,7 +799,7 @@ const DeploymentsPage = () => {
 
                                 <div className="flex gap-4 overflow-x-auto pb-6 custom-scrollbar -mx-2 px-2">
                                     {activeEvents.length === 0 ? (
-                                        <div className="w-full py-12 bg-white/[0.02] rounded-[24px] border border-dashed border-white/10 flex flex-col items-center justify-center text-gray-600 group hover:border-blue-500/30 transition-colors">
+                                        <div className="w-full py-12 bg-white/[0.02] rounded-[24px] border border-dashed border-white/10 flex flex-col items-center justify-center text-gray-600 group hover:border-cyan-500/30 transition-colors">
                                             <div className="w-16 h-16 bg-white/5 rounded-full flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
                                                 <Shield className="w-8 h-8 opacity-20" />
                                             </div>
@@ -718,14 +812,14 @@ const DeploymentsPage = () => {
                                                 key={`${event.eventType}-${event.id}`}
                                                 onClick={() => handleEventSelect(event)}
                                                 className={`flex-shrink-0 w-72 p-5 rounded-[24px] border transition-all duration-500 cursor-pointer group relative overflow-hidden ${formData.linkedEvent?.id === event.id && formData.linkedEvent?.eventType === event.eventType
-                                                    ? 'bg-blue-600 border-blue-400 shadow-2xl shadow-blue-600/40 scale-[1.02]'
-                                                    : 'bg-slate-950/40 border-white/5 hover:border-blue-500/40 hover:bg-slate-900/60'
+                                                    ? 'bg-cyan-600 border-cyan-400 shadow-2xl shadow-cyan-600/40 scale-[1.02]'
+                                                    : 'bg-slate-950/40 border-white/5 hover:border-cyan-500/40 hover:bg-slate-900/60'
                                                     }`}
                                             >
                                                 {/* Card Background Glow */}
                                                 <div className={`absolute -right-8 -top-8 w-24 h-24 rounded-full blur-3xl transition-opacity duration-500 ${formData.linkedEvent?.id === event.id && formData.linkedEvent?.eventType === event.eventType
                                                     ? 'bg-white/20 opacity-100'
-                                                    : 'bg-blue-500/10 opacity-0 group-hover:opacity-100'
+                                                    : 'bg-cyan-500/10 opacity-0 group-hover:opacity-100'
                                                     }`} />
 
                                                 <div className="flex justify-between items-start mb-4 relative z-10">
@@ -736,8 +830,8 @@ const DeploymentsPage = () => {
                                                         {event.eventType}
                                                     </div>
                                                     <div className="flex items-center gap-1.5">
-                                                        <span className="text-[9px] font-black text-white/40 uppercase tracking-tighter">Live</span>
-                                                        <div className={`w-2 h-2 rounded-full animate-pulse ${event.severity === 'critical' ? 'bg-red-500' : 'bg-yellow-500'
+                                                        <span className="text-[9px] font-black text-cyan-400/60 uppercase tracking-tighter">Live</span>
+                                                        <div className={`w-2 h-2 rounded-full animate-pulse ${event.severity === 'critical' ? 'bg-red-500' : 'bg-cyan-400'
                                                             }`} />
                                                     </div>
                                                 </div>
@@ -745,10 +839,10 @@ const DeploymentsPage = () => {
                                                     }`}>
                                                     {event.label.charAt(0).toUpperCase() + event.label.slice(1)}
                                                 </h4>
-                                                <div className={`flex items-center gap-2 text-[11px] font-bold ${formData.linkedEvent?.id === event.id && formData.linkedEvent?.eventType === event.eventType ? 'text-blue-100' : 'text-gray-500'
+                                                <div className={`flex items-center gap-2 text-[11px] font-bold ${formData.linkedEvent?.id === event.id && formData.linkedEvent?.eventType === event.eventType ? 'text-cyan-100' : 'text-gray-500'
                                                     }`}>
-                                                    <MapPin className={`w-3.5 h-3.5 ${formData.linkedEvent?.id === event.id ? 'text-white' : 'text-blue-500'}`} />
-                                                    <span className="truncate">{event.location || 'Unknown Location'}</span>
+                                                    <MapPin className={`w-3.5 h-3.5 ${formData.linkedEvent?.id === event.id ? 'text-white' : 'text-cyan-500'}`} />
+                                                    <span className="truncate">{event.location || `Current Location (${event.latitude?.toFixed(4) || '-1.5043'}, ${event.longitude?.toFixed(4) || '29.6380'})`}</span>
                                                 </div>
                                             </div>
                                         ))
@@ -758,33 +852,33 @@ const DeploymentsPage = () => {
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                                 <div className="space-y-3 group">
-                                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500 ml-1 group-focus-within:text-blue-400 transition-colors">Unit Designation</label>
+                                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500 ml-1 group-focus-within:text-cyan-400 transition-colors">Unit Designation</label>
                                     <div className="relative">
-                                        <Shield className="absolute left-5 top-1/2 -translate-y-1/2 w-5 h-5 text-blue-500/30 group-focus-within:text-blue-500 transition-colors" />
+                                        <Shield className="absolute left-5 top-1/2 -translate-y-1/2 w-5 h-5 text-cyan-500/30 group-focus-within:text-cyan-500 transition-colors" />
                                         <input
                                             required
                                             type="text"
                                             placeholder="e.g. Unit Delta"
                                             value={formData.unitName}
                                             onChange={(e) => setFormData({ ...formData, unitName: e.target.value })}
-                                            className="w-full bg-slate-950/50 border border-white/5 rounded-2xl pl-14 pr-6 py-5 text-white placeholder-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:bg-slate-950 transition-all font-black text-lg shadow-inner"
+                                            className="w-full bg-slate-950/50 border border-white/5 rounded-2xl pl-14 pr-6 py-5 text-white placeholder-gray-700 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:bg-slate-950 transition-all font-black text-lg shadow-inner"
                                         />
-                                        <div className="absolute right-5 top-1/2 -translate-y-1/2 px-2 py-1 bg-blue-600/10 rounded-md border border-blue-500/20">
-                                            <span className="text-[8px] font-black text-blue-400 uppercase tracking-tighter">Autonomous</span>
+                                        <div className="absolute right-5 top-1/2 -translate-y-1/2 px-2 py-1 bg-cyan-600/10 rounded-md border border-cyan-500/20">
+                                            <span className="text-[8px] font-black text-cyan-400 uppercase tracking-tighter">Autonomous</span>
                                         </div>
                                     </div>
                                 </div>
                                 <div className="space-y-3 group">
-                                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500 ml-1 group-focus-within:text-blue-400 transition-colors">Deployment Zone</label>
+                                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500 ml-1 group-focus-within:text-cyan-400 transition-colors">Deployment Zone</label>
                                     <div className="relative">
-                                        <MapPin className="absolute left-5 top-1/2 -translate-y-1/2 w-5 h-5 text-blue-500/30 group-focus-within:text-blue-500 transition-colors" />
+                                        <MapPin className="absolute left-5 top-1/2 -translate-y-1/2 w-5 h-5 text-cyan-500/30 group-focus-within:text-cyan-500 transition-colors" />
                                         <input
                                             required
                                             type="text"
                                             placeholder="e.g. Kimironko Road"
                                             value={formData.address}
                                             onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                                            className="w-full bg-slate-950/50 border border-white/5 rounded-2xl pl-14 pr-6 py-5 text-white placeholder-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:bg-slate-950 transition-all font-black text-lg shadow-inner"
+                                            className="w-full bg-slate-950/50 border border-white/5 rounded-2xl pl-14 pr-6 py-5 text-white placeholder-gray-700 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:bg-slate-950 transition-all font-black text-lg shadow-inner"
                                         />
                                     </div>
                                 </div>
@@ -793,23 +887,23 @@ const DeploymentsPage = () => {
                             <div className="space-y-5">
                                 <div className="flex justify-between items-end px-1">
                                     <div>
-                                        <label className="text-xs font-black uppercase tracking-[0.2em] text-blue-400/80">Deploy Personnel</label>
+                                        <label className="text-xs font-black uppercase tracking-[0.2em] text-cyan-400/80">Deploy Personnel</label>
                                         <p className="text-[10px] font-bold text-gray-600 mt-1">SELECT ONE OR MORE OFFICERS FOR THIS UNIT</p>
                                     </div>
                                     <div className="flex items-center gap-4">
                                         <button
                                             type="button"
                                             onClick={() => setIsAddOfficerModalOpen(true)}
-                                            className="flex items-center gap-2 px-4 py-2 bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 rounded-xl text-[10px] font-black uppercase transition-all border border-blue-500/20"
+                                            className="flex items-center gap-2 px-4 py-2 bg-cyan-600/20 text-cyan-400 hover:bg-cyan-600/30 rounded-xl text-[10px] font-black uppercase transition-all border border-cyan-500/20"
                                         >
                                             <Plus className="w-3 h-3" /> Add New Officer
                                         </button>
                                         <div className="flex items-center gap-3 bg-white/5 px-4 py-2 rounded-2xl border border-white/5">
-                                            <button type="button" onClick={handleSelectAllOfficers} className="text-[10px] font-black uppercase text-blue-400 hover:text-blue-300 transition-colors">Select All</button>
+                                            <button type="button" onClick={handleSelectAllOfficers} className="text-[10px] font-black uppercase text-cyan-400 hover:text-cyan-300 transition-colors">Select All</button>
                                             <div className="w-px h-3 bg-white/10" />
                                             <button type="button" onClick={handleClearAllOfficers} className="text-[10px] font-black uppercase text-gray-500 hover:text-gray-400 transition-colors">Clear</button>
                                         </div>
-                                        <span className="text-[10px] font-black text-white bg-blue-600 px-3 py-2 rounded-xl shadow-lg shadow-blue-600/20">
+                                        <span className="text-[10px] font-black text-white bg-cyan-600 px-3 py-2 rounded-xl shadow-lg shadow-cyan-600/20">
                                             {formData.selectedOfficers.length} SELECTED
                                         </span>
                                     </div>
@@ -825,21 +919,27 @@ const DeploymentsPage = () => {
                                         </div>
                                     ) : (
                                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4 max-h-[350px] overflow-y-auto custom-scrollbar">
-                                            {availableOfficers.map((officer) => (
+                                            {availableOfficers.map((officer) => {
+                                                const isOnline = officer.is_on_duty || officer.status === 'Available' || officer.is_online;
+                                                return (
                                                 <div
                                                     key={officer.id}
                                                     onClick={() => toggleOfficer(officer.id)}
                                                     className={`group relative flex items-center justify-between p-5 cursor-pointer rounded-[24px] transition-all duration-500 overflow-hidden ${formData.selectedOfficers.includes(officer.id)
-                                                        ? 'bg-blue-600 shadow-xl shadow-blue-600/30 scale-[1.02]'
-                                                        : 'bg-white/[0.03] hover:bg-white/[0.06] border border-transparent hover:border-blue-500/20'
+                                                        ? 'bg-cyan-600 shadow-xl shadow-cyan-600/30 scale-[1.02]'
+                                                        : 'bg-white/[0.03] hover:bg-white/[0.06] border border-transparent hover:border-cyan-500/20'
                                                         }`}
                                                 >
                                                     <div className="flex items-center gap-4 relative z-10">
-                                                        <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black text-lg transition-all duration-500 ${formData.selectedOfficers.includes(officer.id)
-                                                            ? 'bg-white/20 text-white rotate-6'
-                                                            : 'bg-slate-800 text-gray-500 group-hover:bg-blue-500/20 group-hover:text-blue-400'
-                                                            }`}>
-                                                            {officer.full_name ? officer.full_name.charAt(0) : (officer.email ? officer.email.charAt(0).toUpperCase() : '?')}
+                                                        <div className="relative">
+                                                            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black text-lg transition-all duration-500 ${formData.selectedOfficers.includes(officer.id)
+                                                                ? 'bg-white/20 text-white rotate-6'
+                                                                : 'bg-slate-800 text-gray-500 group-hover:bg-cyan-500/20 group-hover:text-cyan-400'
+                                                                }`}>
+                                                                {officer.full_name ? officer.full_name.charAt(0) : (officer.email ? officer.email.charAt(0).toUpperCase() : '?')}
+                                                            </div>
+                                                            {/* Online/Offline indicator badge */}
+                                                            <div className={`absolute -top-1 -right-1 w-4 h-4 rounded-full border-2 border-slate-900 ${isOnline ? 'bg-green-500' : 'bg-gray-500'}`} />
                                                         </div>
                                                         <div>
                                                             <p className={`font-black text-sm leading-none mb-1.5 tracking-tight ${formData.selectedOfficers.includes(officer.id) ? 'text-white' : 'text-gray-200'}`}>
@@ -847,17 +947,15 @@ const DeploymentsPage = () => {
                                                             </p>
                                                             <div className="flex flex-col gap-1">
                                                                 <div className="flex items-center gap-2">
-                                                                    <div className={`w-1.5 h-1.5 rounded-full ${officer.status === 'Available' ? 'bg-green-500' : 'bg-yellow-500'}`} />
-                                                                    <p className={`text-[10px] font-black uppercase tracking-widest ${formData.selectedOfficers.includes(officer.id) ? 'text-blue-100' : 'text-gray-500'
+                                                                    <div className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-green-500 animate-pulse' : 'bg-gray-500'}`} />
+                                                                    <p className={`text-[10px] font-black uppercase tracking-widest ${formData.selectedOfficers.includes(officer.id) ? 'text-cyan-100' : 'text-gray-500'
                                                                         }`}>
-                                                                        {officer.unit || 'General Duty'} • {officer.badge_number || 'N/A'}
+                                                                        {officer.unit || 'TRAFFIC UNIT'} • {officer.badge_number || 'RNP-1234'}
                                                                     </p>
                                                                 </div>
-                                                                {officer.status === 'Deployed' && (
-                                                                    <p className={`text-[9px] font-bold uppercase tracking-tighter ${formData.selectedOfficers.includes(officer.id) ? 'text-white/60' : 'text-yellow-500/80'}`}>
-                                                                        At: {officer.current_deployment}
-                                                                    </p>
-                                                                )}
+                                                                <p className={`text-[9px] font-bold uppercase tracking-tighter ${formData.selectedOfficers.includes(officer.id) ? 'text-white/60' : isOnline ? 'text-green-500/80' : 'text-gray-600'}`}>
+                                                                    {isOnline ? '● Online' : '○ Offline'}
+                                                                </p>
                                                             </div>
                                                         </div>
                                                     </div>
@@ -866,10 +964,11 @@ const DeploymentsPage = () => {
                                                             <CheckCircle2 className="w-5 h-5 text-white" />
                                                         </div>
                                                     ) : (
-                                                        <div className="w-8 h-8 rounded-full border-2 border-white/5 group-hover:border-blue-500/30 transition-colors relative z-10" />
+                                                        <div className="w-8 h-8 rounded-full border-2 border-white/5 group-hover:border-cyan-500/30 transition-colors relative z-10" />
                                                     )}
                                                 </div>
-                                            ))}
+                                            );
+                                            })}
                                         </div>
                                     )}
                                 </div>

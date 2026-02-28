@@ -318,7 +318,7 @@ class _EmergencyReportScreenState extends State<EmergencyReportScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            '🚨 EMERGENCY REPORT',
+                            'EMERGENCY REPORT',
                             style: TextStyle(
                               fontWeight: FontWeight.bold,
                               fontSize: 16,

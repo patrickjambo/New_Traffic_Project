@@ -5,10 +5,11 @@ import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:vibration/vibration.dart';
+import 'critical_alert_service.dart';
 
 /// Deployment Alert Service
 /// Handles deployment notifications with distinct sounds/vibrations
-/// Different from emergency alerts - less urgent but still attention-grabbing
+/// URGENT deployments trigger the critical alarm (same as emergency)
 class DeploymentAlertService {
   static final DeploymentAlertService _instance = DeploymentAlertService._internal();
   factory DeploymentAlertService() => _instance;
@@ -90,9 +91,39 @@ class DeploymentAlertService {
   }
 
   /// Show deployment alert with notification, sound, and vibration
+  /// URGENT deployments trigger the mandatory emergency alarm
   Future<void> showDeploymentAlert(Map<String, dynamic> deployment) async {
     print('📋 DEPLOYMENT ALERT: ${deployment['unit_name'] ?? deployment['unitName']}');
 
+    final priority = deployment['priority']?.toString().toLowerCase() ?? 'normal';
+    final isUrgent = priority == 'high' || priority == 'urgent' || priority == 'emergency';
+
+    // For URGENT deployments, use critical alarm (mandatory sound)
+    if (isUrgent) {
+      print('🚨 URGENT DEPLOYMENT - Triggering critical alarm');
+      
+      final criticalService = CriticalAlertService();
+      await criticalService.initialize();
+      
+      criticalService.triggerCriticalAlert({
+        'title': 'URGENT DEPLOYMENT',
+        'message': deployment['instructions'] ?? 'Respond immediately to ${deployment['address'] ?? 'assigned location'}',
+        'type': 'deployment',
+        'priority': priority,
+        'deploymentId': deployment['id'] ?? deployment['deploymentId'] ?? '',
+        'address': deployment['address'] ?? '',
+        'latitude': deployment['latitude'],
+        'longitude': deployment['longitude'],
+        'isEmergency': true,
+        ...deployment,
+      });
+      
+      // Also trigger callback for UI
+      onDeploymentReceived?.call(deployment);
+      return;
+    }
+
+    // Standard priority - use normal deployment alert
     // 1. Show notification
     await _showDeploymentNotification(deployment);
 

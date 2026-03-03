@@ -17,7 +17,9 @@ import 'package:url_launcher/url_launcher.dart';
 /// ============================================================================
 
 class DeploymentsScreen extends StatefulWidget {
-  const DeploymentsScreen({super.key});
+  final int initialTab;
+  
+  const DeploymentsScreen({super.key, this.initialTab = 0});
 
   @override
   State<DeploymentsScreen> createState() => _DeploymentsScreenState();
@@ -41,7 +43,7 @@ class _DeploymentsScreenState extends State<DeploymentsScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 3, vsync: this, initialIndex: widget.initialTab);
     _deploymentService.initialize();
     _setupRealtimeListeners();
     _loadDeployments();
@@ -77,7 +79,9 @@ class _DeploymentsScreenState extends State<DeploymentsScreen>
         _pendingDeployments.removeWhere((d) => d.id == deployment.id);
         
         // Check if deployment is now acknowledged/active
-        if (deployment.acknowledged && deployment.status != 'completed') {
+        // Case-insensitive status comparison for robustness
+        final statusLower = deployment.status.toLowerCase();
+        if (deployment.acknowledged && statusLower != 'completed' && statusLower != 'cancelled') {
           // Update or add to active list
           final existingIndex = _activeDeployments.indexWhere((d) => d.id == deployment.id);
           if (existingIndex >= 0) {
@@ -87,15 +91,19 @@ class _DeploymentsScreenState extends State<DeploymentsScreen>
           }
           // Switch to Active tab
           _tabController.animateTo(1);
-        } else if (deployment.status == 'completed') {
+        } else if (statusLower == 'completed' || statusLower == 'cancelled') {
           // Move to completed
           _activeDeployments.removeWhere((d) => d.id == deployment.id);
           _completedDeployments.insert(0, deployment);
         }
       });
       
-      // Refresh from server in background
-      _loadDeployments();
+      // 🚀 SILENT refresh from server in background (no loading spinner)
+      Future.delayed(const Duration(milliseconds: 1000), () {
+        if (mounted) {
+          _loadDeployments(showLoading: false);
+        }
+      });
     };
 
     _deploymentService.onDeploymentCancelled = (deploymentId) {
@@ -107,11 +115,13 @@ class _DeploymentsScreenState extends State<DeploymentsScreen>
     };
   }
 
-  Future<void> _loadDeployments() async {
-    setState(() {
-      _isLoading = true;
-      _error = null;
-    });
+  Future<void> _loadDeployments({bool showLoading = true}) async {
+    if (showLoading) {
+      setState(() {
+        _isLoading = true;
+        _error = null;
+      });
+    }
 
     try {
       final results = await Future.wait([
@@ -120,17 +130,21 @@ class _DeploymentsScreenState extends State<DeploymentsScreen>
         _deploymentService.getCompletedDeployments(),
       ]);
 
-      setState(() {
-        _pendingDeployments = results[0];
-        _activeDeployments = results[1].where((d) => d.acknowledged).toList();
-        _completedDeployments = results[2];
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _pendingDeployments = results[0];
+          _activeDeployments = results[1].where((d) => d.acknowledged).toList();
+          _completedDeployments = results[2];
+          _isLoading = false;
+        });
+      }
     } catch (e) {
-      setState(() {
-        _error = e.toString();
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _error = e.toString();
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -989,6 +1003,9 @@ class _DeploymentsScreenState extends State<DeploymentsScreen>
               // Instantly update UI for real-time feel
               final updatedDeployment = Deployment(
                 id: deployment.id,
+                unitName: deployment.unitName,
+                status: 'Completed',
+                createdAt: deployment.createdAt,
                 incidentId: deployment.incidentId,
                 officerId: deployment.officerId,
                 assignedBy: deployment.assignedBy,
@@ -1133,6 +1150,9 @@ class _DeploymentsScreenState extends State<DeploymentsScreen>
               // Instantly update UI for real-time feel
               final updatedDeployment = Deployment(
                 id: deployment.id,
+                unitName: deployment.unitName,
+                status: 'Unable',
+                createdAt: deployment.createdAt,
                 incidentId: deployment.incidentId,
                 officerId: deployment.officerId,
                 assignedBy: deployment.assignedBy,
@@ -1559,7 +1579,7 @@ class _DeploymentsScreenState extends State<DeploymentsScreen>
           address: deployment.address,
           latitude: deployment.latitude,
           longitude: deployment.longitude,
-          status: 'acknowledged',
+          status: 'Active',
           priority: deployment.priority,
           instructions: deployment.instructions,
           scheduledTime: deployment.scheduledTime,
@@ -1567,7 +1587,7 @@ class _DeploymentsScreenState extends State<DeploymentsScreen>
           createdAt: deployment.createdAt,
           acknowledged: true,
           acknowledgedAt: DateTime.now(),
-          officerStatus: deployment.officerStatus,
+          officerStatus: 'en_route',
           officerNotes: deployment.officerNotes,
           incidentType: deployment.incidentType,
           incidentSeverity: deployment.incidentSeverity,
@@ -1575,6 +1595,13 @@ class _DeploymentsScreenState extends State<DeploymentsScreen>
           emergencyType: deployment.emergencyType,
           emergencySeverity: deployment.emergencySeverity,
           emergencyDescription: deployment.emergencyDescription,
+          incidentId: deployment.incidentId,
+          officerId: deployment.officerId,
+          assignedBy: deployment.assignedBy,
+          incidentLocation: deployment.incidentLocation,
+          incidentLatitude: deployment.incidentLatitude,
+          incidentLongitude: deployment.incidentLongitude,
+          notes: deployment.notes,
         );
         _activeDeployments.insert(0, acknowledgedDeployment);
       });
@@ -1582,8 +1609,13 @@ class _DeploymentsScreenState extends State<DeploymentsScreen>
       // SWITCH TO ACTIVE TAB IMMEDIATELY
       _tabController.animateTo(1); // Index 1 = Active tab
       
-      // Refresh from server in background (for any other updates)
-      _loadDeployments();
+      // 🚀 SILENT refresh from server after a delay (no loading spinner)
+      // Delay ensures backend has processed the acknowledge before we fetch
+      Future.delayed(const Duration(milliseconds: 1500), () {
+        if (mounted) {
+          _loadDeployments(showLoading: false);
+        }
+      });
     } else {
       _showSnackBar(result['message'] ?? 'Failed to acknowledge', isError: true);
     }
@@ -1593,6 +1625,9 @@ class _DeploymentsScreenState extends State<DeploymentsScreen>
     // Instantly update UI before API call for real-time feel
     final updatedDeployment = Deployment(
       id: deployment.id,
+      unitName: deployment.unitName,
+      status: newStatus == 'completed' ? 'Completed' : deployment.status,
+      createdAt: deployment.createdAt,
       incidentId: deployment.incidentId,
       officerId: deployment.officerId,
       assignedBy: deployment.assignedBy,
@@ -1650,13 +1685,17 @@ class _DeploymentsScreenState extends State<DeploymentsScreen>
     );
 
     if (result['success'] == true) {
-      // Refresh to get server-confirmed data
-      _loadDeployments();
+      // 🚀 SILENT refresh to get server-confirmed data (no loading spinner)
+      Future.delayed(const Duration(milliseconds: 1000), () {
+        if (mounted) {
+          _loadDeployments(showLoading: false);
+        }
+      });
     } else {
       // Revert on failure
       _showSnackBar(result['message'] ?? 'Failed to update status',
           isError: true);
-      _loadDeployments();
+      _loadDeployments(showLoading: false);
     }
   }
 

@@ -220,8 +220,25 @@ export const DataProvider = ({ children }) => {
   // Handle emergency update
   const handleEmergencyUpdate = useCallback((update) => {
     console.log('🔄 Emergency update received:', update);
+    // Handle both 'id' and 'emergencyId' field names
+    const emergencyId = update.id || update.emergencyId;
+    if (!emergencyId) return;
+    
     setEmergencies(prev =>
-      prev.map(em => em.id === update.id ? { ...em, ...update } : em)
+      prev.map(em => {
+        if (em.id === emergencyId || em.id === parseInt(emergencyId)) {
+          return { 
+            ...em, 
+            ...update,
+            id: em.id, // Keep original id
+            status: update.status || em.status,
+            assigned_to: update.assigned_to || update.officerId || em.assigned_to,
+            assigned_to_name: update.assigned_to_name || update.responder_name || update.officerName || em.assigned_to_name,
+            responder_name: update.responder_name || update.officerName || update.assigned_to_name || em.responder_name,
+          };
+        }
+        return em;
+      })
     );
     // Don't show toast for every status update - too noisy
   }, []);
@@ -283,6 +300,102 @@ export const DataProvider = ({ children }) => {
     // Don't show toast for every update
   }, []);
 
+  // Handle officer response to emergency (real-time)
+  const handleOfficerResponse = useCallback((data) => {
+    console.log('🚔 Officer responding to emergency:', data);
+    const emergencyId = data.emergencyId || data.id;
+    const officerName = data.officerName || data.responder_name || data.assigned_to_name || 'Officer';
+    const officerId = data.officerId || data.assigned_to;
+    const newStatus = data.status || 'dispatched'; // Default to dispatched when officer accepts
+    
+    if (officerName && officerName !== 'Officer') {
+      toast.success(`🚔 ${officerName} is responding!`, {
+        icon: '�',
+        duration: 4000,
+        id: `emergency-response-${emergencyId}`,
+      });
+    }
+    
+    // INSTANT: Update local state with responding officer info
+    if (emergencyId) {
+      setEmergencies(prev =>
+        prev.map(em => {
+          if (em.id === emergencyId || em.id === parseInt(emergencyId)) {
+            return { 
+              ...em, 
+              status: newStatus,
+              assigned_to: officerId,
+              assigned_to_name: officerName,
+              assigned_officer_id: officerId,
+              assigned_officer_name: officerName,
+              responder_name: officerName,
+            };
+          }
+          return em;
+        })
+      );
+    }
+  }, []);
+
+  // Handle emergency status change
+  const handleEmergencyStatusChange = useCallback((data) => {
+    console.log('📊 Emergency status changed:', data);
+    const emergencyId = data.emergencyId || data.id;
+    const newStatus = data.newStatus || data.status;
+    
+    // Update local state with new status
+    if (emergencyId && newStatus) {
+      setEmergencies(prev =>
+        prev.map(em => {
+          if (em.id === emergencyId || em.id === parseInt(emergencyId)) {
+            return { 
+              ...em, 
+              status: newStatus,
+              assigned_to_name: data.responder_name || data.officerName || em.assigned_to_name,
+              responder_name: data.responder_name || data.officerName || em.responder_name,
+            };
+          }
+          return em;
+        })
+      );
+    }
+  }, []);
+  
+  // Handle emergency accepted (same as officer response)
+  const handleEmergencyAccepted = useCallback((data) => {
+    console.log('✅ Emergency accepted:', data);
+    const emergencyId = data.emergencyId || data.id;
+    const officerName = data.officerName || data.responder_name || data.acceptedBy?.officerName || 'Officer';
+    const officerId = data.officerId || data.assigned_to || data.acceptedBy?.officerId;
+    
+    if (officerName && officerName !== 'Officer') {
+      // Use same id pattern as handleOfficerResponse to prevent duplicate toasts
+      toast.success(`🚔 ${officerName} is responding!`, {
+        icon: '✅',
+        duration: 5000,
+        id: `emergency-response-${emergencyId}`,
+      });
+    }
+    
+    // INSTANT: Update local state
+    if (emergencyId) {
+      setEmergencies(prev =>
+        prev.map(em => {
+          if (em.id === emergencyId || em.id === parseInt(emergencyId)) {
+            return { 
+              ...em, 
+              status: 'dispatched',
+              assigned_to: officerId,
+              assigned_to_name: officerName,
+              responder_name: officerName,
+            };
+          }
+          return em;
+        })
+      );
+    }
+  }, []);
+
   // Handle officer assigned
   const handleOfficerAssigned = useCallback((assignment) => {
     console.log('👮 Officer assigned:', assignment);
@@ -312,6 +425,10 @@ export const DataProvider = ({ children }) => {
       subscribe('emergency:new', handleNewEmergency),
       subscribe('emergency:update', handleEmergencyUpdate),
       subscribe('emergency:alert', handleNewEmergency),
+      subscribe('emergency:accepted', handleEmergencyAccepted), // INSTANT: Officer accepted emergency
+      subscribe('emergency:officer_response', handleOfficerResponse),
+      subscribe('emergency:status_change', handleEmergencyStatusChange),
+      subscribe('emergency:status_changed', handleEmergencyStatusChange), // Alternate event name
       subscribe('analysis:complete', handleAnalysisComplete),
       subscribe('notification:new', handleNewNotification),
       subscribe('deployment:new', handleNewDeployment),
@@ -322,7 +439,7 @@ export const DataProvider = ({ children }) => {
     return () => {
       unsubscribers.forEach(unsub => unsub());
     };
-  }, [isConnected, subscribe, handleNewIncident, handleIncidentUpdate, handleNewEmergency, handleEmergencyUpdate, handleAnalysisComplete, handleNewNotification, handleNewDeployment, handleDeploymentUpdate, handleOfficerAssigned]);
+  }, [isConnected, subscribe, handleNewIncident, handleIncidentUpdate, handleNewEmergency, handleEmergencyUpdate, handleEmergencyAccepted, handleOfficerResponse, handleEmergencyStatusChange, handleAnalysisComplete, handleNewNotification, handleNewDeployment, handleDeploymentUpdate, handleOfficerAssigned]);
 
   // ============================================
   // API Functions

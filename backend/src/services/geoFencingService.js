@@ -298,7 +298,8 @@ class GeoFencingService {
 
     /**
      * Create and send targeted alert for an incident
-     * This is the main function that processes incidents and sends geo-fenced alerts
+     * OPTIMIZED: Broadcasts alert IMMEDIATELY, then does DB operations
+     * This ensures police receive alerts in real-time without database delay
      * 
      * @param {object} incident - Incident data
      * @param {boolean} isEmergency - Whether this is an emergency alert
@@ -309,74 +310,18 @@ class GeoFencingService {
             const latitude = incident.latitude || incident.lat;
             const longitude = incident.longitude || incident.lng;
 
-            // Get district for the incident location
-            const district = await this.getDistrictFromLocation(latitude, longitude);
-            
-            // Determine alert type and priority
+            // Determine alert type and priority FIRST
             const alertType = this.determineAlertType(incident.type, isEmergency, aiData);
             const priority = isEmergency ? this.PRIORITY.CRITICAL : this.PRIORITY.MEDIUM;
-            
-            // Determine search radius based on priority
             const searchRadius = isEmergency ? 10 : 5; // km
 
-            // Create alert record (compatible with existing schema)
-            const alertResult = await query(`
-                INSERT INTO incident_alerts (
-                    incident_id, emergency_id, alert_type_id,
-                    alert_type, is_emergency, priority,
-                    incident_location, incident_lat, incident_lng,
-                    latitude, longitude,
-                    district_id,
-                    title, message, ai_confidence, detected_object,
-                    media_urls, target_radius_km, source, created_by
-                ) VALUES (
-                    $1, $2, 
-                    (SELECT id FROM alert_types WHERE code = $3 LIMIT 1),
-                    $3, $4, $5,
-                    POINT($7, $6)::TEXT, $6, $7,
-                    $6, $7,
-                    $8,
-                    $9, $10, $11, $12,
-                    $13, $14, $15, $16
-                )
-                RETURNING id
-            `, [
-                incident.id || null,                      // $1 incident_id
-                incident.emergency_id || null,            // $2 emergency_id
-                alertType,                                // $3 alert_type code
-                isEmergency,                              // $4 is_emergency
-                priority,                                 // $5 priority
-                latitude,                                 // $6 incident_lat / latitude
-                longitude,                                // $7 incident_lng / longitude
-                district?.id || null,                     // $8 district_id
-                this.generateAlertTitle(incident, isEmergency, aiData),   // $9 title
-                this.generateAlertMessage(incident, isEmergency, aiData), // $10 message
-                aiData.confidence || null,                // $11 ai_confidence
-                aiData.detectedObject || null,            // $12 detected_object
-                incident.media_urls || null,              // $13 media_urls
-                searchRadius,                             // $14 target_radius_km
-                aiData.source || 'manual',                // $15 source
-                incident.reported_by || null              // $16 created_by
-            ]);
-
-            const alertId = alertResult.rows[0]?.id;
-
-            // Find target officers within geo-fence
-            const officers = await this.findOfficersInGeoFence(
-                latitude, 
-                longitude, 
-                searchRadius, 
-                district?.id,
-                isEmergency // Include off-duty officers for emergencies
-            );
-
-            console.log(`🎯 Found ${officers.length} officers in geo-fence for alert ${alertId}`);
-
-            // Send alerts to each officer
+            // CRITICAL: Build and broadcast alert payload IMMEDIATELY (before DB)
             const alertPayload = {
-                alertId,
+                alertId: incident.emergency_id || incident.id,
+                emergencyId: incident.emergency_id || incident.id,
                 incidentId: incident.id,
                 type: incident.type,
+                emergency_type: incident.type,
                 severity: incident.severity || 'medium',
                 isEmergency,
                 priority,
@@ -384,26 +329,100 @@ class GeoFencingService {
                     latitude,
                     longitude,
                     address: incident.address || incident.location_name,
-                    district: district?.name || 'Kigali'
+                    district: 'Kigali'
                 },
+                latitude,
+                longitude,
+                location_name: incident.address || incident.location_name,
+                locationName: incident.address || incident.location_name,
                 title: this.generateAlertTitle(incident, isEmergency, aiData),
                 message: this.generateAlertMessage(incident, isEmergency, aiData),
+                description: incident.description || this.generateAlertMessage(incident, isEmergency, aiData),
                 ai: {
                     confidence: aiData.confidence,
                     detectedObject: aiData.detectedObject,
                     detectionMethod: aiData.detectionMethod
                 },
+                aiConfidence: aiData.confidence,
                 mediaUrls: incident.media_urls || [],
+                requiresFullScreen: isEmergency,
+                overrideDoNotDisturb: isEmergency,
+                soundType: isEmergency ? 'siren' : 'default',
+                vibrationPattern: isEmergency ? 'emergency' : 'default',
                 timestamp: new Date().toISOString()
             };
 
-            // Send to each officer and record delivery
-            for (const officer of officers) {
-                await this.sendAlertToOfficer(alertId, officer, alertPayload);
+            // BROADCAST IMMEDIATELY - Don't wait for database
+            console.log(`🚀 BROADCASTING ALERT IMMEDIATELY: ${isEmergency ? 'EMERGENCY' : 'STANDARD'}`);
+            this.broadcastAlert(alertPayload, null); // Broadcast to all police immediately
+
+            // Get district for the incident location (can be slightly delayed)
+            const district = await this.getDistrictFromLocation(latitude, longitude);
+            alertPayload.location.district = district?.name || 'Kigali';
+
+            // Create alert record in database (background operation)
+            let alertId = incident.emergency_id || incident.id;
+            try {
+                const alertResult = await query(`
+                    INSERT INTO incident_alerts (
+                        incident_id, emergency_id, alert_type_id,
+                        alert_type, is_emergency, priority,
+                        incident_location, incident_lat, incident_lng,
+                        latitude, longitude,
+                        district_id,
+                        title, message, ai_confidence, detected_object,
+                        media_urls, target_radius_km, source, created_by
+                    ) VALUES (
+                        $1, $2, 
+                        (SELECT id FROM alert_types WHERE code = $3 LIMIT 1),
+                        $3, $4, $5,
+                        POINT($7, $6)::TEXT, $6, $7,
+                        $6, $7,
+                        $8,
+                        $9, $10, $11, $12,
+                        $13, $14, $15, $16
+                    )
+                    RETURNING id
+                `, [
+                    incident.id || null,
+                    incident.emergency_id || null,
+                    alertType,
+                    isEmergency,
+                    priority,
+                    latitude,
+                    longitude,
+                    district?.id || null,
+                    alertPayload.title,
+                    alertPayload.message,
+                    aiData.confidence || null,
+                    aiData.detectedObject || null,
+                    incident.media_urls || null,
+                    searchRadius,
+                    aiData.source || 'manual',
+                    incident.reported_by || null
+                ]);
+                alertId = alertResult.rows[0]?.id || alertId;
+            } catch (dbError) {
+                console.log('⚠️ Alert DB insert failed (non-critical):', dbError.message);
             }
 
-            // Also broadcast via WebSocket for real-time
-            this.broadcastAlert(alertPayload, district?.id);
+            // Find target officers within geo-fence (for logging/tracking)
+            const officers = await this.findOfficersInGeoFence(
+                latitude, 
+                longitude, 
+                searchRadius, 
+                district?.id,
+                isEmergency
+            );
+
+            console.log(`🎯 Found ${officers.length} officers in geo-fence for alert ${alertId}`);
+
+            // Send targeted alerts to individual officers (FCM for background delivery)
+            for (const officer of officers) {
+                this.sendAlertToOfficer(alertId, officer, alertPayload).catch(e => {
+                    console.log(`⚠️ Officer alert failed: ${e.message}`);
+                });
+            }
 
             return {
                 success: true,

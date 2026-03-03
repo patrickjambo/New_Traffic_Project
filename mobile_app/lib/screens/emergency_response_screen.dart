@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/api_service.dart';
 import '../services/websocket_service.dart';
+import '../services/auth_service.dart';
 import '../config/app_theme.dart';
 
 /// ============================================================================
@@ -32,10 +33,13 @@ class _EmergencyResponseScreenState extends State<EmergencyResponseScreen> {
   // Services
   final ApiService _apiService = ApiService();
   final WebSocketService _wsService = WebSocketService();
+  final AuthService _authService = AuthService();
   
   // State
   String _currentStatus = 'dispatched';
   bool _isUpdating = false;
+  int? _currentUserId;
+  String? _currentUserName;
   
   // Status options for emergency response - ALL using AppColors.primary
   final List<Map<String, dynamic>> _statusOptions = [
@@ -48,6 +52,7 @@ class _EmergencyResponseScreenState extends State<EmergencyResponseScreen> {
   void initState() {
     super.initState();
     _currentStatus = widget.emergencyData['status'] ?? 'dispatched';
+    _loadCurrentUser();
     
     // Set system UI style
     SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
@@ -56,10 +61,24 @@ class _EmergencyResponseScreenState extends State<EmergencyResponseScreen> {
     ));
   }
 
+  Future<void> _loadCurrentUser() async {
+    final userData = await _authService.getUserData();
+    if (userData != null && mounted) {
+      setState(() {
+        _currentUserId = userData['id'];
+        _currentUserName = userData['full_name'] ?? userData['fullName'] ?? userData['name'] ?? 'Officer';
+      });
+    }
+  }
+
   Future<void> _updateStatus(String newStatus) async {
     if (_isUpdating || _currentStatus == newStatus) return;
     
-    // Update UI immediately
+    final emergencyId = widget.emergencyData['emergencyId'] ?? 
+                        widget.emergencyData['id'] ?? 
+                        widget.emergencyData['alertId'];
+    
+    // Update UI immediately (optimistic)
     setState(() {
       _currentStatus = newStatus;
       _isUpdating = true;
@@ -67,32 +86,38 @@ class _EmergencyResponseScreenState extends State<EmergencyResponseScreen> {
     
     _showSnackBar('Status: ${_getStatusLabel(newStatus)}', isSuccess: true);
     
+    // 🚀 INSTANT: Emit WebSocket event IMMEDIATELY for real-time dashboard update
+    _wsService.emit('emergency:status_change', {
+      'emergencyId': emergencyId,
+      'id': emergencyId,
+      'newStatus': newStatus,
+      'status': newStatus,
+      'officerId': _currentUserId,
+      'officerName': _currentUserName ?? 'Officer',
+      'responder_name': _currentUserName ?? 'Officer',
+      'timestamp': DateTime.now().toIso8601String(),
+    });
+    print('📤 WebSocket status change emitted: $newStatus');
+    
     // If resolved, ask to go back home
     if (newStatus == 'resolved') {
       _showResolvedDialog();
     }
     
-    // Send to backend
-    try {
-      final emergencyId = widget.emergencyData['emergencyId'] ?? 
-                          widget.emergencyData['id'] ?? 
-                          widget.emergencyData['alertId'];
-      
-      print('📡 Updating status: $emergencyId -> $newStatus');
-      
-      if (emergencyId != null) {
-        final response = await _apiService.dio.put(
-          '/api/emergency/$emergencyId/status',
-          data: {'status': newStatus},
-        ).timeout(const Duration(seconds: 10));
-        print('✅ Status updated: ${response.data}');
-      }
-    } catch (e) {
-      print('⚠️ Status update error: $e');
-    } finally {
-      if (mounted) {
-        setState(() => _isUpdating = false);
-      }
+    // Send to backend (non-blocking)
+    if (emergencyId != null) {
+      _apiService.dio.put(
+        '/api/emergency/$emergencyId/status',
+        data: {'status': newStatus},
+      ).timeout(const Duration(seconds: 10)).then((response) {
+        print('✅ Status updated in DB: ${response.data}');
+      }).catchError((e) {
+        print('⚠️ Status update error (non-blocking): $e');
+      });
+    }
+    
+    if (mounted) {
+      setState(() => _isUpdating = false);
     }
   }
 

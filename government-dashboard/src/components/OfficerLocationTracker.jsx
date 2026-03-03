@@ -4,7 +4,7 @@ import { MapPin, Navigation, Clock, User, Radio, Signal, Activity, Circle, X, Lo
 import { useWebSocket } from '../context/WebSocketContext';
 import { useAuth } from '../context/AuthContext';
 import { incidentService, emergencyService } from '../services/api';
-import { MapContainer, TileLayer, Marker, Popup, CircleMarker } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, CircleMarker, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 
@@ -121,6 +121,112 @@ const createEmergencyIcon = (severity) => {
     iconAnchor: [18, 18],
     popupAnchor: [0, -18],
   });
+};
+
+// Auto-fit map bounds to show all markers
+const AutoFitBounds = ({ officers, officerLocations, adminLocation, adminLocationEnabled }) => {
+    const map = useMap();
+    const [hasFitted, setHasFitted] = useState(false);
+    
+    // Count online officers to detect when a new one comes online
+    const onlineCount = useMemo(() => {
+        let count = 0;
+        officerLocations.forEach(loc => {
+            if (loc?.isOnline === true) count++;
+        });
+        return count;
+    }, [officerLocations]);
+    
+    useEffect(() => {
+        const points = [];
+        
+        // Add admin location
+        if (adminLocationEnabled && adminLocation) {
+            points.push([adminLocation.latitude, adminLocation.longitude]);
+        }
+        
+        // Add officers with coordinates (prioritize online officers)
+        officers.forEach(officer => {
+            const location = officerLocations.get(officer.id);
+            const lat = location?.latitude || officer.current_latitude;
+            const lng = location?.longitude || officer.current_longitude;
+            if (lat && lng) {
+                points.push([parseFloat(lat), parseFloat(lng)]);
+            }
+        });
+        
+        if (points.length >= 2) {
+            const bounds = L.latLngBounds(points);
+            map.fitBounds(bounds, { padding: [50, 50], maxZoom: 14 });
+        } else if (points.length === 1) {
+            map.setView(points[0], 13);
+        }
+        
+        setHasFitted(true);
+    }, [officers.length, onlineCount, adminLocation, adminLocationEnabled, map]); // Re-fit when officer count or online count changes
+    
+    return null;
+};
+
+/**
+ * Spread overlapping markers in a circle so all are visible.
+ * Officers at the exact same (or very close) lat/lng get offset
+ * in a ring pattern around the original point.
+ */
+const spreadOverlappingMarkers = (officers, officerLocations) => {
+    const PROXIMITY_THRESHOLD = 0.0003; // ~30 meters — considered "same location"
+    const SPREAD_RADIUS = 0.0006;       // ~60 meters offset radius for the ring
+
+    // Build position list: { officerId, lat, lng }
+    const positions = [];
+    officers.forEach(officer => {
+        const location = officerLocations.get(officer.id) || officerLocations.get(String(officer.id));
+        const lat = parseFloat(location?.latitude || officer.current_latitude);
+        const lng = parseFloat(location?.longitude || officer.current_longitude);
+        if (!isNaN(lat) && !isNaN(lng)) {
+            positions.push({ id: officer.id, lat, lng });
+        }
+    });
+
+    // Group nearby officers together
+    const groups = [];
+    const used = new Set();
+
+    positions.forEach((pos) => {
+        if (used.has(pos.id)) return;
+        const group = [pos];
+        used.add(pos.id);
+
+        positions.forEach((other) => {
+            if (used.has(other.id)) return;
+            if (
+                Math.abs(pos.lat - other.lat) < PROXIMITY_THRESHOLD &&
+                Math.abs(pos.lng - other.lng) < PROXIMITY_THRESHOLD
+            ) {
+                group.push(other);
+                used.add(other.id);
+            }
+        });
+        groups.push(group);
+    });
+
+    // For groups with 2+ officers, spread them in a circle
+    const offsets = new Map(); // officerId -> { lat, lng }
+    groups.forEach((group) => {
+        if (group.length <= 1) return; // single officer, no offset needed
+        const centerLat = group.reduce((s, p) => s + p.lat, 0) / group.length;
+        const centerLng = group.reduce((s, p) => s + p.lng, 0) / group.length;
+
+        group.forEach((pos, idx) => {
+            const angle = (2 * Math.PI * idx) / group.length;
+            offsets.set(pos.id, {
+                lat: centerLat + SPREAD_RADIUS * Math.cos(angle),
+                lng: centerLng + SPREAD_RADIUS * Math.sin(angle),
+            });
+        });
+    });
+
+    return offsets; // Map<officerId, {lat, lng}>
 };
 
 /**
@@ -309,11 +415,13 @@ const OfficerLocationTracker = ({ officers = [], deployments = [], onOfficerClic
 
         const unsubLocation = subscribe('officer:location', (data) => {
             console.log('📍 Real-time officer location:', data);
+            const odId = Number(data.officerId);
             
             setOfficerLocations(prev => {
                 const newMap = new Map(prev);
-                newMap.set(data.officerId, {
+                newMap.set(odId, {
                     ...data,
+                    officerId: odId,
                     receivedAt: new Date(),
                     isOnline: true,
                 });
@@ -326,12 +434,14 @@ const OfficerLocationTracker = ({ officers = [], deployments = [], onOfficerClic
         // Listen for officer login/online status
         const unsubOnline = subscribe('officer:online', (data) => {
             console.log('🟢 Officer came online:', data);
+            const odId = Number(data.officerId);
             setOfficerLocations(prev => {
                 const newMap = new Map(prev);
-                const existing = newMap.get(data.officerId) || {};
-                newMap.set(data.officerId, {
+                const existing = newMap.get(odId) || {};
+                newMap.set(odId, {
                     ...existing,
                     ...data,
+                    officerId: odId,
                     receivedAt: new Date(),
                     isOnline: true,
                     loginTime: new Date()
@@ -344,11 +454,12 @@ const OfficerLocationTracker = ({ officers = [], deployments = [], onOfficerClic
         // Listen for officer logout/offline status
         const unsubOffline = subscribe('officer:offline', (data) => {
             console.log('⚫ Officer went offline:', data);
+            const odId = Number(data.officerId);
             setOfficerLocations(prev => {
                 const newMap = new Map(prev);
-                const existing = newMap.get(data.officerId);
+                const existing = newMap.get(odId);
                 if (existing) {
-                    newMap.set(data.officerId, { ...existing, isOnline: false });
+                    newMap.set(odId, { ...existing, isOnline: false });
                 }
                 return newMap;
             });
@@ -357,10 +468,11 @@ const OfficerLocationTracker = ({ officers = [], deployments = [], onOfficerClic
         // Listen for officer duty status changes
         const unsubDuty = subscribe('officer:duty_status', (data) => {
             console.log('📋 Officer duty status:', data);
+            const odId = Number(data.officerId);
             setOfficerLocations(prev => {
                 const newMap = new Map(prev);
-                const existing = newMap.get(data.officerId) || {};
-                newMap.set(data.officerId, {
+                const existing = newMap.get(odId) || {};
+                newMap.set(odId, {
                     ...existing,
                     isOnDuty: data.isOnDuty,
                     receivedAt: new Date(),
@@ -457,8 +569,9 @@ const OfficerLocationTracker = ({ officers = [], deployments = [], onOfficerClic
             const locA = officerLocations.get(a.id);
             const locB = officerLocations.get(b.id);
             
-            const aIsOnline = locA?.isOnline || a.is_on_duty || a.is_online;
-            const bIsOnline = locB?.isOnline || b.is_on_duty || b.is_online;
+            // Only real-time WebSocket data determines online status
+            const aIsOnline = locA?.isOnline === true;
+            const bIsOnline = locB?.isOnline === true;
             
             // Online officers come first
             if (aIsOnline && !bIsOnline) return -1;
@@ -480,8 +593,14 @@ const OfficerLocationTracker = ({ officers = [], deployments = [], onOfficerClic
     const onlineCount = useMemo(() => {
         return sortedOfficers.filter(o => {
             const loc = officerLocations.get(o.id);
-            return loc?.isOnline || o.is_on_duty || o.is_online;
+            // Only count as online if we have real-time WebSocket data
+            return loc?.isOnline === true;
         }).length;
+    }, [sortedOfficers, officerLocations]);
+
+    // Calculate spread offsets for overlapping markers
+    const markerOffsets = useMemo(() => {
+        return spreadOverlappingMarkers(sortedOfficers, officerLocations);
     }, [sortedOfficers, officerLocations]);
 
     // Get officer's active deployment
@@ -600,9 +719,15 @@ const OfficerLocationTracker = ({ officers = [], deployments = [], onOfficerClic
                     sortedOfficers.map((officer) => {
                         const location = officerLocations.get(officer.id);
                         const deployment = getOfficerDeployment(officer.id);
-                        const isOnline = location?.isOnline || officer.is_on_duty || officer.is_online;
+                        // Only real-time WebSocket data determines online status
+                        const isOnline = location?.isOnline === true;
                         const distance = getOfficerDistance(officer);
                         const formattedDist = formatDistance(distance);
+                        
+                        // Use real-time location first, fall back to DB stored location
+                        const displayLat = location?.latitude || officer.current_latitude;
+                        const displayLng = location?.longitude || officer.current_longitude;
+                        const displayAddress = location?.address || officer.current_address;
 
                         return (
                             <div
@@ -641,12 +766,12 @@ const OfficerLocationTracker = ({ officers = [], deployments = [], onOfficerClic
 
                                             {/* Location with distance */}
                                             <div className="flex items-center gap-2 text-sm mt-1">
-                                                {location?.latitude ? (
+                                                {displayLat ? (
                                                     <>
                                                         <div className="flex items-center gap-1 text-gray-600">
                                                             <MapPin className="h-3 w-3 text-cyan-500" />
                                                             <span className="truncate max-w-[180px]">
-                                                                {location.address || `${parseFloat(location.latitude).toFixed(4)}, ${parseFloat(location.longitude).toFixed(4)}`}
+                                                                {displayAddress || `${parseFloat(displayLat).toFixed(4)}, ${parseFloat(displayLng).toFixed(4)}`}
                                                             </span>
                                                         </div>
                                                         {formattedDist && (
@@ -678,24 +803,50 @@ const OfficerLocationTracker = ({ officers = [], deployments = [], onOfficerClic
                                     {/* Right Side - Status & Speed */}
                                     <div className="text-right flex flex-col items-end gap-2">
                                         {/* Status Badge */}
-                                        <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold ${
-                                            isOnline 
-                                                ? 'bg-green-100 text-green-700' 
-                                                : 'bg-gray-100 text-gray-500'
-                                        }`}>
-                                            {deployment?.officers?.find(o => o.id === officer.id)?.status || 
-                                             (isOnline ? 'Available' : 'Offline')}
-                                        </span>
+                                        {(() => {
+                                            const deploymentStatus = deployment?.officers?.find(o => o.id === officer.id)?.status;
+                                            const displayStatus = deploymentStatus || (isOnline ? 'Available' : 'Offline');
+                                            const statusColors = {
+                                                'assigned': 'bg-amber-100 text-amber-700',
+                                                'en_route': 'bg-cyan-100 text-cyan-700',
+                                                'on_scene': 'bg-green-100 text-green-700',
+                                                'available': 'bg-emerald-100 text-emerald-700',
+                                                'offline': 'bg-gray-100 text-gray-500',
+                                            };
+                                            const colorClass = statusColors[displayStatus.toLowerCase()] || 
+                                                (isOnline ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500');
+                                            return (
+                                                <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold ${colorClass}`}>
+                                                    {displayStatus}
+                                                </span>
+                                            );
+                                        })()}
 
-                                        {/* Speed & Last Update */}
+                                        {/* Speed & Last Update - Only show real data */}
                                         {location && (
                                             <div className="text-xs text-gray-500 space-y-1">
-                                                {location.speed > 0 && (
-                                                    <div className="flex items-center justify-end gap-1 text-cyan-600">
-                                                        <Navigation className="h-3 w-3" />
-                                                        <span className="font-medium">{Math.round(location.speed * 3.6)} km/h</span>
-                                                    </div>
-                                                )}
+                                                {/* Speed: only show if > 3 km/h (filter GPS noise when stationary) */}
+                                                {(() => {
+                                                    const rawSpeed = parseFloat(location.speed);
+                                                    const speedKmh = !isNaN(rawSpeed) && rawSpeed > 0 ? rawSpeed * 3.6 : 0;
+                                                    // Only display if moving faster than 3 km/h (walking pace)
+                                                    if (speedKmh >= 3 && isOnline) {
+                                                        return (
+                                                            <div className="flex items-center justify-end gap-1 text-cyan-600">
+                                                                <Navigation className="h-3 w-3" />
+                                                                <span className="font-medium">{Math.round(speedKmh)} km/h</span>
+                                                            </div>
+                                                        );
+                                                    } else if (isOnline) {
+                                                        return (
+                                                            <div className="flex items-center justify-end gap-1 text-gray-400">
+                                                                <Navigation className="h-3 w-3" />
+                                                                <span className="font-medium">Stationary</span>
+                                                            </div>
+                                                        );
+                                                    }
+                                                    return null;
+                                                })()}
                                                 <div className="flex items-center justify-end gap-1">
                                                     <Clock className="h-3 w-3" />
                                                     <span>{formatTimeAgo(location.timestamp || location.receivedAt)}</span>
@@ -784,27 +935,40 @@ const OfficerLocationTracker = ({ officers = [], deployments = [], onOfficerClic
                                 attribution='&copy; OpenStreetMap contributors'
                             />
                             
+                            {/* Auto-fit map to show all markers */}
+                            <AutoFitBounds 
+                                officers={sortedOfficers}
+                                officerLocations={officerLocations}
+                                adminLocation={adminLocation}
+                                adminLocationEnabled={adminLocationEnabled}
+                            />
+                            
                             {sortedOfficers.map((officer) => {
                                 const location = officerLocations.get(officer.id) || officerLocations.get(String(officer.id));
-                                const lat = location?.latitude || officer.current_latitude;
-                                const lng = location?.longitude || officer.current_longitude;
+                                const rawLat = location?.latitude || officer.current_latitude;
+                                const rawLng = location?.longitude || officer.current_longitude;
                                 
-                                if (!lat || !lng) return null;
+                                if (!rawLat || !rawLng) return null;
 
-                                const isOnline = location?.isOnline || officer.is_on_duty || officer.is_online;
+                                // Use spread offset if officers overlap, otherwise use raw position
+                                const offset = markerOffsets.get(officer.id);
+                                const lat = offset ? offset.lat : parseFloat(rawLat);
+                                const lng = offset ? offset.lng : parseFloat(rawLng);
+
+                                const isOnline = location?.isOnline === true;
                                 const deployment = deployments.find(d => d.officers?.some(o => o.id === officer.id));
                                 const icon = createOfficerIcon(isOnline, !!deployment);
                                 const distance = getOfficerDistance(officer);
                                 const formattedDist = formatDistance(distance);
 
                                 return (
-                                    <Marker key={officer.id} position={[parseFloat(lat), parseFloat(lng)]} icon={icon}>
+                                    <Marker key={`${officer.id}-${isOnline ? 'on' : 'off'}`} position={[lat, lng]} icon={icon}>
                                         <Popup>
                                             <div className="p-2 min-w-[180px]">
                                                 <div className="font-bold text-sm mb-1">{officer.full_name || 'Unknown'}</div>
                                                 <div className="text-xs text-gray-500 mb-1">Badge: {officer.badge_number || 'N/A'}</div>
                                                 <div className="text-xs text-gray-600 mb-1">
-                                                    📍 {parseFloat(lat).toFixed(5)}, {parseFloat(lng).toFixed(5)}
+                                                    📍 {parseFloat(rawLat).toFixed(5)}, {parseFloat(rawLng).toFixed(5)}
                                                 </div>
                                                 {formattedDist && (
                                                     <div className="text-xs text-cyan-600 font-medium mb-1">

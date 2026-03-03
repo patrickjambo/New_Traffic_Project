@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import '../config/app_config.dart';
 import 'notification_service.dart';
-import 'emergency_alert_service.dart';
+import 'critical_alert_service.dart';
 import 'deployment_alert_service.dart';
 import 'navigation_service.dart';
 import '../main.dart' show navigatorKey;
@@ -442,20 +442,26 @@ class WebSocketService {
           'location': emergencyData['location_name'] ?? emergencyData['location']?['name'] ?? 'Unknown location',
           'latitude': emergencyData['latitude'],
           'longitude': emergencyData['longitude'],
+          'isEmergency': true,
           ...emergencyData,
         };
         
-        // CRITICAL: Trigger alarm FIRST (real-time)
-        final emergencyService = EmergencyAlertService();
-        emergencyService.showEmergencyAlert(alertPayload);
-
-        // Navigate to emergency alert screen IMMEDIATELY
+        // 🚀 INSTANT: Navigate to red screen FIRST (highest priority)
         if (navigatorKey.currentState != null) {
           navigatorKey.currentState!.pushNamed(
             '/emergency-alert',
             arguments: alertPayload,
           );
         }
+        
+        // 🔊 THEN: Trigger alarm effects in parallel (siren + vibration)
+        // CriticalAlertService is pre-initialized in main.dart, so no delay
+        final criticalService = CriticalAlertService();
+        // Temporarily disable navigation callback to avoid double push
+        final savedCallback = criticalService.onCriticalEmergency;
+        criticalService.onCriticalEmergency = null;
+        criticalService.triggerCriticalAlert(alertPayload);
+        criticalService.onCriticalEmergency = savedCallback;
       }
 
       _notificationService.addNotification(
@@ -511,18 +517,34 @@ class WebSocketService {
         'latitude': alertData['latitude'],
         'longitude': alertData['longitude'],
         'emergencyId': emergencyId,
+        'isEmergency': true,
         ...alertData,
       };
       
-      // CRITICAL: Trigger alarm FIRST (real-time)
-      final emergencyService = EmergencyAlertService();
-      emergencyService.showEmergencyAlert(alertPayload);
-
-      // Navigate to emergency alert screen IMMEDIATELY
-      if (navigatorKey.currentState != null) {
-        navigatorKey.currentState!.pushNamed(
-          '/emergency-alert',
-          arguments: alertPayload,
+      // Check severity to determine alert behavior
+      final severity = alertPayload['severity']?.toString().toLowerCase() ?? '';
+      
+      if (severity == 'critical' || severity == 'high') {
+        // 🚨 HIGH/CRITICAL: Red screen + custom siren + vibration + wakelock
+        if (navigatorKey.currentState != null) {
+          navigatorKey.currentState!.pushNamed(
+            '/emergency-alert',
+            arguments: alertPayload,
+          );
+        }
+        
+        // Trigger alarm with emergency_siren.mp3
+        final criticalService = CriticalAlertService();
+        final savedCallback = criticalService.onCriticalEmergency;
+        criticalService.onCriticalEmergency = null;
+        criticalService.triggerCriticalAlert(alertPayload);
+        criticalService.onCriticalEmergency = savedCallback;
+      } else {
+        // 📢 LOW/MEDIUM: Normal phone notification sound only
+        _notificationService.addNotification(
+          title: alertPayload['title'] ?? 'Emergency Alert',
+          message: alertPayload['message'] ?? 'Response needed',
+          type: 'emergency',
         );
       }
       
@@ -533,9 +555,9 @@ class WebSocketService {
       });
 
       _notificationService.addNotification(
-        title: 'CRITICAL EMERGENCY',
+        title: 'EMERGENCY ALERT',
         message: alertData['message'] ?? 'Immediate attention required!',
-        type: 'critical',
+        type: severity == 'critical' || severity == 'high' ? 'critical' : 'emergency',
       );
     } catch (e) {
       print('Error handling emergency:alert: $e');
@@ -586,17 +608,32 @@ class WebSocketService {
       
       print('[ALERT] PROCESSING EMERGENCY ALARM: $alarmData');
       
-      final alertPayload = {...alarmData, 'emergencyId': emergencyId};
+      final alertPayload = {...alarmData, 'emergencyId': emergencyId, 'isEmergency': true};
       
-      // CRITICAL: Trigger alarm FIRST before anything else (real-time response)
-      final emergencyService = EmergencyAlertService();
-      emergencyService.showEmergencyAlert(alertPayload);
+      // Check severity to determine alert behavior
+      final severity = (alertPayload['severity'] ?? alarmData['severity'] ?? '').toString().toLowerCase();
       
-      // Navigate to emergency alert screen IMMEDIATELY
-      if (navigatorKey.currentState != null) {
-        navigatorKey.currentState!.pushNamed(
-          '/emergency-alert',
-          arguments: alertPayload,
+      if (severity == 'critical' || severity == 'high') {
+        // 🚨 HIGH/CRITICAL: Red screen + custom siren + vibration + wakelock
+        if (navigatorKey.currentState != null) {
+          navigatorKey.currentState!.pushNamed(
+            '/emergency-alert',
+            arguments: alertPayload,
+          );
+        }
+        
+        // Trigger alarm with emergency_siren.mp3
+        final criticalService = CriticalAlertService();
+        final savedCallback = criticalService.onCriticalEmergency;
+        criticalService.onCriticalEmergency = null;
+        criticalService.triggerCriticalAlert(alertPayload);
+        criticalService.onCriticalEmergency = savedCallback;
+      } else {
+        // 📢 LOW/MEDIUM: Normal phone notification sound only
+        _notificationService.addNotification(
+          title: alarmData['title'] ?? 'Emergency Alert',
+          message: alarmData['message'] ?? 'Response needed',
+          type: 'emergency',
         );
       }
       

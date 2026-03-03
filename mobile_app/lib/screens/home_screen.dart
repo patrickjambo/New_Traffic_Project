@@ -35,11 +35,24 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   // State
   List<dynamic> _incidents = [];
+  List<dynamic> _emergencies = [];
   bool _isLoading = true;
   int _selectedNavIndex = 0;
   String _userRole = 'public';
   String _userName = '';
+  
+  // Statistics (real-time)
+  int _activeCount = 0;
+  int _resolvedCount = 0;
+  int _totalEmergencies = 0;
+  int _pendingEmergencies = 0;
+  
+  // WebSocket subscriptions
   StreamSubscription<Map<String, dynamic>>? _incidentSubscription;
+  StreamSubscription<Map<String, dynamic>>? _emergencySubscription;
+  
+  // Auto-refresh timer
+  Timer? _refreshTimer;
 
   // Animation controllers
   late AnimationController _fadeController;
@@ -50,8 +63,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     super.initState();
     _initializeAnimations();
     _loadUserData();
-    _loadNearbyIncidents();
-    _subscribeToIncidentUpdates();
+    _loadAllData();
+    _subscribeToRealTimeUpdates();
+    _startAutoRefresh();
   }
 
   void _initializeAnimations() {
@@ -68,25 +82,59 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   @override
   void dispose() {
     _incidentSubscription?.cancel();
+    _emergencySubscription?.cancel();
+    _refreshTimer?.cancel();
     _fadeController.dispose();
     super.dispose();
   }
+  
+  /// Start auto-refresh every 30 seconds
+  void _startAutoRefresh() {
+    _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (mounted) {
+        _loadAllData();
+      }
+    });
+  }
 
-  void _subscribeToIncidentUpdates() {
+  /// Subscribe to real-time WebSocket updates
+  void _subscribeToRealTimeUpdates() {
     try {
       final wsService = Provider.of<WebSocketService>(context, listen: false);
+      
+      // Subscribe to incident updates
       _incidentSubscription = wsService.incidentStream.listen((event) {
         final type = event['type'];
-        debugPrint('Home screen received incident event: $type');
-
-        // Refresh incidents list when there's a new incident, update, or response
-        if (type == 'new' || type == 'update' || type == 'response') {
-          _loadNearbyIncidents();
+        debugPrint('HOME: Incident event: $type');
+        
+        if (type == 'new' || type == 'update' || type == 'response' || type == 'resolved') {
+          _loadAllData();
         }
       });
+      
+      // Subscribe to emergency updates
+      _emergencySubscription = wsService.emergencyStream.listen((event) {
+        final type = event['type'];
+        debugPrint('HOME: Emergency event: $type');
+        
+        if (type == 'new' || type == 'update' || type == 'accepted' || 
+            type == 'status_change' || type == 'officer_response') {
+          _loadAllData();
+        }
+      });
+      
     } catch (e) {
-      debugPrint('Error subscribing to incident updates: $e');
+      debugPrint('Error subscribing to real-time updates: $e');
     }
+  }
+  
+  /// Load all data: incidents, emergencies, and statistics
+  Future<void> _loadAllData() async {
+    await Future.wait([
+      _loadNearbyIncidents(),
+      _loadEmergencies(),
+      _loadStatistics(),
+    ]);
   }
 
   Future<void> _loadUserData() async {
@@ -100,7 +148,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   Future<void> _loadNearbyIncidents() async {
-    setState(() => _isLoading = true);
+    if (!_isLoading) {
+      setState(() => _isLoading = true);
+    }
 
     final result = await _incidentService.getNearbyIncidents(
       latitude: AppConfig.defaultLatitude,
@@ -108,12 +158,116 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       radius: AppConfig.nearbyIncidentsRadius,
     );
 
-    setState(() {
-      _isLoading = false;
-      if (result['success']) {
-        _incidents = result['data']['incidents'] ?? [];
+    if (mounted) {
+      setState(() {
+        _isLoading = false;
+        if (result['success']) {
+          _incidents = result['data']['incidents'] ?? [];
+        }
+      });
+    }
+  }
+  
+  /// Load emergencies from API
+  Future<void> _loadEmergencies() async {
+    try {
+      final token = await _authService.getToken();
+      final response = await http.get(
+        Uri.parse('${AppConfig.baseUrl}/emergency?limit=10'),
+        headers: {
+          'Content-Type': 'application/json',
+          if (token != null) 'Authorization': 'Bearer $token',
+        },
+      );
+      
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data['success'] == true && mounted) {
+          setState(() {
+            _emergencies = data['data'] ?? [];
+          });
+        }
       }
-    });
+    } catch (e) {
+      debugPrint('Error loading emergencies: $e');
+    }
+  }
+  
+  /// Load statistics from API (real-time counts)
+  Future<void> _loadStatistics() async {
+    try {
+      final token = await _authService.getToken();
+      final headers = {
+        'Content-Type': 'application/json',
+        if (token != null) 'Authorization': 'Bearer $token',
+      };
+      
+      // Load incident statistics
+      final incidentStatsResponse = await http.get(
+        Uri.parse('${AppConfig.baseUrl}/incidents/statistics'),
+        headers: headers,
+      );
+      
+      // Load emergency statistics
+      final emergencyStatsResponse = await http.get(
+        Uri.parse('${AppConfig.baseUrl}/emergency/stats'),
+        headers: headers,
+      );
+      
+      if (mounted) {
+        setState(() {
+          // Incident stats
+          if (incidentStatsResponse.statusCode == 200) {
+            final data = json.decode(incidentStatsResponse.body);
+            if (data['success'] == true) {
+              final stats = data['data'];
+              _activeCount = _parseIntSafe(stats['active_reports']);
+              _resolvedCount = _parseIntSafe(stats['total_incidents']) - _activeCount;
+              if (_resolvedCount < 0) _resolvedCount = 0;
+            }
+          }
+          
+          // Emergency stats
+          if (emergencyStatsResponse.statusCode == 200) {
+            final data = json.decode(emergencyStatsResponse.body);
+            if (data['success'] == true) {
+              final stats = data['data'];
+              _totalEmergencies = _parseIntSafe(stats['total']);
+              _pendingEmergencies = _parseIntSafe(stats['pending']);
+              
+              // Add emergency active count to overall active
+              final emergencyActive = _parseIntSafe(stats['active']);
+              final emergencyDispatched = _parseIntSafe(stats['dispatched']);
+              _activeCount += emergencyActive + emergencyDispatched + _pendingEmergencies;
+              
+              // Add emergency resolved to overall resolved
+              final emergencyResolved = _parseIntSafe(stats['resolved']);
+              _resolvedCount += emergencyResolved;
+            }
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading statistics: $e');
+      // Fallback: calculate from local data
+      if (mounted) {
+        setState(() {
+          _activeCount = _incidents.where((i) => i['status'] != 'resolved').length +
+                         _emergencies.where((e) => e['status'] != 'resolved').length;
+          _resolvedCount = _incidents.where((i) => i['status'] == 'resolved').length +
+                          _emergencies.where((e) => e['status'] == 'resolved').length;
+        });
+      }
+    }
+  }
+  
+  /// Safely parse an integer from dynamic value
+  int _parseIntSafe(dynamic value) {
+    if (value == null) return 0;
+    if (value is int) return value;
+    if (value is double) return value.toInt();
+    if (value is String) return int.tryParse(value) ?? 0;
+    return 0;
   }
 
   @override
@@ -127,7 +281,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       backgroundColor: AppColors.background,
       body: SafeArea(
         child: RefreshIndicator(
-          onRefresh: _loadNearbyIncidents,
+          onRefresh: _loadAllData,
           color: AppColors.primary,
           backgroundColor: AppColors.backgroundSecondary,
           child: CustomScrollView(
@@ -325,32 +479,32 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   // ===========================================================================
-  // Statistics Cards
+  // Statistics Cards (Real-time from API)
   // ===========================================================================
 
   Widget _buildStatisticsRow() {
-    final activeCount = _incidents.where((i) => i['status'] != 'resolved').length;
-    final resolvedCount = _incidents.where((i) => i['status'] == 'resolved').length;
-
+    // Use API-loaded statistics (real-time)
     return Row(
       children: [
         Expanded(
           child: _buildStatCard(
             label: 'Active',
-            value: activeCount.toString(),
+            value: _activeCount.toString(),
             icon: Icons.warning_amber_rounded,
             iconColor: AppColors.warning,
             backgroundColor: AppColors.warning.withValues(alpha: 0.1),
+            isLive: true,
           ),
         ),
         const SizedBox(width: 16),
         Expanded(
           child: _buildStatCard(
             label: 'Resolved',
-            value: resolvedCount.toString(),
+            value: _resolvedCount.toString(),
             icon: Icons.check_circle_outline_rounded,
             iconColor: AppColors.success,
             backgroundColor: AppColors.success.withValues(alpha: 0.1),
+            isLive: true,
           ),
         ),
       ],
@@ -363,6 +517,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     required IconData icon,
     required Color iconColor,
     required Color backgroundColor,
+    bool isLive = false,
   }) {
     return Container(
       padding: const EdgeInsets.all(20),
@@ -382,23 +537,64 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             child: Icon(icon, color: iconColor, size: 24),
           ),
           const SizedBox(width: 16),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                value,
-                style: AppTextStyles.headlineMedium.copyWith(
-                  color: AppColors.textPrimary,
-                  fontWeight: FontWeight.w800,
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        value,
+                        style: AppTextStyles.headlineMedium.copyWith(
+                          color: AppColors.textPrimary,
+                          fontWeight: FontWeight.w800,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (isLive) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: AppColors.success.withValues(alpha: 0.2),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              width: 5,
+                              height: 5,
+                              decoration: BoxDecoration(
+                                color: AppColors.success,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            const SizedBox(width: 3),
+                            Text(
+                              'LIVE',
+                              style: AppTextStyles.labelSmall.copyWith(
+                                color: AppColors.success,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 7,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
-              ),
-              Text(
-                label,
-                style: AppTextStyles.bodySmall.copyWith(
-                  color: AppColors.textTertiary,
+                Text(
+                  label,
+                  style: AppTextStyles.bodySmall.copyWith(
+                    color: AppColors.textTertiary,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ],
       ),
@@ -537,11 +733,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   // ===========================================================================
-  // Incidents List
+  // Incidents & Emergencies List (Real-time)
   // ===========================================================================
 
   Widget _buildIncidentsList() {
-    if (_isLoading) {
+    if (_isLoading && _incidents.isEmpty && _emergencies.isEmpty) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(48),
@@ -553,29 +749,61 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       );
     }
 
-    if (_incidents.isEmpty) {
+    // Combine incidents and emergencies
+    final List<Map<String, dynamic>> allItems = [];
+    
+    // Add incidents with source marker
+    for (final incident in _incidents) {
+      allItems.add({
+        ...Map<String, dynamic>.from(incident),
+        '_source': 'incident',
+      });
+    }
+    
+    // Add emergencies with source marker
+    for (final emergency in _emergencies) {
+      allItems.add({
+        ...Map<String, dynamic>.from(emergency),
+        '_source': 'emergency',
+        'type': emergency['type'] ?? emergency['emergency_type'] ?? 'Emergency',
+        'severity': emergency['severity'] ?? 'high',
+      });
+    }
+    
+    // Sort by created_at (most recent first)
+    allItems.sort((a, b) {
+      final aTime = DateTime.tryParse(a['created_at']?.toString() ?? '') ?? DateTime.now();
+      final bTime = DateTime.tryParse(b['created_at']?.toString() ?? '') ?? DateTime.now();
+      return bTime.compareTo(aTime);
+    });
+    
+    // Limit to 10 most recent
+    final displayItems = allItems.take(10).toList();
+
+    if (displayItems.isEmpty) {
       return _buildEmptyState();
     }
 
     return ListView.separated(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      itemCount: _incidents.length,
+      itemCount: displayItems.length,
       separatorBuilder: (context, index) => const SizedBox(height: 12),
-      itemBuilder: (context, index) => _buildIncidentCard(_incidents[index]),
+      itemBuilder: (context, index) => _buildIncidentCard(displayItems[index]),
     );
   }
 
   Widget _buildIncidentCard(Map<String, dynamic> incident) {
-    final type = incident['type'] ?? 'unknown';
-    final severity = incident['severity'] ?? 'low';
+    final isEmergency = incident['_source'] == 'emergency';
+    final type = incident['type'] ?? incident['emergency_type'] ?? 'unknown';
+    final severity = incident['severity'] ?? (isEmergency ? 'high' : 'low');
     final status = incident['status'] ?? 'active';
-    final respondingOfficerId = incident['responding_officer_id'];
-    final createdAt = DateTime.parse(incident['created_at']);
+    final respondingOfficerId = incident['responding_officer_id'] ?? incident['assigned_officer_id'];
+    final createdAt = DateTime.tryParse(incident['created_at']?.toString() ?? '') ?? DateTime.now();
     final timeAgo = _formatTimeAgo(createdAt);
 
     final hasResponder = respondingOfficerId != null;
-    final isResponding = status == 'responding' || status == 'in_progress';
+    final isResponding = status == 'responding' || status == 'in_progress' || status == 'dispatched';
 
     return Material(
       color: Colors.transparent,
@@ -585,14 +813,18 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         child: Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: isResponding
-                ? AppColors.primary.withValues(alpha: 0.05)
-                : AppColors.backgroundSecondary,
+            color: isEmergency
+                ? AppColors.error.withValues(alpha: 0.05)
+                : (isResponding
+                    ? AppColors.primary.withValues(alpha: 0.05)
+                    : AppColors.backgroundSecondary),
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
-              color: isResponding
-                  ? AppColors.primary.withValues(alpha: 0.3)
-                  : AppColors.border,
+              color: isEmergency
+                  ? AppColors.error.withValues(alpha: 0.3)
+                  : (isResponding
+                      ? AppColors.primary.withValues(alpha: 0.3)
+                      : AppColors.border),
               width: 1,
             ),
           ),
@@ -604,15 +836,40 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: _getSeverityColor(severity).withValues(alpha: 0.15),
+                      color: isEmergency 
+                          ? AppColors.error.withValues(alpha: 0.15)
+                          : _getSeverityColor(severity).withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(14),
                     ),
                     child: Icon(
-                      _getIncidentIcon(type),
-                      color: _getSeverityColor(severity),
+                      isEmergency ? Icons.emergency_rounded : _getIncidentIcon(type),
+                      color: isEmergency ? AppColors.error : _getSeverityColor(severity),
                       size: 24,
                     ),
                   ),
+                  // Emergency badge
+                  if (isEmergency)
+                    Positioned(
+                      right: -2,
+                      top: -2,
+                      child: Container(
+                        padding: const EdgeInsets.all(3),
+                        decoration: BoxDecoration(
+                          color: AppColors.error,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: AppColors.backgroundSecondary,
+                            width: 2,
+                          ),
+                        ),
+                        child: const Icon(
+                          Icons.priority_high_rounded,
+                          size: 8,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  // Responder badge
                   if (hasResponder)
                     Positioned(
                       right: -2,
@@ -643,16 +900,42 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      _formatIncidentType(type),
-                      style: AppTextStyles.titleSmall.copyWith(
-                        color: AppColors.textPrimary,
-                        fontWeight: FontWeight.w700,
-                      ),
+                    Row(
+                      children: [
+                        if (isEmergency) ...[
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            margin: const EdgeInsets.only(right: 8),
+                            decoration: BoxDecoration(
+                              color: AppColors.error,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              'EMERGENCY',
+                              style: AppTextStyles.labelSmall.copyWith(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 9,
+                              ),
+                            ),
+                          ),
+                        ],
+                        Expanded(
+                          child: Text(
+                            _formatIncidentType(type),
+                            style: AppTextStyles.titleSmall.copyWith(
+                              color: AppColors.textPrimary,
+                              fontWeight: FontWeight.w700,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      incident['address'] ?? 'Unknown location',
+                      incident['address'] ?? incident['location'] ?? 'Unknown location',
                       style: AppTextStyles.bodySmall.copyWith(
                         color: AppColors.textTertiary,
                       ),

@@ -25,6 +25,7 @@ import {
   CheckCircle,
   XCircle,
   Trash2,
+  Download,
 } from 'lucide-react';
 
 // Create axios instance with authentication
@@ -294,6 +295,57 @@ const OfficerManagement = () => {
     setShowConfirmModal(true);
   };
 
+  // Download officers list as CSV
+  const handleDownloadOfficers = () => {
+    if (filteredOfficers.length === 0) {
+      toast.error('No officers to download');
+      return;
+    }
+
+    // CSV Headers
+    const headers = [
+      'Full Name',
+      'Email',
+      'Badge Number',
+      'Unit',
+      'Phone',
+      'District',
+      'Status',
+      'Joined Date'
+    ];
+
+    // Map officers to CSV rows
+    const rows = filteredOfficers.map(officer => [
+      officer.full_name || '',
+      officer.email || '',
+      officer.badge_number || 'N/A',
+      officer.unit || 'Traffic Unit',
+      officer.phone || 'N/A',
+      officer.district_name || 'Not Assigned',
+      officer.is_active ? 'Active' : 'Blocked',
+      new Date(officer.created_at).toLocaleDateString()
+    ]);
+
+    // Build CSV content
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+    ].join('\n');
+
+    // Create and trigger download
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `officers_list_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    toast.success(`Downloaded ${filteredOfficers.length} officers`);
+  };
+
   const getStatusBadge = (officer) => {
     if (!officer.is_active) {
       return (
@@ -335,18 +387,33 @@ const OfficerManagement = () => {
             <Shield className="w-8 h-8 text-blue-400" />
             Officer Management
           </h1>
-          <p className="text-gray-400 mt-1">Create, manage, and monitor police officers</p>
+          <p className="text-gray-400 mt-1">
+            {user?.role === 'admin' 
+              ? 'Create, manage, and monitor police officers across all districts' 
+              : `Create, manage, and monitor police officers in ${user?.districtName || 'your district'}`}
+          </p>
         </div>
-        <button
-          onClick={() => {
-            resetForm();
-            setShowCreateModal(true);
-          }}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
-        >
-          <Plus className="w-5 h-5" />
-          Add Officer
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={handleDownloadOfficers}
+            disabled={loading || officers.length === 0}
+            className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-green-600/50 text-white rounded-lg transition-colors"
+            title="Download officers list as CSV"
+          >
+            <Download className="w-5 h-5" />
+            Download List
+          </button>
+          <button
+            onClick={() => {
+              resetForm();
+              setShowCreateModal(true);
+            }}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+          >
+            <Plus className="w-5 h-5" />
+            Add Officer
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -455,6 +522,9 @@ const OfficerManagement = () => {
                     Contact
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
+                    District
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
                     Status
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
@@ -492,6 +562,14 @@ const OfficerManagement = () => {
                       <div className="flex items-center gap-2 text-gray-400">
                         <Phone className="w-4 h-4" />
                         <span className="text-sm">{officer.phone || 'N/A'}</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-4">
+                      <div className="flex items-center gap-2">
+                        <MapPin className="w-4 h-4 text-gray-400" />
+                        <span className={`text-sm ${officer.district_name ? 'text-white' : 'text-gray-500'}`}>
+                          {officer.district_name || 'Not Assigned'}
+                        </span>
                       </div>
                     </td>
                     <td className="px-4 py-4">

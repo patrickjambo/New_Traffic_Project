@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:dio/dio.dart';
+import 'package:vibration/vibration.dart';
 import 'dart:async';
 import '../services/emergency_alert_service.dart';
+import '../services/critical_alert_service.dart';
 import '../services/api_service.dart';
 import '../services/websocket_service.dart';
 import '../services/auth_service.dart';
@@ -57,6 +59,11 @@ class _EmergencyAlertScreenState extends State<EmergencyAlertScreen>
   bool _showDetails = false;
   String _currentStatus = 'dispatched';
   bool _isUpdatingStatus = false;
+  int? _currentUserId;
+  String? _currentUserName;
+  
+  // Auth Service to get current user
+  final AuthService _authService = AuthService();
   
   // Emergency Colors (keeping red theme)
   static const Color _emergencyDark = Color(0xFFB71C1C);
@@ -65,6 +72,9 @@ class _EmergencyAlertScreenState extends State<EmergencyAlertScreen>
   @override
   void initState() {
     super.initState();
+    
+    // Get current user ID to avoid showing "Another officer" screen to self
+    _loadCurrentUser();
     
     // Set system UI to immersive mode
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
@@ -99,6 +109,16 @@ class _EmergencyAlertScreenState extends State<EmergencyAlertScreen>
     // Listen for emergency accepted by another officer
     _listenForAcceptance();
   }
+  
+  Future<void> _loadCurrentUser() async {
+    final userData = await _authService.getUserData();
+    if (userData != null && mounted) {
+      setState(() {
+        _currentUserId = userData['id'];
+        _currentUserName = userData['full_name'] ?? userData['fullName'] ?? userData['name'] ?? 'Officer';
+      });
+    }
+  }
 
   void _startTimeout() {
     _autoTimeoutTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
@@ -122,6 +142,23 @@ class _EmergencyAlertScreenState extends State<EmergencyAlertScreen>
     _wsService.onCustomEvent('emergency:accepted', (data) {
       final emergencyId = widget.alertData['emergencyId'] ?? widget.alertData['alertId'];
       if (data['emergencyId'] == emergencyId || data['emergencyId']?.toString() == emergencyId?.toString()) {
+        
+        // Check if the current user is the one who accepted
+        final acceptingOfficerId = data['acceptedBy']?['officerId'];
+        final isCurrentUser = _currentUserId != null && 
+            (acceptingOfficerId == _currentUserId || 
+             acceptingOfficerId?.toString() == _currentUserId?.toString());
+        
+        // If current user accepted, don't show "Another officer" screen
+        // Just stop the alarm and let _handleAccept handle the navigation
+        if (isCurrentUser) {
+          print('🚔 Current user accepted - skipping "Another officer" screen');
+          _alertService.stopEmergencyAlarm();
+          return; // Don't show the "Another officer" screen
+        }
+        
+        // Another officer accepted - show notification
+        print('🚔 Another officer (${data['acceptedBy']?['officerName']}) accepted emergency');
         setState(() {
           _isAccepted = true;
           _acceptedByOfficer = data['acceptedBy']?['officerName'] ?? 'Another officer';
@@ -158,29 +195,46 @@ class _EmergencyAlertScreenState extends State<EmergencyAlertScreen>
     
     print('🚨 Accepting emergency ID: $emergencyId');
     
-    // INSTANT: Stop alarm immediately
+    // INSTANT: Stop ALL alarms and vibration IMMEDIATELY
+    // Stop vibration FIRST (most noticeable to user)
+    Vibration.cancel();
+    
+    // Stop emergency alarm service
     _alertService.stopEmergencyAlarm();
+    
+    // Stop critical alert service
+    CriticalAlertService().stopCriticalAlert();
+    
+    // Stop animations
     _flashController.stop();
     _pulseController.stop();
+    
+    // Cancel auto-timeout
+    _autoTimeoutTimer?.cancel();
+    
+    print('✅ All alarms and vibrations stopped');
     
     // Mark this emergency as accepted to prevent duplicate alerts
     _wsService.markEmergencyAccepted(emergencyId);
     
-    // Call API to update database - this will trigger backend to emit to dashboard
-    if (emergencyId != null) {
-      try {
-        print('📤 Calling accept API for emergency: $emergencyId');
-        final response = await _apiService.dio.post(
-          '/api/emergency/$emergencyId/respond',
-          data: {'action': 'accept'},
-        ).timeout(const Duration(seconds: 10));
-        print('✅ Accept API success: ${response.data}');
-      } catch (e) {
-        print('⚠️ Accept API error: $e');
-      }
-    }
+    // 🚀 INSTANT: Emit WebSocket event IMMEDIATELY for real-time dashboard update
+    // This updates admin dashboard BEFORE the API call completes
+    _wsService.emit('emergency:officer_response', {
+      'emergencyId': emergencyId,
+      'id': emergencyId,
+      'action': 'accept',
+      'status': 'dispatched',
+      'officerId': _currentUserId,
+      'officerName': _currentUserName ?? 'Officer',
+      'responder_name': _currentUserName ?? 'Officer',
+      'assigned_to': _currentUserId,
+      'assigned_to_name': _currentUserName ?? 'Officer',
+      'timestamp': DateTime.now().toIso8601String(),
+    });
+    print('📤 WebSocket accept event emitted immediately - Officer: $_currentUserName');
     
-    // Navigate to response screen
+    // 🚀 INSTANT: Navigate to response screen IMMEDIATELY
+    // Don't wait for API - navigate first for instant UX
     if (mounted) {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
@@ -193,6 +247,19 @@ class _EmergencyAlertScreenState extends State<EmergencyAlertScreen>
           ),
         ),
       );
+    }
+    
+    // 📝 BACKGROUND: Call API to update database (non-blocking)
+    // This runs after navigation - user doesn't wait
+    if (emergencyId != null) {
+      _apiService.dio.post(
+        '/api/emergency/$emergencyId/respond',
+        data: {'action': 'accept'},
+      ).timeout(const Duration(seconds: 10)).then((response) {
+        print('✅ Accept API success: ${response.data}');
+      }).catchError((e) {
+        print('⚠️ Accept API error (non-blocking): $e');
+      });
     }
   }
   
@@ -426,8 +493,9 @@ class _EmergencyAlertScreenState extends State<EmergencyAlertScreen>
 
   @override
   Widget build(BuildContext context) {
-    // If accepted by another officer
-    if (_isAccepted && _acceptedByOfficer != null && !_showDetails) {
+    // If accepted by another officer (NOT the current user who is accepting)
+    // Don't show this screen if the current user is the one accepting (_isAccepting flag)
+    if (_isAccepted && _acceptedByOfficer != null && !_showDetails && !_isAccepting) {
       return Scaffold(
         backgroundColor: AppColors.success,
         body: Center(

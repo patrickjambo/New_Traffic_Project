@@ -27,6 +27,18 @@ class Deployment {
   final String? emergencyType;
   final String? emergencySeverity;
   final String? emergencyDescription;
+  // Additional fields for real-time updates
+  final int? incidentId;
+  final int? officerId;
+  final int? assignedBy;
+  final DateTime? deployedAt;
+  final DateTime? completedAt;
+  final String? notes;
+  final String? incidentLocation;
+  final String? officerName;
+  final String? assignerName;
+  final double? incidentLatitude;
+  final double? incidentLongitude;
 
   Deployment({
     required this.id,
@@ -50,11 +62,22 @@ class Deployment {
     this.emergencyType,
     this.emergencySeverity,
     this.emergencyDescription,
+    this.incidentId,
+    this.officerId,
+    this.assignedBy,
+    this.deployedAt,
+    this.completedAt,
+    this.notes,
+    this.incidentLocation,
+    this.officerName,
+    this.assignerName,
+    this.incidentLatitude,
+    this.incidentLongitude,
   });
 
   factory Deployment.fromJson(Map<String, dynamic> json) {
     return Deployment(
-      id: json['id'] ?? 0,
+      id: json['id'] ?? json['deploymentId'] ?? json['deployment_id'] ?? 0,
       unitName: json['unit_name'] ?? json['unitName'] ?? 'Unknown',
       address: json['address'],
       latitude: json['latitude'] != null ? double.tryParse(json['latitude'].toString()) : null,
@@ -81,6 +104,25 @@ class Deployment {
       emergencyType: json['emergency_type'],
       emergencySeverity: json['emergency_severity'],
       emergencyDescription: json['emergency_description'],
+      incidentId: json['incident_id'],
+      officerId: json['officer_id'],
+      assignedBy: json['assigned_by'],
+      deployedAt: json['deployed_at'] != null 
+          ? DateTime.tryParse(json['deployed_at'].toString()) 
+          : null,
+      completedAt: json['completed_at'] != null 
+          ? DateTime.tryParse(json['completed_at'].toString()) 
+          : null,
+      notes: json['notes'] ?? json['officer_notes'],
+      incidentLocation: json['incident_location'] ?? json['address'],
+      officerName: json['officer_name'],
+      assignerName: json['assigner_name'],
+      incidentLatitude: json['incident_latitude'] != null 
+          ? double.tryParse(json['incident_latitude'].toString()) 
+          : null,
+      incidentLongitude: json['incident_longitude'] != null 
+          ? double.tryParse(json['incident_longitude'].toString()) 
+          : null,
     );
   }
 
@@ -102,7 +144,10 @@ class Deployment {
     return 'Normal';
   }
 
-  bool get needsAcknowledgment => !acknowledged && status != 'Completed' && status != 'Cancelled';
+  bool get needsAcknowledgment {
+    final statusLower = status.toLowerCase();
+    return !acknowledged && statusLower != 'completed' && statusLower != 'cancelled';
+  }
 }
 
 /// Deployment service for officer mobile app

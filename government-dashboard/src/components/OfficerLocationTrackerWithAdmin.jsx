@@ -51,6 +51,47 @@ const createAdminIcon = () => {
 };
 
 /**
+ * Spread overlapping markers so all are visible
+ */
+const spreadOverlappingMarkers = (officers, officerLocations) => {
+    const PROXIMITY_THRESHOLD = 0.0003;
+    const SPREAD_RADIUS = 0.0006;
+    const positions = [];
+    officers.forEach(officer => {
+        const location = officerLocations.get(officer.id) || officerLocations.get(String(officer.id));
+        const lat = parseFloat(location?.latitude || officer.current_latitude);
+        const lng = parseFloat(location?.longitude || officer.current_longitude);
+        if (!isNaN(lat) && !isNaN(lng)) positions.push({ id: officer.id, lat, lng });
+    });
+    const groups = [];
+    const used = new Set();
+    positions.forEach((pos) => {
+        if (used.has(pos.id)) return;
+        const group = [pos];
+        used.add(pos.id);
+        positions.forEach((other) => {
+            if (used.has(other.id)) return;
+            if (Math.abs(pos.lat - other.lat) < PROXIMITY_THRESHOLD && Math.abs(pos.lng - other.lng) < PROXIMITY_THRESHOLD) {
+                group.push(other);
+                used.add(other.id);
+            }
+        });
+        groups.push(group);
+    });
+    const offsets = new Map();
+    groups.forEach((group) => {
+        if (group.length <= 1) return;
+        const centerLat = group.reduce((s, p) => s + p.lat, 0) / group.length;
+        const centerLng = group.reduce((s, p) => s + p.lng, 0) / group.length;
+        group.forEach((pos, idx) => {
+            const angle = (2 * Math.PI * idx) / group.length;
+            offsets.set(pos.id, { lat: centerLat + SPREAD_RADIUS * Math.cos(angle), lng: centerLng + SPREAD_RADIUS * Math.sin(angle) });
+        });
+    });
+    return offsets;
+};
+
+/**
  * Enhanced Officer Location Tracker with Admin Location
  * Shows live locations of officers and admin with distance calculations
  */
@@ -64,6 +105,11 @@ const OfficerLocationTrackerWithAdmin = ({ officers = [], deployments = [], onOf
     const [shareLocation, setShareLocation] = useState(false);
     const [officersWithDistance, setOfficersWithDistance] = useState([]);
     const [loading, setLoading] = useState(false);
+
+    // Spread offsets for overlapping markers
+    const markerOffsets = useMemo(() => {
+        return spreadOverlappingMarkers(officers, officerLocations);
+    }, [officers, officerLocations]);
 
     // District-specific configuration
     const isDistrictAdmin = user?.role === 'district_admin';
@@ -151,11 +197,13 @@ const OfficerLocationTrackerWithAdmin = ({ officers = [], deployments = [], onOf
 
         const unsubLocation = subscribe('officer:location', (data) => {
             console.log('📍 Real-time officer location:', data);
+            const odId = Number(data.officerId);
             
             setOfficerLocations(prev => {
                 const newMap = new Map(prev);
-                newMap.set(data.officerId, {
+                newMap.set(odId, {
                     ...data,
+                    officerId: odId,
                     receivedAt: new Date(),
                     isOnline: true,
                 });
@@ -523,27 +571,32 @@ const OfficerLocationTrackerWithAdmin = ({ officers = [], deployments = [], onOf
                             {/* Officer Markers */}
                             {officers.map((officer) => {
                                 const location = officerLocations.get(officer.id) || officerLocations.get(String(officer.id));
-                                const lat = location?.latitude || officer.current_latitude;
-                                const lng = location?.longitude || officer.current_longitude;
+                                const rawLat = location?.latitude || officer.current_latitude;
+                                const rawLng = location?.longitude || officer.current_longitude;
                                 
-                                if (!lat || !lng) return null;
+                                if (!rawLat || !rawLng) return null;
 
-                                const isOnline = location?.isOnline !== false;
+                                // Spread overlapping markers
+                                const offset = markerOffsets.get(officer.id);
+                                const lat = offset ? offset.lat : parseFloat(rawLat);
+                                const lng = offset ? offset.lng : parseFloat(rawLng);
+
+                                const isOnline = location?.isOnline === true;
                                 const deployment = deployments.find(d => d.officers?.some(o => o.id === officer.id));
                                 const icon = createOfficerIcon(isOnline, !!deployment);
 
                                 return (
-                                    <Marker key={officer.id} position={[parseFloat(lat), parseFloat(lng)]} icon={icon}>
+                                    <Marker key={`${officer.id}-${isOnline ? 'on' : 'off'}`} position={[lat, lng]} icon={icon}>
                                         <Popup>
                                             <div className="p-2 min-w-[160px]">
                                                 <div className="font-bold text-sm mb-1">{officer.full_name || 'Unknown'}</div>
                                                 <div className="text-xs text-gray-500 mb-1">Badge: {officer.badge_number || 'N/A'}</div>
                                                 <div className="text-xs text-gray-600 mb-1">
-                                                    📍 {parseFloat(lat).toFixed(5)}, {parseFloat(lng).toFixed(5)}
+                                                    📍 {parseFloat(rawLat).toFixed(5)}, {parseFloat(rawLng).toFixed(5)}
                                                 </div>
                                                 {shareLocation && adminLocation && (
                                                     <div className="text-xs font-medium text-amber-600 mb-1">
-                                                        📏 {calculateDistance(adminLocation.latitude, adminLocation.longitude, lat, lng)} km away
+                                                        📏 {calculateDistance(adminLocation.latitude, adminLocation.longitude, rawLat, rawLng)} km away
                                                     </div>
                                                 )}
                                                 <div className={`text-xs font-medium ${isOnline ? 'text-green-600' : 'text-gray-500'}`}>

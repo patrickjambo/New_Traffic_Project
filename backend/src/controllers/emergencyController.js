@@ -753,30 +753,10 @@ const respondToEmergency = async (req, res) => {
                 [id, emergency.status, officerId, `Accepted by ${officerName}`]
             );
 
-            // 🔔 Broadcast to ALL nearby officers that this emergency has been accepted
-            // This will stop alarms on their devices
-            socketManager.io.to('role:police').emit('emergency:accepted', {
-                emergencyId: parseInt(id),
-                acceptedBy: {
-                    officerId: officerId,
-                    officerName: officerName
-                },
-                timestamp: new Date().toISOString(),
-                message: `${officerName} is responding to this emergency`
-            });
+            // 🔔 INSTANT broadcast to admin dashboard using optimized method
+            socketManager.emitOfficerResponse(id, officerId, officerName, 'dispatched', 'accepted');
 
-            // 🔔 Also broadcast to admins so they see real-time updates
-            socketManager.io.to('role:admin').emit('emergency:accepted', {
-                emergencyId: parseInt(id),
-                acceptedBy: {
-                    officerId: officerId,
-                    officerName: officerName
-                },
-                timestamp: new Date().toISOString(),
-                message: `${officerName} is responding to this emergency`
-            });
-
-            // 🔔 Also emit emergency:update with full data for dashboard refresh
+            // 🔔 Also broadcast full emergency:update with complete data
             socketManager.io.emit('emergency:update', {
                 id: parseInt(id),
                 emergencyId: parseInt(id),
@@ -784,7 +764,10 @@ const respondToEmergency = async (req, res) => {
                 assigned_to: officerId,
                 assigned_to_name: officerName,
                 responder_name: officerName,
+                officerName: officerName,
+                officer_name: officerName,
                 response_time: new Date().toISOString(),
+                timestamp: new Date().toISOString(),
             });
 
             console.log(`✅ Emergency #${id} accepted by officer ${officerName} (ID: ${officerId})`);

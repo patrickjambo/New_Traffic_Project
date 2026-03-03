@@ -159,6 +159,10 @@ export const WebSocketProvider = ({ children }) => {
                 'emergency:update',
                 'emergency:alert',
                 'emergency:nearby',
+                'emergency:accepted',
+                'emergency:officer_response',
+                'emergency:status_change',
+                'emergency:status_changed', // Backend emits this from emitEmergencyUpdate
                 'analysis:complete',
                 'notification:new',
                 'deployment:new',

@@ -313,8 +313,9 @@ const generateReport = async (req, res) => {
 const createOfficer = async (req, res) => {
     try {
         const { email, full_name, password, badge_number, unit, phone } = req.body;
+        const adminDistrictId = req.user.district_id; // Get admin's district for assigning to new officer
 
-        console.log('📝 Creating officer:', { email, full_name, badge_number, unit });
+        console.log('📝 Creating officer:', { email, full_name, badge_number, unit, adminDistrictId });
 
         if (!email || !password || !full_name) {
             return res.status(400).json({
@@ -344,26 +345,36 @@ const createOfficer = async (req, res) => {
         const officerBadge = badge_number || `RNP-${Date.now().toString().slice(-6)}`;
         const officerUnit = unit || 'Traffic Unit';
 
-        // Create user with police role
+        // Create user with police role and assign to admin's district
         const result = await query(
-            `INSERT INTO users (email, full_name, password_hash, role, badge_number, unit, phone, is_active)
-             VALUES ($1, $2, $3, 'police', $4, $5, $6, true)
-             RETURNING id, email, full_name, role, badge_number, unit, phone, is_active, created_at`,
-            [cleanEmail, full_name.trim(), password_hash, officerBadge, officerUnit, phone || null]
+            `INSERT INTO users (email, full_name, password_hash, role, badge_number, unit, phone, is_active, district_id)
+             VALUES ($1, $2, $3, 'police', $4, $5, $6, true, $7)
+             RETURNING id, email, full_name, role, badge_number, unit, phone, is_active, created_at, district_id`,
+            [cleanEmail, full_name.trim(), password_hash, officerBadge, officerUnit, phone || null, adminDistrictId || null]
         );
 
         const officer = result.rows[0];
-        console.log('✅ User created with ID:', officer.id);
+        console.log('✅ User created with ID:', officer.id, 'District ID:', officer.district_id);
 
-        // Create officer profile with correct columns
+        // Get district name for response
+        let districtName = null;
+        if (officer.district_id) {
+            const districtResult = await query('SELECT name FROM districts WHERE id = $1', [officer.district_id]);
+            if (districtResult.rows.length > 0) {
+                districtName = districtResult.rows[0].name;
+            }
+        }
+
+        // Create officer profile with correct columns and assigned district
+        // is_on_duty defaults to false - will be set true when officer logs in via mobile app
         await query(
-            `INSERT INTO officer_profiles (user_id, badge_number, unit, is_on_duty, emergency_alert_enabled, notification_enabled)
-             VALUES ($1, $2, $3, true, true, true)
+            `INSERT INTO officer_profiles (user_id, badge_number, unit, is_on_duty, emergency_alert_enabled, notification_enabled, assigned_district_id)
+             VALUES ($1, $2, $3, false, true, true, $4)
              ON CONFLICT (user_id) DO UPDATE SET 
                 badge_number = EXCLUDED.badge_number, 
                 unit = EXCLUDED.unit,
-                is_on_duty = true`,
-            [officer.id, officerBadge, officerUnit]
+                assigned_district_id = EXCLUDED.assigned_district_id`,
+            [officer.id, officerBadge, officerUnit, adminDistrictId || null]
         );
         console.log('✅ Officer profile created');
 
@@ -377,6 +388,7 @@ const createOfficer = async (req, res) => {
                     email: cleanEmail,
                     badgeNumber: officerBadge,
                     unit: officerUnit,
+                    districtName: districtName,
                     timestamp: new Date().toISOString(),
                 });
                 console.log('📡 Broadcasted new officer creation to admins');
@@ -390,6 +402,7 @@ const createOfficer = async (req, res) => {
             message: `Officer ${full_name} created successfully. They can now login with email: ${cleanEmail}`,
             data: {
                 ...officer,
+                district_name: districtName,
                 login_credentials: {
                     email: cleanEmail,
                     note: 'Use the password you set to login on the mobile app'
@@ -418,6 +431,8 @@ const createOfficer = async (req, res) => {
 const getOfficers = async (req, res) => {
     try {
         const { status, search } = req.query;
+        const adminDistrictId = req.user.district_id; // For district_admin filtering
+        const isDistrictAdmin = req.user.role === 'district_admin';
 
         let queryText = `
             SELECT 
@@ -429,6 +444,8 @@ const getOfficers = async (req, res) => {
                 u.is_active,
                 u.created_at,
                 u.updated_at,
+                u.district_id,
+                d.name as district_name,
                 COALESCE(op.badge_number, u.badge_number) as badge_number,
                 COALESCE(op.unit, u.unit, 'Traffic Unit') as unit,
                 CASE WHEN op.is_on_duty THEN 'on_duty' ELSE 'off_duty' END as availability_status,
@@ -438,15 +455,23 @@ const getOfficers = async (req, res) => {
                 op.location_updated_at,
                 op.emergency_alert_enabled,
                 (SELECT COUNT(*) FROM deployment_officers do2 
-                 JOIN deployments d ON do2.deployment_id = d.id 
-                 WHERE do2.officer_id = u.id AND d.status = 'Active') as active_deployments
+                 JOIN deployments dep ON do2.deployment_id = dep.id 
+                 WHERE do2.officer_id = u.id AND dep.status = 'Active') as active_deployments
             FROM users u
             LEFT JOIN officer_profiles op ON u.id = op.user_id
+            LEFT JOIN districts d ON u.district_id = d.id
             WHERE u.role = 'police'
         `;
 
         const params = [];
         let paramCount = 0;
+
+        // District admin only sees officers from their district
+        if (isDistrictAdmin && adminDistrictId) {
+            paramCount++;
+            queryText += ` AND u.district_id = $${paramCount}`;
+            params.push(adminDistrictId);
+        }
 
         if (status === 'active') {
             queryText += ` AND u.is_active = true`;

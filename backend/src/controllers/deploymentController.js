@@ -1,5 +1,6 @@
 const { query, transaction } = require('../config/database');
 const socketManager = require('../services/socketManager');
+const fcmService = require('../services/fcmService');
 
 /**
  * Get all deployments
@@ -209,9 +210,14 @@ const createDeployment = async (req, res) => {
 
         // Send targeted notifications to each assigned officer
         if (officers && officers.length > 0) {
+            const deploymentType = incidentId ? 'incident' : (emergencyId ? 'emergency' : 'patrol');
+            
             for (const officerId of officers) {
+                // Socket notification (for when app is open)
                 socketManager.emitToUser(officerId, 'deployment:assigned', {
+                    id: deployment.id,
                     deploymentId: deployment.id,
+                    unit_name: deployment.unit_name,
                     unitName: deployment.unit_name,
                     address: deployment.address,
                     latitude: deployment.latitude,
@@ -219,12 +225,16 @@ const createDeployment = async (req, res) => {
                     priority: priority || 'normal',
                     instructions: instructions || null,
                     status: 'Pending',
+                    acknowledged: false,
+                    created_at: deployment.created_at,
                     assignedAt: new Date().toISOString(),
-                    type: incidentId ? 'incident' : (emergencyId ? 'emergency' : 'patrol'),
+                    type: deploymentType,
+                    incident_id: incidentId || null,
+                    emergency_id: emergencyId || null,
                     requiresAcknowledgment: true
                 });
 
-                // Also send notification
+                // Socket notification popup
                 socketManager.emitNotificationToUser(officerId, {
                     id: `deploy_${deployment.id}_${Date.now()}`,
                     title: '📍 New Deployment Assignment',
@@ -232,6 +242,26 @@ const createDeployment = async (req, res) => {
                     type: 'deployment',
                     created_at: new Date().toISOString()
                 });
+
+                // 🔔 FCM Push Notification (works when app is closed/background)
+                // This ensures officers receive notification with sound/vibration
+                try {
+                    await fcmService.sendDeploymentToOfficer(officerId, {
+                        id: deployment.id,
+                        unitName: deployment.unit_name,
+                        address: deployment.address,
+                        latitude: deployment.latitude,
+                        longitude: deployment.longitude,
+                        priority: priority || 'normal',
+                        instructions: instructions || null,
+                        type: deploymentType,
+                        incidentId: incidentId || null,
+                        emergencyId: emergencyId || null,
+                    });
+                } catch (fcmError) {
+                    console.error(`⚠️ FCM error for officer ${officerId}:`, fcmError.message);
+                    // Don't fail the request if FCM fails
+                }
             }
         }
 
@@ -449,17 +479,30 @@ const updateOfficerDeploymentStatus = async (req, res) => {
             }
         }
 
-        // Emit status update to admin
-        socketManager.emitToRole('admin', 'deployment:officer_status', {
+        // 🔔 INSTANT: Emit multiple events to ensure admin dashboard updates immediately
+        const statusPayload = {
             deploymentId: parseInt(id),
             officerId: officerId,
             officerName: officer?.full_name,
+            officer_name: officer?.full_name,
             badgeNumber: officer?.badge_number,
             status: status,
             notes: notes || null,
             location: latitude && longitude ? { latitude, longitude } : null,
-            updatedAt: new Date().toISOString()
-        });
+            updatedAt: new Date().toISOString(),
+            timestamp: new Date().toISOString(),
+        };
+
+        // Emit to admin room - primary event
+        socketManager.emitToRole('admin', 'deployment:officer_status', statusPayload);
+        
+        // Also emit general deployment:update for dashboard
+        socketManager.io.to('role:admin').emit('deployment:update', statusPayload);
+        
+        // Emit to all clients for real-time sync
+        socketManager.io.emit('deployment:status_changed', statusPayload);
+
+        console.log(`👮 INSTANT: Officer ${officer?.full_name} status → ${status} on deployment #${id}`);
 
         res.json({
             success: true,
@@ -634,7 +677,12 @@ const getAvailableOfficers = async (req, res) => {
                 op.is_on_duty,
                 op.current_latitude,
                 op.current_longitude,
+                op.current_address,
                 op.location_updated_at,
+                CASE 
+                    WHEN op.location_updated_at > NOW() - INTERVAL '2 minutes' THEN true 
+                    ELSE false 
+                END as is_online,
                 CASE 
                     WHEN d.id IS NOT NULL THEN 'Deployed'
                     ELSE 'Available'

@@ -22,6 +22,13 @@ router.use(authorize('police', 'admin'));
 router.post('/location', updateOfficerLocation);
 
 /**
+ * @route   PUT /api/police/location
+ * @desc    Update officer's current location (for background tracking - PUT method)
+ * @access  Private (Police)
+ */
+router.put('/location', updateOfficerLocation);
+
+/**
  * @route   GET /api/police/incidents
  * @desc    Get incidents for police dashboard
  * @access  Private (Police/Admin)

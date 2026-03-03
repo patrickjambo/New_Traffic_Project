@@ -83,26 +83,117 @@ const Emergency = () => {
     // 🚨 Listen for emergency accepted by officer (real-time)
     const unsubEmergencyAccepted = subscribe('emergency:accepted', (data) => {
       console.log('✅ Emergency accepted by officer:', data);
-      toast.success(
-        `🚔 ${data.acceptedBy?.officerName || 'Officer'} is responding to emergency #${data.emergencyId}!`,
-        { duration: 6000, icon: '🚨' }
-      );
       
       setAcceptedEmergencies(prev => ({
         ...prev,
         [data.emergencyId]: {
-          officerId: data.acceptedBy?.officerId,
-          officerName: data.acceptedBy?.officerName,
+          officerId: data.acceptedBy?.officerId || data.officerId,
+          officerName: data.acceptedBy?.officerName || data.officerName || data.responder_name,
           timestamp: data.timestamp,
+          status: data.status || 'dispatched',
           message: data.message
         }
       }));
+      
+      // Refresh emergencies to get updated status
+      fetchEmergencies();
+    });
+
+    // 🚨 Listen for officer response (instant updates)
+    const unsubOfficerResponse = subscribe('emergency:officer_response', (data) => {
+      console.log('🚔 Officer responding to emergency:', data);
+      
+      if (data.emergencyId) {
+        setAcceptedEmergencies(prev => ({
+          ...prev,
+          [data.emergencyId]: {
+            officerId: data.officerId,
+            officerName: data.officerName || data.responder_name,
+            timestamp: data.timestamp,
+            status: data.status || 'dispatched',
+          }
+        }));
+      }
+      
+      // Refresh emergencies to get updated status
+      fetchEmergencies();
+    });
+
+    // Listen for emergency status changes
+    const unsubStatusChange = subscribe('emergency:status_change', (data) => {
+      console.log('📊 Emergency status changed:', data);
+      const emergencyId = data.emergencyId || data.id;
+      const newStatus = data.newStatus || data.status;
+      
+      // INSTANT: Update local accepted emergencies with new status
+      if (emergencyId && newStatus) {
+        setAcceptedEmergencies(prev => ({
+          ...prev,
+          [emergencyId]: {
+            ...prev[emergencyId],
+            officerId: data.officerId || prev[emergencyId]?.officerId,
+            officerName: data.officerName || data.responder_name || prev[emergencyId]?.officerName,
+            timestamp: data.timestamp || prev[emergencyId]?.timestamp,
+            status: newStatus,
+          }
+        }));
+      }
+      
+      // Also refresh from server as backup
+      fetchEmergencies();
+    });
+
+    // Listen for emergency:status_changed (emitted by backend emitEmergencyUpdate)
+    const unsubStatusChanged = subscribe('emergency:status_changed', (data) => {
+      console.log('📊 Emergency status_changed:', data);
+      const emergencyId = data.emergencyId || data.id;
+      const newStatus = data.newStatus || data.status;
+      
+      // INSTANT: Update local accepted emergencies with new status
+      if (emergencyId && newStatus) {
+        setAcceptedEmergencies(prev => ({
+          ...prev,
+          [emergencyId]: {
+            ...prev[emergencyId],
+            officerId: data.officerId || data.assigned_to || prev[emergencyId]?.officerId,
+            officerName: data.officerName || data.responder_name || data.assigned_to_name || prev[emergencyId]?.officerName,
+            timestamp: data.timestamp || prev[emergencyId]?.timestamp,
+            status: newStatus,
+          }
+        }));
+      }
+      
+      fetchEmergencies();
+    });
+
+    // Listen for emergency:update (broadcast by backend for ALL emergency changes)
+    const unsubUpdate = subscribe('emergency:update', (data) => {
+      console.log('🔄 Emergency update in Emergency page:', data);
+      const emergencyId = data.emergencyId || data.id;
+      const newStatus = data.status;
+      
+      if (emergencyId && newStatus) {
+        setAcceptedEmergencies(prev => ({
+          ...prev,
+          [emergencyId]: {
+            ...prev[emergencyId],
+            officerId: data.officerId || data.assigned_to || data.assignedTo || prev[emergencyId]?.officerId,
+            officerName: data.officerName || data.responder_name || data.assigned_to_name || prev[emergencyId]?.officerName,
+            timestamp: data.timestamp || prev[emergencyId]?.timestamp,
+            status: newStatus,
+          }
+        }));
+      }
     });
 
     return () => {
       unsubAck();
       unsubStatus();
       unsubEmergencyAccepted();
+      unsubOfficerResponse();
+      unsubStatusChange();
+      unsubStatusChanged();
+      unsubUpdate();
     };
   }, [isConnected, subscribe]);
 
@@ -297,27 +388,77 @@ const Emergency = () => {
                   <div className="flex flex-col justify-center gap-3 min-w-[200px]">
                     <div className="text-center mb-2">
                       <span className="text-xs text-gray-500 uppercase tracking-wider">Current Status</span>
-                      <p className={`font-bold ${emergency.status === 'resolved' ? 'text-green-400' :
-                        emergency.status === 'active' || emergency.status === 'dispatched' ? 'text-orange-400' :
-                          'text-red-400'
-                        }`}>
-                        {emergency.status.toUpperCase()}
-                      </p>
+                      {(() => {
+                        // Use the most up-to-date status: real-time WebSocket > API data
+                        const liveStatus = acceptedEmergencies[emergency.id]?.status || emergency.status;
+                        const statusColors = {
+                          'resolved': 'text-green-400',
+                          'on_scene': 'text-cyan-400',
+                          'en_route': 'text-blue-400',
+                          'active': 'text-orange-400',
+                          'dispatched': 'text-orange-400',
+                          'pending': 'text-red-400',
+                          'cancelled': 'text-gray-400',
+                        };
+                        const statusLabels = {
+                          'pending': 'PENDING',
+                          'dispatched': 'DISPATCHED',
+                          'en_route': 'EN ROUTE',
+                          'on_scene': 'ON SCENE',
+                          'active': 'ACTIVE',
+                          'resolved': 'RESOLVED',
+                          'cancelled': 'CANCELLED',
+                        };
+                        return (
+                          <p className={`font-bold ${statusColors[liveStatus] || 'text-red-400'}`}>
+                            {statusLabels[liveStatus] || liveStatus?.toUpperCase() || 'UNKNOWN'}
+                          </p>
+                        );
+                      })()}
                     </div>
 
                     {/* 🚔 Officer Response Status - Real-time */}
                     {(emergency.assigned_to || acceptedEmergencies[emergency.id]) && (
-                      <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-3 mb-2">
-                        <div className="flex items-center gap-2 text-green-400">
-                          <UserCheck className="w-4 h-4" />
-                          <span className="text-xs font-bold uppercase">Officer Responding</span>
+                      <div className={`rounded-lg p-3 mb-2 border ${
+                        (acceptedEmergencies[emergency.id]?.status === 'on_scene') 
+                          ? 'bg-cyan-500/10 border-cyan-500/30' 
+                          : (acceptedEmergencies[emergency.id]?.status === 'en_route')
+                            ? 'bg-blue-500/10 border-blue-500/30'
+                            : 'bg-green-500/10 border-green-500/30'
+                      }`}>
+                        <div className={`flex items-center gap-2 ${
+                          (acceptedEmergencies[emergency.id]?.status === 'on_scene')
+                            ? 'text-cyan-400'
+                            : (acceptedEmergencies[emergency.id]?.status === 'en_route')
+                              ? 'text-blue-400'
+                              : 'text-green-400'
+                        }`}>
+                          {acceptedEmergencies[emergency.id]?.status === 'on_scene' ? (
+                            <MapPin className="w-4 h-4" />
+                          ) : acceptedEmergencies[emergency.id]?.status === 'en_route' ? (
+                            <Navigation className="w-4 h-4" />
+                          ) : (
+                            <UserCheck className="w-4 h-4" />
+                          )}
+                          <span className="text-xs font-bold uppercase">
+                            {acceptedEmergencies[emergency.id]?.status === 'on_scene' 
+                              ? 'Officer On Scene'
+                              : acceptedEmergencies[emergency.id]?.status === 'en_route'
+                                ? 'Officer En Route'
+                                : 'Officer Responding'}
+                          </span>
                         </div>
                         <p className="text-white font-medium mt-1">
                           {acceptedEmergencies[emergency.id]?.officerName || emergency.assigned_to_name || 'Officer assigned'}
                         </p>
                         {acceptedEmergencies[emergency.id]?.timestamp && (
                           <p className="text-green-400/70 text-xs mt-1">
-                            Accepted at {new Date(acceptedEmergencies[emergency.id].timestamp).toLocaleTimeString()}
+                            {acceptedEmergencies[emergency.id]?.status === 'on_scene'
+                              ? 'Arrived at '
+                              : acceptedEmergencies[emergency.id]?.status === 'en_route'
+                                ? 'En route since '
+                                : 'Accepted at '}
+                            {new Date(acceptedEmergencies[emergency.id].timestamp).toLocaleTimeString()}
                           </p>
                         )}
                       </div>

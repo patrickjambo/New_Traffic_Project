@@ -90,3 +90,4 @@ flutter:
   assets:
     - assets/images/
     - assets/images/rnp-logo.png
+    - assets/sounds/

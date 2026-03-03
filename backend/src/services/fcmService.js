@@ -328,33 +328,127 @@ class FCMService {
         return await this.sendToMultipleDevices(tokens, notification, data, false);
     }
 
+    /**
+     * Send deployment notification to officers (high priority with sound/vibration)
+     * This notification triggers sound and vibration to ensure officers notice
+     */
+    async sendDeploymentNotification(officers, deploymentData) {
+        const tokens = officers
+            .filter(o => o.fcm_token)
+            .map(o => o.fcm_token);
+
+        if (tokens.length === 0) {
+            console.log('⚠️ No FCM tokens available for deployment notification');
+            return { success: false, error: 'No tokens' };
+        }
+
+        const isEmergency = deploymentData.priority === 'urgent' || deploymentData.type === 'emergency';
+        
+        const notification = {
+            title: isEmergency ? `🚨 URGENT DEPLOYMENT` : `📍 New Deployment Assignment`,
+            body: `You have been deployed to ${deploymentData.unitName || 'location'} at ${deploymentData.address || 'assigned location'}. Tap to acknowledge.`,
+        };
+
+        const data = {
+            deploymentId: String(deploymentData.id || ''),
+            unitName: deploymentData.unitName || '',
+            type: 'deployment',
+            priority: deploymentData.priority || 'normal',
+            latitude: String(deploymentData.latitude || ''),
+            longitude: String(deploymentData.longitude || ''),
+            address: deploymentData.address || '',
+            instructions: deploymentData.instructions || '',
+            incidentId: String(deploymentData.incidentId || ''),
+            emergencyId: String(deploymentData.emergencyId || ''),
+            requiresAcknowledgment: 'true',
+            timestamp: new Date().toISOString(),
+        };
+
+        console.log(`📱 Sending deployment FCM to ${tokens.length} officers (emergency: ${isEmergency})`);
+        return await this.sendToMultipleDevices(tokens, notification, data, isEmergency);
+    }
+
+    /**
+     * Send deployment notification to a single officer by user ID
+     */
+    async sendDeploymentToOfficer(officerId, deploymentData) {
+        try {
+            // Get officer's FCM token from database
+            const result = await query(`
+                SELECT op.fcm_token, u.full_name
+                FROM officer_profiles op
+                JOIN users u ON op.user_id = u.id
+                WHERE op.user_id = $1 AND op.fcm_token IS NOT NULL
+            `, [officerId]);
+
+            if (result.rows.length === 0 || !result.rows[0].fcm_token) {
+                console.log(`⚠️ No FCM token for officer ${officerId}`);
+                return { success: false, error: 'No FCM token' };
+            }
+
+            const officer = result.rows[0];
+            const isEmergency = deploymentData.priority === 'urgent' || deploymentData.type === 'emergency';
+
+            const notification = {
+                title: isEmergency ? `🚨 URGENT DEPLOYMENT` : `📍 New Deployment`,
+                body: `${deploymentData.unitName || 'Deployment'} at ${deploymentData.address || 'assigned location'}`,
+            };
+
+            const data = {
+                deploymentId: String(deploymentData.id || ''),
+                unitName: deploymentData.unitName || '',
+                type: 'deployment',
+                priority: deploymentData.priority || 'normal',
+                latitude: String(deploymentData.latitude || ''),
+                longitude: String(deploymentData.longitude || ''),
+                address: deploymentData.address || '',
+                instructions: deploymentData.instructions || '',
+                requiresAcknowledgment: 'true',
+                timestamp: new Date().toISOString(),
+            };
+
+            console.log(`📱 Sending deployment FCM to ${officer.full_name}`);
+            return await this.sendToDevice(officer.fcm_token, notification, data, isEmergency);
+        } catch (error) {
+            console.error('Error sending deployment to officer:', error);
+            return { success: false, error: error.message };
+        }
+    }
+
     // ============================================================
     // PRIVATE HELPER METHODS
     // ============================================================
 
     /**
      * Get Android-specific notification config
+     * For emergencies: Uses critical channel that bypasses DND
      */
     _getAndroidConfig(isEmergency) {
         if (isEmergency) {
             return {
                 priority: 'high',
-                ttl: 0, // Immediate delivery
+                ttl: 0, // Immediate delivery - no delay
                 notification: {
-                    channelId: 'emergency_channel',
+                    channelId: 'critical_emergency_channel', // Must match app's critical channel
                     priority: 'max',
-                    visibility: 'public',
+                    visibility: 'public', // Show on lock screen
                     sound: 'emergency_siren', // Custom sound in app
                     defaultSound: false,
                     defaultVibrateTimings: false,
-                    vibrateTimingsMillis: [0, 500, 200, 500, 200, 500],
+                    // Police/Ambulance style vibration pattern
+                    vibrateTimingsMillis: [0, 800, 200, 800, 200, 200, 100, 200, 100, 200],
                     lightSettings: {
-                        color: '#FF0000',
-                        lightOnDurationMillis: 500,
-                        lightOffDurationMillis: 500,
+                        color: '#FF0000', // Red LED
+                        lightOnDurationMillis: 300,
+                        lightOffDurationMillis: 300,
                     },
                     notificationCount: 1,
+                    // CRITICAL: This makes notification appear even on lock screen
+                    bypassDnd: true,
+                    sticky: true,
                 },
+                // Direct boot - allows notification on locked device
+                directBootOk: true,
             };
         }
 

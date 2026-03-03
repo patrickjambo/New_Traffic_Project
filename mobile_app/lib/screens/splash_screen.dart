@@ -129,8 +129,8 @@ class _SplashScreenState extends State<SplashScreen>
   }
 
   Future<void> _checkAuthentication() async {
-    // 🚀 OPTIMIZED: Reduced delay from 3s to 1.5s (just enough for branding)
-    await Future.delayed(const Duration(milliseconds: 1500));
+    // 🚀 ULTRA-FAST: Just enough for branding, then navigate
+    await Future.delayed(const Duration(milliseconds: 800));
 
     // Check if user is authenticated
     final isAuthenticated = await _authService.isAuthenticated();

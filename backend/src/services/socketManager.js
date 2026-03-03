@@ -34,16 +34,38 @@ class SocketManager {
 
             // Handle client disconnection
             socket.on('disconnect', (reason) => {
+                const clientData = this.connectedClients.get(socket.id);
                 console.log(`❌ Client disconnected: ${socket.id} (${reason})`);
+                
+                // If this was a police officer, notify admins they went offline
+                if (clientData && clientData.role === 'police' && clientData.userId) {
+                    this.io.to('role:admin').emit('officer:offline', {
+                        officerId: clientData.userId,
+                        disconnectedAt: new Date().toISOString(),
+                        reason: reason,
+                    });
+                    console.log(`📴 Officer ${clientData.userId} went OFFLINE`);
+                    
+                    // Update DB: mark officer as offline
+                    this._setOfficerOnlineStatus(clientData.userId, false)
+                        .catch(err => console.error('Error setting officer offline:', err));
+                }
+                
                 this.connectedClients.delete(socket.id);
             });
 
-            // Join role-based room (police, admin, public)
+            // Join role-based room (police, admin, district_admin, public)
             socket.on('join:role', (data) => {
                 const { role, userId } = data;
-                if (role && ['police', 'admin', 'public'].includes(role)) {
+                if (role && ['police', 'admin', 'district_admin', 'public'].includes(role)) {
                     const roomName = `role:${role}`;
                     socket.join(roomName);
+                    
+                    // District admins also join the admin room to receive admin broadcasts
+                    if (role === 'district_admin') {
+                        socket.join('role:admin');
+                        console.log(`🏢 District admin ${userId} also joined role:admin room`);
+                    }
 
                     // Also join user-specific room for targeted notifications
                     if (userId) {
@@ -60,6 +82,20 @@ class SocketManager {
 
                     this.updateClientRoom(socket.id, roomName);
                     console.log(`👮 Client ${socket.id} joined room: ${roomName}`);
+                    
+                    // If police officer joined, notify admins they are ONLINE
+                    if (role === 'police' && userId) {
+                        this.io.to('role:admin').emit('officer:online', {
+                            officerId: userId,
+                            connectedAt: new Date().toISOString(),
+                            socketId: socket.id,
+                        });
+                        console.log(`📱 Officer ${userId} came ONLINE - notified admins`);
+                        
+                        // Update DB: mark officer as online
+                        this._setOfficerOnlineStatus(userId, true)
+                            .catch(err => console.error('Error setting officer online:', err));
+                    }
                 }
             });
 
@@ -173,36 +209,102 @@ class SocketManager {
             // 🚨 Handle emergency accepted from mobile app (instant broadcast)
             socket.on('emergency:accepted', (data) => {
                 console.log('📱 Mobile app emitted emergency:accepted:', data);
-                
-                // Broadcast to all admins immediately (no DB call needed, API will handle that)
-                this.io.to('role:admin').emit('emergency:accepted', {
-                    emergencyId: data.emergencyId,
-                    acceptedBy: data.acceptedBy,
-                    timestamp: data.timestamp || new Date().toISOString(),
-                    message: data.message || `${data.acceptedBy?.officerName || 'Officer'} is responding`,
-                });
-                
-                // Also emit emergency:update for dashboard to update status
-                this.io.emit('emergency:update', {
-                    id: data.emergencyId,
-                    emergencyId: data.emergencyId,
-                    status: 'dispatched',
-                    assigned_to: data.acceptedBy?.officerId,
-                    assigned_to_name: data.acceptedBy?.officerName,
-                    responder_name: data.acceptedBy?.officerName,
-                });
-                
-                // Broadcast to other officers so they stop alarming
-                socket.to('role:police').emit('emergency:accepted', {
-                    emergencyId: data.emergencyId,
-                    acceptedBy: data.acceptedBy,
-                    timestamp: data.timestamp,
-                    message: data.message,
-                });
-                
-                console.log(`✅ Broadcasted emergency:accepted for #${data.emergencyId} by ${data.acceptedBy?.officerName}`);
+                this._broadcastEmergencyAccepted(data, socket);
+            });
+            
+            // 🚨 Handle emergency:officer_response from mobile app (instant broadcast)
+            socket.on('emergency:officer_response', (data) => {
+                console.log('📱 Mobile app emitted emergency:officer_response:', data);
+                this._broadcastEmergencyAccepted(data, socket);
+            });
+            
+            // 🚨 Handle emergency:status_change from mobile app (instant broadcast)
+            socket.on('emergency:status_change', (data) => {
+                console.log('📱 Mobile app emitted emergency:status_change:', data);
+                this._broadcastStatusChange(data, socket);
             });
         });
+    }
+    
+    /**
+     * Broadcast status change to all clients
+     */
+    _broadcastStatusChange(data, socket) {
+        const emergencyId = data.emergencyId || data.id;
+        const newStatus = data.newStatus || data.status;
+        const officerId = data.officerId;
+        const officerName = data.officerName || data.responder_name || 'Officer';
+        
+        const payload = {
+            emergencyId: emergencyId,
+            id: emergencyId,
+            status: newStatus,
+            newStatus: newStatus,
+            officerId: officerId,
+            officerName: officerName,
+            responder_name: officerName,
+            assigned_to_name: officerName,
+            timestamp: data.timestamp || new Date().toISOString(),
+            eventType: 'status_change',
+            message: `Emergency #${emergencyId} status: ${newStatus}`,
+        };
+        
+        // INSTANT: Broadcast to all clients
+        this.io.to('role:admin').emit('emergency:status_change', payload);
+        this.io.to('role:admin').emit('emergency:status_changed', payload);
+        this.io.emit('emergency:update', payload);
+        
+        // Notify other police
+        if (socket) {
+            socket.to('role:police').emit('emergency:status_change', payload);
+        }
+        
+        console.log(`✅ INSTANT: Broadcasted status change for #${emergencyId} -> ${newStatus}`);
+    }
+    
+    /**
+     * Broadcast emergency accepted/responded to all clients
+     */
+    _broadcastEmergencyAccepted(data, socket) {
+        const emergencyId = data.emergencyId || data.id;
+        const officerId = data.officerId || data.acceptedBy?.officerId;
+        const officerName = data.officerName || data.acceptedBy?.officerName || 'Officer';
+        const action = data.action || 'accept';
+        
+        // Common payload for all events
+        const payload = {
+            emergencyId: emergencyId,
+            id: emergencyId,
+            status: 'dispatched',
+            officerId: officerId,
+            officerName: officerName,
+            assigned_to: officerId,
+            assigned_to_name: officerName,
+            responder_name: officerName,
+            action: action,
+            timestamp: data.timestamp || new Date().toISOString(),
+            message: `${officerName} is responding to emergency #${emergencyId}`,
+        };
+        
+        // INSTANT: Broadcast to all admins (multiple events for compatibility)
+        this.io.to('role:admin').emit('emergency:accepted', payload);
+        this.io.to('role:admin').emit('emergency:officer_response', payload);
+        this.io.to('role:admin').emit('emergency:status_changed', {
+            ...payload,
+            eventType: 'status_change',
+        });
+        
+        // CRITICAL: Emit emergency:update for dashboard to update the card
+        this.io.emit('emergency:update', payload);
+        
+        // Broadcast to other officers so they stop alarming
+        if (socket) {
+            socket.to('role:police').emit('emergency:accepted', payload);
+        } else {
+            this.io.to('role:police').emit('emergency:accepted', payload);
+        }
+        
+        console.log(`✅ INSTANT: Broadcasted emergency accepted for #${emergencyId} by ${officerName}`);
     }
 
     /**
@@ -223,6 +325,31 @@ class SocketManager {
             console.log(`✅ DB updated for officer ${officerId}: ${location.latitude}, ${location.longitude}`);
         } catch (error) {
             console.error('Error updating officer location in DB:', error.message);
+        }
+    }
+
+    /**
+     * Set officer online/offline status in database
+     */
+    async _setOfficerOnlineStatus(officerId, isOnline) {
+        try {
+            const { query } = require('../config/database');
+            if (isOnline) {
+                await query(`
+                    UPDATE officer_profiles 
+                    SET is_on_duty = true, location_updated_at = NOW()
+                    WHERE user_id = $1
+                `, [officerId]);
+            } else {
+                await query(`
+                    UPDATE officer_profiles 
+                    SET is_on_duty = false
+                    WHERE user_id = $1
+                `, [officerId]);
+            }
+            console.log(`✅ Officer ${officerId} status: ${isOnline ? 'ONLINE' : 'OFFLINE'}`);
+        } catch (error) {
+            console.error('Error updating officer online status:', error.message);
         }
     }
 
@@ -308,6 +435,7 @@ class SocketManager {
 
     /**
      * Emit new emergency to all connected clients
+     * OPTIMIZED: Sends WebSocket immediately + FCM push in parallel
      */
     emitEmergencyNew(emergency) {
         if (!this.io) return;
@@ -329,27 +457,41 @@ class SocketManager {
             description: emergency.description,
             servicesNeeded: emergency.services_needed,
             createdAt: emergency.created_at || new Date().toISOString(),
+            isEmergency: true,
+            priority: emergency.severity === 'critical' ? 'critical' : 'high',
         };
 
-        // Emit to all clients
+        // CRITICAL: Emit WebSocket events IMMEDIATELY (no await)
+        // 1. Emit to all clients
         this.io.emit('emergency:new', payload);
 
-        // Emit to location-based room
+        // 2. Emit to location-based room
         if (emergency.latitude && emergency.longitude) {
             const room = `loc:${Math.round(emergency.latitude * 100)}_${Math.round(emergency.longitude * 100)}`;
             this.io.to(room).emit('emergency:nearby', payload);
         }
 
-        // High priority alert for police/admin
+        // 3. High priority ALARM for police/admin (triggers siren/vibration/red screen)
+        this.io.to('role:police').to('role:admin').emit('emergency:alarm', {
+            ...payload,
+            title: `🚨 ${emergency.emergency_type?.toUpperCase() || 'EMERGENCY'}`,
+            message: emergency.description || 'Immediate response required!',
+            requiresFullScreen: true,
+            overrideDoNotDisturb: true,
+            soundType: 'siren',
+            vibrationPattern: 'emergency',
+        });
+
+        // 4. Also emit legacy alert event
         this.io.to('role:police').to('role:admin').emit('emergency:alert', {
             ...payload,
             priority: emergency.severity === 'critical' ? 'critical' : 'high',
         });
 
-        // Emit notification for police and admin
+        // 5. Emit notification for police and admin
         const emergencyNotification = {
             id: `em_${emergency.id}`,
-            title: `🚨 EMERGENCY: ${emergency.type}`,
+            title: `🚨 EMERGENCY: ${emergency.type || emergency.emergency_type}`,
             message: `URGENT: ${emergency.severity} severity emergency at ${emergency.location_name}. Services needed: ${Array.isArray(emergency.services_needed) ? emergency.services_needed.join(', ') : 'Immediate attention'}.`,
             type: 'emergency',
             created_at: emergency.created_at
@@ -357,11 +499,28 @@ class SocketManager {
         this.emitNotificationToRole('police', emergencyNotification);
         this.emitNotificationToRole('admin', emergencyNotification);
 
-        console.log(`🚨 Emitted emergency:new and notifications - ID: ${emergency.id}`);
+        console.log(`🚨 Emitted emergency:new + emergency:alarm - ID: ${emergency.id}`);
+
+        // PARALLEL: Send FCM push for background/closed apps
+        this._sendEmergencyFCMPush({
+            alertId: emergency.id,
+            emergencyId: emergency.id,
+            type: emergency.emergency_type,
+            title: `🚨 ${emergency.emergency_type?.toUpperCase() || 'EMERGENCY'}`,
+            message: emergency.description || 'Immediate response required!',
+            latitude: parseFloat(emergency.latitude),
+            longitude: parseFloat(emergency.longitude),
+            location_name: emergency.location_name,
+            severity: emergency.severity,
+            isEmergency: true
+        }).catch(err => {
+            console.log('⚠️ FCM push failed:', err.message);
+        });
     }
 
     /**
      * Emit emergency status update
+     * OPTIMIZED: Sends complete data for admin dashboard real-time updates
      */
     emitEmergencyUpdate(emergency) {
         if (!this.io) return;
@@ -374,11 +533,71 @@ class SocketManager {
             assigned_to: emergency.assigned_to,
             assigned_to_name: emergency.assigned_to_name || emergency.responder_name,
             responder_name: emergency.assigned_to_name || emergency.responder_name,
+            officer_name: emergency.assigned_to_name || emergency.responder_name,
+            officerName: emergency.assigned_to_name || emergency.responder_name,
+            // Include more details for dashboard
+            severity: emergency.severity,
+            type: emergency.emergency_type || emergency.type,
+            emergency_type: emergency.emergency_type || emergency.type,
+            location_name: emergency.location_name,
+            latitude: emergency.latitude,
+            longitude: emergency.longitude,
+            description: emergency.description,
+            response_time: emergency.response_time,
+            responder_notes: emergency.responder_notes,
             updatedAt: emergency.updated_at || new Date().toISOString(),
+            updated_at: emergency.updated_at || new Date().toISOString(),
+            timestamp: new Date().toISOString(),
         };
 
+        // CRITICAL: Emit to ALL clients immediately
         this.io.emit('emergency:update', payload);
+        
+        // Also emit specific status change event for admin dashboard
+        this.io.to('role:admin').emit('emergency:status_changed', {
+            ...payload,
+            eventType: 'status_change',
+        });
+
+        // Emit to police as well so they see updates from other officers
+        this.io.to('role:police').emit('emergency:status_changed', {
+            ...payload,
+            eventType: 'status_change',
+        });
+
         console.log(`🔄 Emitted emergency:update - ID: ${emergency.id}, Status: ${emergency.status}, Officer: ${payload.responder_name || 'N/A'}`);
+    }
+
+    /**
+     * Emit officer response/accept event - INSTANT notification to admin
+     * Call this when police accepts/responds to emergency
+     */
+    emitOfficerResponse(emergencyId, officerId, officerName, status, action = 'accepted') {
+        if (!this.io) return;
+
+        const payload = {
+            emergencyId: parseInt(emergencyId),
+            id: parseInt(emergencyId),
+            officerId: officerId,
+            officerName: officerName,
+            officer_name: officerName,
+            responder_name: officerName,
+            assigned_to_name: officerName,
+            status: status,
+            action: action,
+            timestamp: new Date().toISOString(),
+            message: `${officerName} ${action === 'accepted' ? 'is responding to' : `changed status to ${status} for`} emergency #${emergencyId}`,
+        };
+
+        // INSTANT broadcast to admin dashboard
+        this.io.to('role:admin').emit('emergency:officer_response', payload);
+        this.io.to('role:admin').emit('emergency:accepted', payload);
+        this.io.to('role:admin').emit('emergency:update', payload);
+        
+        // Also notify other police
+        this.io.to('role:police').emit('emergency:accepted', payload);
+
+        console.log(`👮 INSTANT: Officer ${officerName} ${action} emergency #${emergencyId} - broadcasted to admin`);
     }
 
     // ============================================
@@ -507,7 +726,17 @@ class SocketManager {
 
         const payload = {
             id: deployment.id,
+            deploymentId: deployment.id,
             status: deployment.status,
+            unit_name: deployment.unit_name,
+            address: deployment.address,
+            latitude: deployment.latitude,
+            longitude: deployment.longitude,
+            priority: deployment.priority,
+            instructions: deployment.instructions,
+            incident_id: deployment.incident_id,
+            emergency_id: deployment.emergency_id,
+            created_at: deployment.created_at,
             location: deployment.location,
             updatedAt: deployment.updated_at || new Date().toISOString(),
         };
@@ -655,13 +884,15 @@ class SocketManager {
 
     /**
      * Broadcast alert to all police in geo-fence
+     * OPTIMIZED: Sends WebSocket + FCM push in PARALLEL for instant delivery
      */
     broadcastGeoFencedAlert(alertData, targetRooms = []) {
         if (!this.io) return;
 
         const event = alertData.isEmergency ? 'emergency:alarm' : 'incident:alert';
 
-        // Always send to police and admin
+        // CRITICAL: Send WebSocket IMMEDIATELY (no await)
+        // Send to police and admin rooms
         this.io.to('role:police').to('role:admin').emit(event, alertData);
 
         // Send to additional target rooms
@@ -670,6 +901,61 @@ class SocketManager {
         }
 
         console.log(`📡 Geo-fenced alert broadcast: ${event} to ${targetRooms.length + 2} rooms`);
+
+        // PARALLEL: Also send FCM push for background/closed apps
+        // This ensures police get the alert even if app is closed
+        if (alertData.isEmergency) {
+            this._sendEmergencyFCMPush(alertData).catch(err => {
+                console.log('⚠️ FCM push failed (non-critical):', err.message);
+            });
+        }
+    }
+
+    /**
+     * Send FCM push notification for emergency (runs in background)
+     * This ensures delivery even when app is closed
+     */
+    async _sendEmergencyFCMPush(alertData) {
+        try {
+            const fcmService = require('./fcmService');
+            if (!fcmService.initialized) return;
+
+            const { query } = require('../config/database');
+            
+            // Get all police officers with FCM tokens
+            const result = await query(`
+                SELECT op.fcm_token, u.full_name, u.id
+                FROM officer_profiles op
+                JOIN users u ON op.user_id = u.id
+                WHERE op.fcm_token IS NOT NULL 
+                AND u.role = 'police'
+                AND u.is_active = true
+                AND op.emergency_alert_enabled = true
+            `);
+
+            const officers = result.rows;
+            if (officers.length === 0) return;
+
+            // Send emergency FCM to all officers
+            await fcmService.sendEmergencyAlarm(officers, {
+                alertId: alertData.alertId || alertData.emergencyId,
+                emergencyId: alertData.emergencyId,
+                incidentId: alertData.incidentId,
+                type: alertData.type || 'emergency',
+                title: alertData.title || '🚨 EMERGENCY ALERT',
+                message: alertData.message || alertData.description || 'Immediate response required!',
+                location: alertData.location || {
+                    latitude: alertData.latitude,
+                    longitude: alertData.longitude,
+                    address: alertData.location_name
+                },
+                ai: alertData.ai
+            });
+
+            console.log(`📱 FCM push sent to ${officers.length} police officers`);
+        } catch (error) {
+            console.error('FCM push error:', error.message);
+        }
     }
 
     // ============================================

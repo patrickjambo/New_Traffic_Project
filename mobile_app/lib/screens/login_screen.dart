@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../services/auth_service.dart';
+import '../services/location_tracking_service.dart';
+import '../services/background_location_service.dart';
+import '../services/fcm_service.dart';
+import '../services/websocket_service.dart';
 import '../config/server_config.dart';
 import '../config/app_theme.dart';
 import '../components/server_settings_dialog.dart';
@@ -101,11 +105,93 @@ class _LoginScreenState extends State<LoginScreen>
     if (!mounted) return;
 
     if (result['success']) {
+      // 🚨 CRITICAL: Start real-time location tracking for police officers
+      // This runs in background even when phone is in pocket
+      await _startPoliceLocationTracking();
+      
       Navigator.of(context).pushReplacementNamed('/home');
     } else {
       setState(() {
         _errorMessage = result['message'] ?? 'Login failed. Please try again.';
       });
+    }
+  }
+  
+  /// Start real-time background location tracking for police officers
+  /// This is CRITICAL for:
+  /// - Admin to track all police locations on map
+  /// - Automatic deployment based on proximity
+  /// - Emergency response coordination
+  Future<void> _startPoliceLocationTracking() async {
+    try {
+      // Get user data to check role
+      final userData = await _authService.getUserData();
+      final role = userData?['role'] ?? '';
+      final userId = userData?['id']?.toString() ?? '';
+      
+      debugPrint('👮 User logged in - Role: $role, ID: $userId');
+      
+      // Only start tracking for police officers
+      if (role == 'police') {
+        debugPrint('🚨 Starting REAL-TIME background location tracking for police officer');
+        
+        // Initialize and connect WebSocket first for real-time updates
+        final wsService = WebSocketService();
+        wsService.connect();
+        
+        // Get auth token
+        final authService = AuthService();
+        final token = await authService.getToken();
+        
+        if (token != null) {
+          // Set auth token for FCM
+          final fcmService = FCMService();
+          fcmService.setAuthToken(token);
+          await fcmService.initialize();
+          
+          // Subscribe to police alerts
+          await fcmService.subscribeToPoliceAlerts();
+          
+          // 🚨 START BACKGROUND LOCATION SERVICE (runs even when app closed)
+          final backgroundService = BackgroundLocationService();
+          await backgroundService.startBackgroundTracking(
+            userId: userId,
+            authToken: token,
+          );
+          
+          debugPrint('✅ Background location service STARTED');
+          debugPrint('📍 Location will be tracked even when:');
+          debugPrint('   - App is in background');
+          debugPrint('   - Phone is in pocket');
+          debugPrint('   - Screen is off/locked');
+        }
+        
+        // Also start foreground location tracking for more frequent updates
+        final locationService = LocationTrackingService();
+        final initialized = await locationService.initialize();
+        
+        if (initialized) {
+          // Start tracking with high frequency for real-time updates
+          // streamIntervalSeconds: 15 = send location every 15 seconds
+          // highAccuracy: true = use GPS for precise location
+          // streamToServer: true = send to backend in real-time
+          await locationService.startTracking(
+            streamIntervalSeconds: 15, // Update every 15 seconds
+            highAccuracy: true,        // Use GPS for precise tracking
+            streamToServer: true,      // Send to backend continuously
+          );
+          
+          debugPrint('✅ Real-time foreground location tracking STARTED');
+          debugPrint('📍 Location updates will be sent every 15 seconds');
+        } else {
+          debugPrint('⚠️ Location tracking could not be initialized - check permissions');
+        }
+      } else {
+        debugPrint('ℹ️ User is not police officer - location tracking not required');
+      }
+    } catch (e) {
+      debugPrint('❌ Error starting location tracking: $e');
+      // Don't block login even if tracking fails
     }
   }
 

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'screens/splash_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/register_screen.dart';
@@ -24,7 +26,9 @@ import 'services/websocket_service.dart';
 import 'services/notification_service.dart';
 import 'services/api_service.dart';
 import 'services/emergency_alert_service.dart';
+import 'services/critical_alert_service.dart';
 import 'services/deployment_alert_service.dart';
+import 'services/fcm_service.dart';
 import 'providers/app_state_provider.dart';
 import 'utils/error_handler.dart';
 import 'config/server_config.dart';
@@ -37,6 +41,19 @@ final appState = AppStateManager();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // 🔥 CRITICAL: Initialize Firebase FIRST (required for background messages)
+  try {
+    await Firebase.initializeApp();
+    print('✅ Firebase initialized');
+    
+    // 🚨 Register background message handler for when app is closed
+    // This enables emergency alerts even when app is not running
+    FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+    print('✅ Background message handler registered');
+  } catch (e) {
+    print('❌ Firebase initialization failed: $e');
+  }
   
   // Set up global error handling
   FlutterError.onError = (FlutterErrorDetails details) {
@@ -90,53 +107,91 @@ void main() async {
 }
 
 /// Initialize non-critical services after the app UI is shown
-/// This prevents blocking the startup
+/// 🚀 OPTIMIZED: Parallel initialization for faster startup
 void _initializeDeferredServices() async {
   // Small delay to let the first frame render
   await Future.delayed(const Duration(milliseconds: 100));
   
-  // Initialize notification service (can be deferred)
+  // 🚀 PRIORITY 1: Initialize Critical Alert Service FIRST (needed for emergencies)
+  // This MUST be ready before WebSocket connects to avoid delayed red screen
   try {
-    final notificationService = NotificationService();
-    await notificationService.initialize();
-  } catch (e) {
-    print('Failed to initialize Notification Service: $e');
-  }
-  
-  // Initialize Emergency Alert Service
-  try {
-    final emergencyAlertService = EmergencyAlertService();
-    await emergencyAlertService.initialize();
+    final criticalAlertService = CriticalAlertService();
+    await criticalAlertService.initialize();
     
-    // Set callback to show full-screen emergency alert
-    emergencyAlertService.onEmergencyAlarm = (data) {
-      print('🚨 EMERGENCY ALARM CALLBACK TRIGGERED: $data');
+    // Set callback for non-WebSocket triggers (e.g., FCM notification tap)
+    criticalAlertService.onCriticalEmergency = (data) {
+      print('🚨🚨🚨 CRITICAL EMERGENCY CALLBACK: $data');
       if (navigatorKey.currentState != null) {
         navigatorKey.currentState!.pushNamed('/emergency-alert', arguments: data);
       }
     };
     
-    print('✅ Emergency Alert Service initialized');
+    print('✅ Critical Alert Service initialized');
   } catch (e) {
-    print('Failed to initialize Emergency Alert Service: $e');
+    print('Failed to initialize Critical Alert Service: $e');
   }
   
-  // Initialize Deployment Alert Service
-  try {
-    final deploymentAlertService = DeploymentAlertService();
-    await deploymentAlertService.initialize();
-    print('✅ Deployment Alert Service initialized');
-  } catch (e) {
-    print('Failed to initialize Deployment Alert Service: $e');
-  }
-  
-  // Initialize WebSocket (connect in background)
+  // 🚀 PRIORITY 2: Connect WebSocket EARLY (receives emergency events)
   try {
     final websocketService = WebSocketService();
     websocketService.connect();
+    print('✅ WebSocket Service connecting');
   } catch (e) {
     print('Failed to initialize WebSocket Service: $e');
   }
+  
+  // 🚀 PRIORITY 3: Initialize remaining services IN PARALLEL (non-blocking)
+  await Future.wait([
+    // Notification service
+    Future(() async {
+      try {
+        final notificationService = NotificationService();
+        await notificationService.initialize();
+        print('✅ Notification Service initialized');
+      } catch (e) {
+        print('Failed to initialize Notification Service: $e');
+      }
+    }),
+    // Emergency Alert Service
+    Future(() async {
+      try {
+        final emergencyAlertService = EmergencyAlertService();
+        await emergencyAlertService.initialize();
+        
+        // Set callback for non-WebSocket triggers (e.g., FCM notification tap)
+        emergencyAlertService.onEmergencyAlarm = (data) {
+          print('🚨 EMERGENCY ALARM CALLBACK TRIGGERED: $data');
+          if (navigatorKey.currentState != null) {
+            navigatorKey.currentState!.pushNamed('/emergency-alert', arguments: data);
+          }
+        };
+        
+        print('✅ Emergency Alert Service initialized');
+      } catch (e) {
+        print('Failed to initialize Emergency Alert Service: $e');
+      }
+    }),
+    // Deployment Alert Service
+    Future(() async {
+      try {
+        final deploymentAlertService = DeploymentAlertService();
+        await deploymentAlertService.initialize();
+        
+        // Set callback to navigate to deployments screen when notification tapped
+        deploymentAlertService.onDeploymentReceived = (data) {
+          print('📋 DEPLOYMENT NOTIFICATION TAPPED: $data');
+          if (navigatorKey.currentState != null) {
+            // Navigate to deployments screen with tab index (0 = Pending)
+            navigatorKey.currentState!.pushNamed('/deployments', arguments: {'initialTab': 0});
+          }
+        };
+        
+        print('✅ Deployment Alert Service initialized');
+      } catch (e) {
+        print('Failed to initialize Deployment Alert Service: $e');
+      }
+    }),
+  ]);
 }
 
 class TrafficGuardApp extends StatefulWidget {
@@ -327,7 +382,10 @@ class _TrafficGuardAppState extends State<TrafficGuardApp> {
           case '/about':
             return MaterialPageRoute(builder: (_) => const AboutScreen());
           case '/deployments':
-            return MaterialPageRoute(builder: (_) => const DeploymentsScreen());
+            // Support passing initialTab argument for notification navigation
+            final args = settings.arguments as Map<String, dynamic>?;
+            final initialTab = args?['initialTab'] as int? ?? 0;
+            return MaterialPageRoute(builder: (_) => DeploymentsScreen(initialTab: initialTab));
           default:
             return MaterialPageRoute(builder: (_) => const SplashScreen());
         }

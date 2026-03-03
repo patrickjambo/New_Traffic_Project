@@ -157,20 +157,27 @@ class _EmergencyAlertScreenState extends State<EmergencyAlertScreen>
           return; // Don't show the "Another officer" screen
         }
         
-        // Another officer accepted - show notification
+        // Another officer accepted - show brief notification banner
         print('🚔 Another officer (${data['acceptedBy']?['officerName']}) accepted emergency');
-        setState(() {
-          _isAccepted = true;
-          _acceptedByOfficer = data['acceptedBy']?['officerName'] ?? 'Another officer';
-        });
+        final officerName = data['acceptedBy']?['officerName'] ?? 'Another officer';
         
         // Stop alarm since someone else accepted
         _alertService.stopEmergencyAlarm();
+        Vibration.cancel();
+        CriticalAlertService().stopCriticalAlert();
+        _flashController.stop();
+        _pulseController.stop();
+        _autoTimeoutTimer?.cancel();
         
-        // Show message and close after 3 seconds
+        // Show a brief top banner notification (not full screen)
+        if (mounted) {
+          _showOfficerRespondingBanner(officerName);
+        }
+        
+        // Close after 3 seconds
         Future.delayed(const Duration(seconds: 3), () {
           if (mounted) {
-            Navigator.of(context).pop({'action': 'accepted_by_other', 'acceptedBy': _acceptedByOfficer});
+            Navigator.of(context).pop({'action': 'accepted_by_other', 'acceptedBy': officerName});
           }
         });
       }
@@ -491,59 +498,32 @@ class _EmergencyAlertScreenState extends State<EmergencyAlertScreen>
     Navigator.of(context).popUntil((route) => route.isFirst);
   }
 
+  /// Show a brief top banner when another officer accepts the emergency
+  void _showOfficerRespondingBanner(String officerName) {
+    final overlay = Overlay.of(context);
+    late OverlayEntry overlayEntry;
+
+    overlayEntry = OverlayEntry(
+      builder: (context) => _OfficerRespondingBanner(
+        officerName: officerName,
+        onDismiss: () {
+          overlayEntry.remove();
+        },
+      ),
+    );
+
+    overlay.insert(overlayEntry);
+
+    // Auto-remove after 3 seconds
+    Future.delayed(const Duration(seconds: 3), () {
+      if (overlayEntry.mounted) {
+        overlayEntry.remove();
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    // If accepted by another officer (NOT the current user who is accepting)
-    // Don't show this screen if the current user is the one accepting (_isAccepting flag)
-    if (_isAccepted && _acceptedByOfficer != null && !_showDetails && !_isAccepting) {
-      return Scaffold(
-        backgroundColor: AppColors.success,
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.2),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.check_circle_rounded,
-                  color: Colors.white,
-                  size: 80,
-                ),
-              ),
-              const SizedBox(height: 24),
-              Text(
-                _acceptedByOfficer!,
-                textAlign: TextAlign.center,
-                style: AppTextStyles.headlineMedium.copyWith(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'is responding to this emergency',
-                textAlign: TextAlign.center,
-                style: AppTextStyles.bodyLarge.copyWith(
-                  color: Colors.white.withOpacity(0.9),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'This alert will close automatically',
-                style: AppTextStyles.bodySmall.copyWith(
-                  color: Colors.white.withOpacity(0.7),
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
     // Show emergency details after accepting
     if (_showDetails) {
       return _buildDetailsView();
@@ -1574,4 +1554,138 @@ Future<Map<String, dynamic>?> showEmergencyAlert(
       },
     ),
   );
+}
+
+/// Brief overlay banner shown when another officer responds to emergency
+class _OfficerRespondingBanner extends StatefulWidget {
+  final String officerName;
+  final VoidCallback onDismiss;
+
+  const _OfficerRespondingBanner({
+    required this.officerName,
+    required this.onDismiss,
+  });
+
+  @override
+  State<_OfficerRespondingBanner> createState() => _OfficerRespondingBannerState();
+}
+
+class _OfficerRespondingBannerState extends State<_OfficerRespondingBanner>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<Offset> _slideAnimation;
+  late Animation<double> _fadeAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+    );
+    _slideAnimation = Tween<Offset>(
+      begin: const Offset(0, -1),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOut));
+    _fadeAnimation = Tween<double>(begin: 0, end: 1)
+        .animate(CurvedAnimation(parent: _controller, curve: Curves.easeOut));
+
+    _controller.forward();
+
+    // Slide out before dismiss
+    Future.delayed(const Duration(milliseconds: 2500), () {
+      if (mounted) {
+        _controller.reverse();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      top: MediaQuery.of(context).padding.top + 10,
+      left: 16,
+      right: 16,
+      child: SlideTransition(
+        position: _slideAnimation,
+        child: FadeTransition(
+          opacity: _fadeAnimation,
+          child: Material(
+            color: Colors.transparent,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF00C853), Color(0xFF00E676)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFF00C853).withOpacity(0.4),
+                    blurRadius: 20,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.25),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.check_circle_rounded,
+                      color: Colors.white,
+                      size: 28,
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          widget.officerName,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 15,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'is responding to this emergency',
+                          style: TextStyle(
+                            color: Colors.white.withOpacity(0.9),
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(
+                    Icons.local_police_rounded,
+                    color: Colors.white.withOpacity(0.7),
+                    size: 22,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

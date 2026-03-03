@@ -225,19 +225,28 @@ class DeploymentService {
   Future<List<Deployment>> getMyDeployments({String? status}) async {
     try {
       final queryParams = status != null ? {'status': status} : null;
+      developer.log('Fetching deployments with status: $status', name: 'Deployment');
+      
       final response = await _apiService.get(
         '/api/deployments/my-deployments',
         queryParameters: queryParams,
       );
 
+      developer.log('Deployments response: ${response.statusCode}', name: 'Deployment');
+
       if (response.data['success'] == true && response.data['data'] != null) {
         final List<dynamic> data = response.data['data'];
+        developer.log('Got ${data.length} deployments for status=$status', name: 'Deployment');
         return data.map((json) => Deployment.fromJson(json)).toList();
       }
+      developer.log('No deployments data in response for status=$status', name: 'Deployment');
       return [];
+    } on DioException catch (e) {
+      developer.log('DioError fetching deployments (status=$status): ${e.type} - ${e.message}', name: 'Deployment');
+      rethrow; // Let caller handle timeout
     } catch (e) {
-      developer.log('Error fetching deployments: $e', name: 'Deployment');
-      return [];
+      developer.log('Error fetching deployments (status=$status): $e', name: 'Deployment');
+      rethrow; // Let caller handle
     }
   }
 

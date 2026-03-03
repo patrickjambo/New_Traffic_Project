@@ -58,13 +58,23 @@ class _DeploymentsScreenState extends State<DeploymentsScreen>
 
   void _setupRealtimeListeners() {
     _deploymentService.onNewDeployment = (deployment) {
+      print('🆕 NEW DEPLOYMENT received - ID: ${deployment.id}, needsAck: ${deployment.needsAcknowledgment}, acknowledged: ${deployment.acknowledged}, status: ${deployment.status}');
       setState(() {
-        if (deployment.needsAcknowledgment) {
-          _pendingDeployments.insert(0, deployment);
+        // Always add to pending if not acknowledged, regardless of status
+        if (!deployment.acknowledged) {
+          // Avoid duplicates
+          if (!_pendingDeployments.any((d) => d.id == deployment.id)) {
+            _pendingDeployments.insert(0, deployment);
+            print('✅ Added deployment ${deployment.id} to PENDING tab (total: ${_pendingDeployments.length})');
+          } else {
+            print('⚠️ Deployment ${deployment.id} already in pending list');
+          }
           // Switch to Pending tab to show new deployment
           _tabController.animateTo(0);
         } else {
-          _activeDeployments.insert(0, deployment);
+          if (!_activeDeployments.any((d) => d.id == deployment.id)) {
+            _activeDeployments.insert(0, deployment);
+          }
           // Switch to Active tab
           _tabController.animateTo(1);
         }
@@ -73,40 +83,46 @@ class _DeploymentsScreenState extends State<DeploymentsScreen>
     };
 
     _deploymentService.onDeploymentUpdated = (deployment) {
+      print('🔄 DEPLOYMENT UPDATED - ID: ${deployment.id}, acknowledged: ${deployment.acknowledged}, status: ${deployment.status}');
       // REAL-TIME UPDATE: Update UI instantly
       setState(() {
-        // Remove from pending if it was there
-        _pendingDeployments.removeWhere((d) => d.id == deployment.id);
-        
-        // Check if deployment is now acknowledged/active
-        // Case-insensitive status comparison for robustness
         final statusLower = deployment.status.toLowerCase();
+        
+        if (!deployment.acknowledged && statusLower != 'completed' && statusLower != 'cancelled') {
+          // Still unacknowledged - keep in pending, just update it
+          final pendingIdx = _pendingDeployments.indexWhere((d) => d.id == deployment.id);
+          if (pendingIdx >= 0) {
+            _pendingDeployments[pendingIdx] = deployment;
+            print('📝 Updated deployment ${deployment.id} in PENDING tab');
+          }
+          // Don't remove from pending if not acknowledged!
+          return;
+        }
+        
         if (deployment.acknowledged && statusLower != 'completed' && statusLower != 'cancelled') {
-          // Update or add to active list
+          // Now acknowledged - move from pending to active
+          _pendingDeployments.removeWhere((d) => d.id == deployment.id);
           final existingIndex = _activeDeployments.indexWhere((d) => d.id == deployment.id);
           if (existingIndex >= 0) {
             _activeDeployments[existingIndex] = deployment;
           } else {
             _activeDeployments.insert(0, deployment);
           }
+          print('➡️ Moved deployment ${deployment.id} from PENDING to ACTIVE');
           // Switch to Active tab
           _tabController.animateTo(1);
         } else if (statusLower == 'completed' || statusLower == 'cancelled') {
           // Move to completed
+          _pendingDeployments.removeWhere((d) => d.id == deployment.id);
           _activeDeployments.removeWhere((d) => d.id == deployment.id);
           _completedDeployments.insert(0, deployment);
-        }
-      });
-      
-      // 🚀 SILENT refresh from server in background (no loading spinner)
-      Future.delayed(const Duration(milliseconds: 1000), () {
-        if (mounted) {
-          _loadDeployments(showLoading: false);
+          print('✅ Moved deployment ${deployment.id} to HISTORY');
         }
       });
     };
 
     _deploymentService.onDeploymentCancelled = (deploymentId) {
+      print('❌ DEPLOYMENT CANCELLED - ID: $deploymentId');
       setState(() {
         _pendingDeployments.removeWhere((d) => d.id == deploymentId);
         _activeDeployments.removeWhere((d) => d.id == deploymentId);
@@ -124,24 +140,52 @@ class _DeploymentsScreenState extends State<DeploymentsScreen>
     }
 
     try {
-      final results = await Future.wait([
-        _deploymentService.getPendingDeployments(),
-        _deploymentService.getActiveDeployments(),
-        _deploymentService.getCompletedDeployments(),
-      ]);
+      // Load each independently with individual timeouts
+      // If one fails, others still load
+      List<Deployment> pending = [];
+      List<Deployment> active = [];
+      List<Deployment> completed = [];
+
+      try {
+        pending = await _deploymentService.getPendingDeployments()
+            .timeout(const Duration(seconds: 10));
+        print('✅ Pending deployments loaded: ${pending.length}');
+      } catch (e) {
+        print('⚠️ Failed to load pending deployments: $e');
+      }
+
+      try {
+        active = await _deploymentService.getActiveDeployments()
+            .timeout(const Duration(seconds: 10));
+        print('✅ Active deployments loaded: ${active.length}');
+      } catch (e) {
+        print('⚠️ Failed to load active deployments: $e');
+      }
+
+      try {
+        completed = await _deploymentService.getCompletedDeployments()
+            .timeout(const Duration(seconds: 10));
+        print('✅ Completed deployments loaded: ${completed.length}');
+      } catch (e) {
+        print('⚠️ Failed to load completed deployments: $e');
+      }
 
       if (mounted) {
         setState(() {
-          _pendingDeployments = results[0];
-          _activeDeployments = results[1].where((d) => d.acknowledged).toList();
-          _completedDeployments = results[2];
+          _pendingDeployments = pending;
+          _activeDeployments = active;
+          _completedDeployments = completed;
           _isLoading = false;
+          _error = null;
         });
+        
+        print('📋 Deployments loaded - Pending: ${pending.length}, Active: ${active.length}, History: ${completed.length}');
       }
     } catch (e) {
+      print('❌ Error loading deployments: $e');
       if (mounted) {
         setState(() {
-          _error = e.toString();
+          _error = 'Failed to load deployments. Tap refresh to retry.';
           _isLoading = false;
         });
       }

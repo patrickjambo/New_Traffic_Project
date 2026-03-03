@@ -910,7 +910,7 @@ const getMyDeployments = async (req, res) => {
         const params = [officerId];
 
         if (status === 'active') {
-            queryText += ` AND d.status IN ('Active', 'Pending', 'En Route', 'On Scene')`;
+            queryText += ` AND d_o.acknowledged = TRUE AND d.status IN ('Active', 'Pending', 'En Route', 'On Scene')`;
         } else if (status === 'pending') {
             queryText += ` AND d_o.acknowledged = FALSE AND d.status NOT IN ('Completed', 'Cancelled')`;
         } else if (status === 'completed') {
@@ -920,6 +920,8 @@ const getMyDeployments = async (req, res) => {
         queryText += ` ORDER BY d.created_at DESC`;
 
         const result = await query(queryText, params);
+
+        console.log(`📋 getMyDeployments for officer ${officerId} (status=${status}): ${result.rows.length} results`);
 
         res.json({
             success: true,

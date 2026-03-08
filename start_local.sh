@@ -110,12 +110,26 @@ if ! systemctl is-active --quiet postgresql 2>/dev/null; then
     sleep 2
 fi
 
-# Check if PostgreSQL is now running
-if systemctl is-active --quiet postgresql 2>/dev/null || pgrep -x "postgres" > /dev/null; then
-    echo -e "${GREEN}✓ PostgreSQL is running${NC}"
+# Ensure the actual PostgreSQL cluster is online (systemctl can say "active"
+# even when the cluster is down)
+CLUSTER_STATUS=$(pg_lsclusters -h 2>/dev/null | grep "5432" | awk '{print $4}')
+if [ "$CLUSTER_STATUS" != "online" ]; then
+    echo -e "${YELLOW}PostgreSQL cluster is down, starting it...${NC}"
+    # Find which version is on port 5432
+    PG_VER=$(pg_lsclusters -h 2>/dev/null | grep "5432" | awk '{print $1}')
+    if [ -n "$PG_VER" ]; then
+        sudo pg_ctlcluster $PG_VER main start 2>/dev/null
+        sleep 2
+    fi
+fi
+
+# Verify the cluster is actually accepting connections
+CLUSTER_STATUS=$(pg_lsclusters -h 2>/dev/null | grep "5432" | awk '{print $4}')
+if [ "$CLUSTER_STATUS" = "online" ]; then
+    echo -e "${GREEN}✓ PostgreSQL cluster is online (port 5432)${NC}"
 else
-    echo -e "${RED}✗ Failed to start PostgreSQL${NC}"
-    echo "  Try manually: sudo systemctl start postgresql"
+    echo -e "${RED}✗ Failed to start PostgreSQL cluster${NC}"
+    echo "  Try manually: sudo pg_ctlcluster 18 main start"
     exit 1
 fi
 

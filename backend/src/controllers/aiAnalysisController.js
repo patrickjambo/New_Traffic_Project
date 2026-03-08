@@ -22,7 +22,7 @@ const analyzeVideoAndCreateIncident = async (req, res) => {
             });
         }
 
-        const { latitude, longitude } = req.body;
+        const { latitude, longitude, auto_mode, clip_id, device_id } = req.body;
         const userId = req.user ? req.user.id : null;
 
         // Validate video file exists
@@ -64,7 +64,9 @@ const analyzeVideoAndCreateIncident = async (req, res) => {
         });
 
         // Process video asynchronously (don't await)
-        processVideoAsync(req.file, videoId, userId, latitude, longitude).catch(err => {
+        processVideoAsync(req.file, videoId, userId, latitude, longitude, {
+            auto_mode, clip_id, device_id
+        }).catch(err => {
             console.error(`❌ Async video processing error for ${videoId}:`, err.message);
         });
 
@@ -85,7 +87,7 @@ const analyzeVideoAndCreateIncident = async (req, res) => {
 /**
  * Process video asynchronously
  */
-async function processVideoAsync(file, videoId, userId, latitude, longitude) {
+async function processVideoAsync(file, videoId, userId, latitude, longitude, sessionMeta = {}) {
     console.log(`🤖 [${videoId}] Starting async AI analysis...`);
 
     try {
@@ -97,6 +99,14 @@ async function processVideoAsync(file, videoId, userId, latitude, longitude) {
         });
         // Enable test_mode (enhanced analyzer) for better screen video detection
         formData.append('test_mode', 'true');
+        
+        // Session metadata — allows AI to link consecutive clips
+        if (sessionMeta.auto_mode) formData.append('auto_mode', sessionMeta.auto_mode);
+        if (sessionMeta.clip_id) formData.append('clip_id', sessionMeta.clip_id);
+        if (sessionMeta.device_id) formData.append('device_id', sessionMeta.device_id);
+        if (userId) formData.append('user_id', String(userId));
+        if (latitude) formData.append('latitude', String(latitude));
+        if (longitude) formData.append('longitude', String(longitude));
 
         const aiResponse = await axios.post(
             `${AI_SERVICE_URL}/ai/analyze-traffic`,
@@ -123,13 +133,46 @@ async function processVideoAsync(file, videoId, userId, latitude, longitude) {
             confidence: aiResults.confidence,
             vehicles: aiResults.vehicles_detected,
             fire_frames: aiResults.fire_frames,
+            session_action: aiResults.session_action || 'n/a',
+            detected_at: aiResults.detected_at || 'n/a',
         });
 
-        // Step 2: If REAL incident detected (not "normal"), create incident in database
+        // Step 2: Check session-based decision
+        // If AI returned a session_action, respect it:
+        //   'report'  → create incident (confirmed across clips)
+        //   'suppress' → duplicate, skip
+        //   'pending'  → not yet confirmed, skip
+        //   'none'     → no incident, skip
+        const sessionAction = aiResults.session_action;
+        
+        if (sessionAction === 'suppress') {
+            console.log(`🔇 [${videoId}] AI session suppressed — duplicate of ongoing incident`);
+            socketManager.emitAnalysisComplete({
+                result: aiResults.suppression_reason || 'Duplicate suppressed by AI session',
+                confidence: aiResults.confidence || 0,
+                incident_detected: false,
+                isDuplicate: true,
+            });
+            return; // Skip — already reported
+        }
+        
+        if (sessionAction === 'pending') {
+            console.log(`⏳ [${videoId}] AI session pending — awaiting confirmation (${aiResults.clips_so_far}/${aiResults.clips_needed} clips)`);
+            socketManager.emitAnalysisComplete({
+                result: `Potential ${aiResults.session_incident_type} — awaiting confirmation`,
+                confidence: aiResults.session_confidence || 0,
+                incident_detected: false,
+                pending_confirmation: true,
+            });
+            return; // Skip — not confirmed yet
+        }
+
+        // Step 3: If REAL incident detected (not "normal"), create incident in database
         let incident = null;
         const isRealIncident = aiResults.incident_detected && 
                               aiResults.incident_type !== 'normal' && 
-                              aiResults.incident_type !== 'error';
+                              aiResults.incident_type !== 'error' &&
+                              aiResults.incident_type !== 'none';
         
         if (isRealIncident) {
             // ============================================================
@@ -223,9 +266,18 @@ async function processVideoAsync(file, videoId, userId, latitude, longitude) {
             );
 
             // Step 3: Broadcast real-time notification via WebSocket
+            const detectedAt = aiResults.detected_at || new Date().toISOString().replace('T', ' ').substring(0, 19);
+            const detectedAtHuman = aiResults.detected_at_human || new Date().toLocaleString('en-US', {
+                year: 'numeric', month: 'long', day: 'numeric',
+                hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true
+            });
+            
             socketManager.emitIncidentNew({
                 ...incident,
-                source: 'ai'
+                source: 'ai',
+                detected_at: detectedAt,
+                detected_at_human: detectedAtHuman,
+                analysis_timestamp: aiResults.analysis_timestamp,
             });
 
             // Emit analysis complete event
@@ -236,6 +288,9 @@ async function processVideoAsync(file, videoId, userId, latitude, longitude) {
                 vehicle_count: aiResults.vehicle_count,
                 incident_detected: true,
                 detected_type: aiResults.incident_type,
+                detected_at: detectedAt,
+                detected_at_human: detectedAtHuman,
+                analysis_timestamp: aiResults.analysis_timestamp,
             });
 
             // Step 4: Create notifications for police/admin users
@@ -308,24 +363,31 @@ function generateIncidentDescription(aiResults) {
     const confidence = Math.round((aiResults.confidence || 0) * 100);
     const vehicles = aiResults.vehicles_detected || 0;
     
+    // Real-time timestamp — use AI detection time if available, otherwise now
+    const detectedAt = aiResults.detected_at || new Date().toISOString().replace('T', ' ').substring(0, 19);
+    const detectedAtHuman = aiResults.detected_at_human || new Date().toLocaleString('en-US', {
+        year: 'numeric', month: 'long', day: 'numeric',
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true
+    });
+    
     // 🔥 Special description for FIRE
     if (incidentType === 'fire') {
         const firePercent = aiResults.fire_percentage?.toFixed(1) || 'N/A';
-        return `🔥 AI DETECTED FIRE/BURNING VEHICLE - ${aiResults.fire_frames || 0} frames with fire (${firePercent}% coverage). ${vehicles} vehicles nearby. Confidence: ${confidence}%. IMMEDIATE RESPONSE REQUIRED.`;
+        return `🔥 AI DETECTED FIRE/BURNING VEHICLE — Detected: ${detectedAtHuman}. ${aiResults.fire_frames || 0} frames with fire (${firePercent}% coverage). ${vehicles} vehicles nearby. Confidence: ${confidence}%. IMMEDIATE RESPONSE REQUIRED.`;
     }
     
     // 🚨 Accident description
     if (incidentType === 'accident') {
-        return `🚨 AI DETECTED ACCIDENT - ${vehicles} vehicles involved, multiple stopped vehicles detected. Confidence: ${confidence}%. Emergency response needed.`;
+        return `🚨 AI DETECTED ACCIDENT — Detected: ${detectedAtHuman}. ${vehicles} vehicles involved, multiple stopped vehicles detected. Confidence: ${confidence}%. Emergency response needed.`;
     }
     
     // 🚗 Traffic jam description
     if (incidentType === 'traffic_jam' || incidentType === 'congestion') {
-        return `🚗 AI DETECTED TRAFFIC JAM - ${vehicles} vehicles, moving slowly or stopped. Confidence: ${confidence}%. Traffic management required.`;
+        return `🚗 AI DETECTED TRAFFIC JAM — Detected: ${detectedAtHuman}. ${vehicles} vehicles, moving slowly or stopped. Confidence: ${confidence}%. Traffic management required.`;
     }
     
     // Default description
-    return `AI-detected ${incidentType}: ${vehicles} vehicles observed (${confidence}% confidence).`;
+    return `AI-detected ${incidentType} — Detected: ${detectedAtHuman}. ${vehicles} vehicles observed (${confidence}% confidence).`;
 }
 
 /**
@@ -347,15 +409,16 @@ async function createIncidentNotifications(incident, aiResults = {}) {
         const incidentSeverity = incident.severity || 'medium';
         const incidentAddress = incident.address || incident.location_name || 'Unknown location';
         const confidence = aiResults.confidence || 0;
-        const vehicleCount = aiResults.vehicle_count || 0;
+        const vehicleCount = aiResults.vehicle_count || aiResults.vehicles_detected || 0;
+        const detectedAt = aiResults.detected_at || new Date().toISOString().replace('T', ' ').substring(0, 19);
 
         // Create notification for each police/admin user
         const notifications = usersResult.rows.map(user => [
             user.id,
             incident.id,
             'incident',
-            `AI-Detected ${incidentSeverity.toUpperCase()} ${incidentType}`,
-            `Location: ${incidentAddress}. Confidence: ${Math.round(confidence * 100)}%. Vehicles: ${vehicleCount}`,
+            `AI-Detected ${incidentSeverity.toUpperCase()} ${incidentType} at ${detectedAt}`,
+            `Detected: ${detectedAt}. Location: ${incidentAddress}. Confidence: ${Math.round(confidence * 100)}%. Vehicles: ${vehicleCount}`,
             false, // is_read
         ]);
 
@@ -386,23 +449,29 @@ async function createAutomaticEmergency(incident, aiResults, latitude, longitude
         let servicesNeeded = [];
         let description = '';
 
+        // Real-time detection timestamp for emergency descriptions
+        const emergencyTime = aiResults.detected_at_human || new Date().toLocaleString('en-US', {
+            year: 'numeric', month: 'long', day: 'numeric',
+            hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true
+        });
+
         // 🔥 FIRE - Highest priority emergency
         if (incident.type === 'fire') {
             emergencyType = 'fire';
             servicesNeeded = ['fire_department', 'ambulance', 'police'];
-            description = `🔥 AUTOMATIC ALERT: FIRE/BURNING VEHICLE detected in Kigali! Fire coverage: ${aiResults.fire_percentage?.toFixed(1) || 'N/A'}%. IMMEDIATE fire response required. Ambulance dispatched for potential casualties.`;
+            description = `🔥 AUTOMATIC ALERT: FIRE/BURNING VEHICLE detected at ${emergencyTime} in Kigali! Fire coverage: ${aiResults.fire_percentage?.toFixed(1) || 'N/A'}%. IMMEDIATE fire response required. Ambulance dispatched for potential casualties.`;
         } else if (incident.type === 'accident') {
             emergencyType = 'accident';
             servicesNeeded = ['police', 'ambulance'];
-            description = `🚨 AUTOMATIC ALERT: Traffic accident detected in Kigali. ${aiResults.stationary_count || aiResults.vehicles_detected || 0} vehicles involved. Immediate response needed.`;
+            description = `🚨 AUTOMATIC ALERT: Traffic accident detected at ${emergencyTime} in Kigali. ${aiResults.stationary_count || aiResults.vehicles_detected || 0} vehicles involved. Immediate response needed.`;
         } else if (incident.type === 'road_blockage') {
             emergencyType = 'road_blockage';
             servicesNeeded = ['police'];
-            description = `🚧 AUTOMATIC ALERT: Road blockage detected in Kigali. ${aiResults.vehicles_detected || 0} vehicles affected. Traffic control needed.`;
+            description = `🚧 AUTOMATIC ALERT: Road blockage detected at ${emergencyTime} in Kigali. ${aiResults.vehicles_detected || 0} vehicles affected. Traffic control needed.`;
         } else if (incident.type === 'traffic_jam' || incident.type === 'congestion') {
             emergencyType = 'traffic';
             servicesNeeded = ['traffic_police'];
-            description = `🚦 AUTOMATIC ALERT: Heavy traffic congestion detected in Kigali. ${aiResults.vehicles_detected || 0} vehicles in frame. Traffic management required.`;
+            description = `🚦 AUTOMATIC ALERT: Heavy traffic congestion detected at ${emergencyTime} in Kigali. ${aiResults.vehicles_detected || 0} vehicles in frame. Traffic management required.`;
         }
 
         // Create emergency in database - use correct column names
@@ -456,6 +525,7 @@ async function createAutomaticEmergency(incident, aiResults, latitude, longitude
 
         // 🔥🔥🔥 BROADCAST EMERGENCY ALARM to ALL police & admin for full alert experience
         // This triggers same alarm as public-reported emergencies: siren, vibration, red screen
+        const alertDetectedAt = aiResults.detected_at || new Date().toISOString().replace('T', ' ').substring(0, 19);
         socketManager.broadcastGeoFencedAlert({
             alertId: emergency.id,
             emergencyId: emergency.id,
@@ -464,9 +534,11 @@ async function createAutomaticEmergency(incident, aiResults, latitude, longitude
             emergency_type: emergencyType,
             severity: 'critical',
             priority: 1,
-            title: `🚨 AI DETECTED: ${emergencyType.toUpperCase()}`,
+            title: `🚨 AI DETECTED: ${emergencyType.toUpperCase()} at ${alertDetectedAt}`,
             message: description,
             description: description,
+            detected_at: alertDetectedAt,
+            detected_at_human: emergencyTime,
             location: {
                 lat: parseFloat(latitude || incident.latitude || -1.9536),
                 lng: parseFloat(longitude || incident.longitude || 30.0606),

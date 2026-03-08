@@ -15,6 +15,7 @@ from contextlib import asynccontextmanager
 # Import lightweight analyzer (no PyTorch needed)
 from lightweight_analyzer import analyzer
 from backend_notifier import notify_backend
+from session_manager import session_manager
 
 load_dotenv()
 
@@ -83,11 +84,34 @@ async def analyze_traffic(
     video: UploadFile = File(None),
     video_path: str = Form(None),
     latitude: float = Form(None),
-    longitude: float = Form(None)
+    longitude: float = Form(None),
+    user_id: str = Form(None),
+    device_id: str = Form(None),
+    clip_id: str = Form(None),
+    auto_mode: str = Form(None),
+    test_mode: str = Form(None),
 ):
     """
-    Analyze traffic video for incidents
-    Accepts either uploaded file or path to existing file
+    Analyze traffic video for incidents.
+    
+    Supports two modes:
+    
+    1. **Session mode** (auto_mode=true OR user_id/device_id provided):
+       Uses cross-clip correlation. Consecutive clips from the same source
+       are linked together. Incidents are only reported after confirmation
+       across multiple clips, and duplicates are suppressed via cooldown.
+    
+    2. **Single-clip mode** (no session info):
+       Legacy behavior — each clip is analyzed independently.
+    
+    Form fields:
+      - video: Uploaded video file
+      - video_path: Path to existing file on server
+      - latitude/longitude: GPS coordinates
+      - user_id / device_id: Identifies the streaming source
+      - clip_id: Unique clip identifier
+      - auto_mode: 'true' for continuous monitoring mode
+      - test_mode: 'true' for enhanced analyzer
     """
     start_time = time.time()
     temp_path = None
@@ -110,20 +134,59 @@ async def analyze_traffic(
         if not os.path.exists(analysis_path):
             raise HTTPException(status_code=404, detail="Video file not found")
         
-        # Analyze video
-        result = analyzer.analyze_video(analysis_path)
+        # Decide: session mode or single-clip mode
+        use_session = (
+            auto_mode == 'true' or
+            user_id is not None or
+            device_id is not None
+        )
         
-        # Add processing time
+        if use_session:
+            # SESSION MODE: Cross-clip correlation
+            result = session_manager.process_clip(
+                analyzer=analyzer,
+                video_path=analysis_path,
+                user_id=user_id,
+                device_id=device_id,
+                clip_id=clip_id,
+                latitude=latitude,
+                longitude=longitude,
+            )
+        else:
+            # SINGLE-CLIP MODE: Legacy independent analysis
+            result = analyzer.analyze_video(analysis_path)
+        
+        # Add processing time and location
         result["processing_time_seconds"] = round(time.time() - start_time, 2)
         result["location"] = {
             "latitude": latitude,
             "longitude": longitude
         }
         
-        # Notify backend if incident detected
-        if result.get("incident_detected") and result.get("incident_type") != "normal":
+        # Notify backend only if session says REPORT (or single-clip mode with incident)
+        session_action = result.get('session_action')
+        should_notify = False
+        
+        if use_session:
+            # In session mode, only notify on 'report' action
+            should_notify = (session_action == 'report')
+        else:
+            # In single-clip mode, notify if incident detected
+            should_notify = (
+                result.get("incident_detected") and 
+                result.get("incident_type") not in ("normal", "none", "error")
+            )
+        
+        if should_notify:
             try:
-                notify_backend(result, latitude, longitude)
+                await notify_backend(
+                    incident_id=0,  # Backend will create the real ID
+                    result=result,
+                    confidence=result.get('confidence', 0),
+                    vehicle_count=result.get('vehicles_detected', 0),
+                    incident_detected=result.get('incident_detected', False),
+                    detected_type=result.get('incident_type'),
+                )
             except Exception as e:
                 print(f"Backend notification failed: {e}")
         
@@ -181,21 +244,32 @@ async def analyze_image(
 
 @app.get("/ai/status")
 async def get_status():
-    """Get AI service status"""
+    """Get AI service status including session manager stats"""
+    stats = session_manager.get_stats()
     return {
         "status": "operational",
         "analyzer": "LightweightTrafficAnalyzer",
         "engine": "OpenCV",
         "version": "3.0.0-light",
         "memory_footprint": "~50MB",
+        "session_manager": stats,
         "capabilities": [
             "vehicle_detection",
             "motion_analysis",
             "congestion_detection",
             "incident_detection",
-            "stopped_vehicle_detection"
+            "stopped_vehicle_detection",
+            "cross_clip_correlation",
+            "duplicate_suppression",
+            "session_based_analysis",
         ]
     }
+
+
+@app.get("/ai/sessions")
+async def get_sessions():
+    """Get active session details for monitoring"""
+    return session_manager.get_stats()
 
 
 if __name__ == "__main__":

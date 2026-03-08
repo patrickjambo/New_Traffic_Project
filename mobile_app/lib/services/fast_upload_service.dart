@@ -23,6 +23,10 @@ class FastUploadService {
   final AuthService _authService = AuthService();
   final Location _location = Location();
   
+  // Stable device ID for session tracking across clips
+  // Generated once per app install and reused
+  final String _deviceId = 'dev_${DateTime.now().microsecondsSinceEpoch}';
+  
   // Upload queue
   final Queue<UploadTask> _uploadQueue = Queue<UploadTask>();
   final List<UploadTask> _activeUploads = [];
@@ -175,6 +179,15 @@ class FastUploadService {
       
       request.fields['auto_mode'] = 'true';
       request.fields['clip_id'] = task.id;
+      
+      // Session identification — allows AI to link consecutive clips
+      // and avoid duplicate incident reports
+      final userData = await _authService.getUserData();
+      if (userData != null && userData['id'] != null) {
+        request.fields['user_id'] = userData['id'].toString();
+      }
+      // Device-level ID as fallback (stable per app install)
+      request.fields['device_id'] = _deviceId;
       
       // Send with timeout
       final streamedResponse = await request.send().timeout(uploadTimeout);

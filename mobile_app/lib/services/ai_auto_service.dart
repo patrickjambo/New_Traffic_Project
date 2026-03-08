@@ -78,93 +78,84 @@ class AIAutoService {
     }
   }
 
-  /// Check if AI detected an incident
+  /// Check if AI detected a REAL incident
+  /// Only returns true for: fire, accident, traffic_jam, congestion (medium+)
+  /// Ignores: normal scenes, people, houses, empty spaces, trees, etc.
   bool _hasIncident(Map<String, dynamic> aiAnalysis) {
-    final confidence = aiAnalysis['confidence'] ?? 0.0;
-    final detectedObjects = aiAnalysis['detected_objects'] ?? [];
-    
-    // Incident detected if:
-    // 1. Confidence > 60%
-    // 2. Multiple vehicles detected (possible accident)
-    // 3. Fire, smoke, or emergency indicators present
-    
-    if (confidence > 0.6) return true;
-    
-    final incidentKeywords = ['fire', 'smoke', 'crash', 'accident', 'emergency', 'collision'];
-    for (var obj in detectedObjects) {
-      final objName = obj['name']?.toString().toLowerCase() ?? '';
-      if (incidentKeywords.any((keyword) => objName.contains(keyword))) {
+    // Check the incident_detected flag from AI service (most reliable)
+    if (aiAnalysis['incident_detected'] == true) {
+      // Double-check: only accept real incident types
+      final incidentType = (aiAnalysis['incident_type'] ?? 'none').toString().toLowerCase();
+      final validIncidents = ['fire', 'accident', 'traffic_jam', 'congestion'];
+      if (validIncidents.contains(incidentType)) {
         return true;
       }
     }
     
-    // Check for multiple vehicles (potential accident)
-    final vehicleCount = _countVehicles(aiAnalysis);
-    if (vehicleCount >= 3) return true;
+    // Check nested data structure (some endpoints wrap in 'data')
+    if (aiAnalysis['data'] != null && aiAnalysis['data']['incident_detected'] == true) {
+      final incidentType = (aiAnalysis['data']['incident_type'] ?? 'none').toString().toLowerCase();
+      final validIncidents = ['fire', 'accident', 'traffic_jam', 'congestion'];
+      if (validIncidents.contains(incidentType)) {
+        return true;
+      }
+    }
     
     return false;
   }
 
   /// Determine incident type from AI analysis
+  /// Only returns valid incident types: fire, accident, traffic_jam, congestion
+  /// Returns 'none' if no real incident detected
   String _determineIncidentType(Map<String, dynamic> aiAnalysis) {
-    final detectedObjects = aiAnalysis['detected_objects'] ?? [];
-    final description = aiAnalysis['description']?.toString().toLowerCase() ?? '';
+    // First, trust the AI service's incident_type if provided
+    final aiIncidentType = (aiAnalysis['incident_type'] ?? '').toString().toLowerCase();
+    final validIncidents = ['fire', 'accident', 'traffic_jam', 'congestion'];
     
-    // Check for fire
-    for (var obj in detectedObjects) {
-      final objName = obj['name']?.toString().toLowerCase() ?? '';
-      if (objName.contains('fire') || objName.contains('smoke') || objName.contains('flame')) {
-        return 'fire';
+    if (validIncidents.contains(aiIncidentType)) {
+      return aiIncidentType;
+    }
+    
+    // Check nested data
+    if (aiAnalysis['data'] != null) {
+      final nestedType = (aiAnalysis['data']['incident_type'] ?? '').toString().toLowerCase();
+      if (validIncidents.contains(nestedType)) {
+        return nestedType;
       }
     }
     
-    if (description.contains('fire') || description.contains('smoke')) {
-      return 'fire';
-    }
-    
-    // Check for medical emergency
-    if (description.contains('ambulance') || description.contains('medical') || description.contains('injured')) {
-      return 'medical';
-    }
-    
-    // Check for traffic accident
-    final vehicleCount = _countVehicles(aiAnalysis);
-    if (vehicleCount >= 2) {
-      return 'accident';
-    }
-    
-    if (description.contains('accident') || description.contains('crash') || description.contains('collision')) {
-      return 'accident';
-    }
-    
-    // Default to traffic incident
-    return 'traffic';
+    // If AI didn't detect a valid incident type, return 'none'
+    return 'none';
   }
 
   /// Determine severity level
+  /// Trusts the AI service severity first, falls back to heuristics
   String _determineSeverity(Map<String, dynamic> aiAnalysis) {
-    final confidence = aiAnalysis['confidence'] ?? 0.0;
-    final detectedObjects = aiAnalysis['detected_objects'] ?? [];
-    final vehicleCount = _countVehicles(aiAnalysis);
+    // Trust AI service severity if provided
+    final aiSeverity = (aiAnalysis['severity'] ?? '').toString().toLowerCase();
+    final validSeverities = ['critical', 'high', 'medium', 'low'];
+    if (validSeverities.contains(aiSeverity) && aiSeverity != 'none') {
+      return aiSeverity;
+    }
     
-    // Critical: Fire, multiple vehicles, high confidence
-    bool hasFire = detectedObjects.any((obj) {
-      final name = obj['name']?.toString().toLowerCase() ?? '';
-      return name.contains('fire') || name.contains('smoke');
-    });
+    // Check nested data
+    if (aiAnalysis['data'] != null) {
+      final nestedSeverity = (aiAnalysis['data']['severity'] ?? '').toString().toLowerCase();
+      if (validSeverities.contains(nestedSeverity) && nestedSeverity != 'none') {
+        return nestedSeverity;
+      }
+    }
     
-    if (hasFire) return 'critical';
-    if (vehicleCount >= 4 && confidence > 0.8) return 'critical';
+    // If no real incident, return 'low'
+    final incidentType = _determineIncidentType(aiAnalysis);
+    if (incidentType == 'none' || incidentType == 'normal') return 'low';
     
-    // High: Multiple vehicles or high confidence
-    if (vehicleCount >= 3) return 'high';
-    if (confidence > 0.75) return 'high';
+    // Fallback heuristics for when AI doesn't provide severity
+    if (incidentType == 'fire') return 'critical';
+    if (incidentType == 'accident') return 'high';
+    if (incidentType == 'traffic_jam') return 'high';
+    if (incidentType == 'congestion') return 'medium';
     
-    // Medium: 2 vehicles or medium confidence
-    if (vehicleCount >= 2) return 'medium';
-    if (confidence > 0.6) return 'medium';
-    
-    // Low: default
     return 'low';
   }
 
@@ -174,16 +165,17 @@ class AIAutoService {
     final severity = _determineSeverity(aiAnalysis);
     final vehicleCount = _countVehicles(aiAnalysis);
     final confidence = aiAnalysis['confidence'] ?? 0.0;
-    final detectedObjects = aiAnalysis['detected_objects'] ?? [];
+    
+    // No incident = no description needed
+    if (incidentType == 'none' || incidentType == 'normal') {
+      return 'No incident detected.';
+    }
     
     String desc = '';
     
     switch (incidentType) {
       case 'fire':
         desc = 'Fire or smoke detected. Immediate response required.';
-        break;
-      case 'medical':
-        desc = 'Medical emergency detected. Ambulance required.';
         break;
       case 'accident':
         desc = 'Traffic accident detected';
@@ -192,24 +184,22 @@ class AIAutoService {
         }
         desc += '.';
         break;
-      default:
-        desc = 'Traffic incident detected';
+      case 'traffic_jam':
+        desc = 'Traffic jam detected';
         if (vehicleCount > 0) {
-          desc += ' with $vehicleCount vehicle${vehicleCount > 1 ? 's' : ''}';
+          desc += ' with $vehicleCount vehicles';
         }
         desc += '.';
-    }
-    
-    // Add detected objects
-    if (detectedObjects.isNotEmpty) {
-      final objectNames = detectedObjects
-          .map((obj) => obj['name']?.toString() ?? '')
-          .where((name) => name.isNotEmpty)
-          .take(5)
-          .join(', ');
-      if (objectNames.isNotEmpty) {
-        desc += ' Detected: $objectNames.';
-      }
+        break;
+      case 'congestion':
+        desc = 'Traffic congestion detected';
+        if (vehicleCount > 0) {
+          desc += ' with $vehicleCount vehicles';
+        }
+        desc += '.';
+        break;
+      default:
+        desc = 'Incident detected.';
     }
     
     desc += ' AI confidence: ${(confidence * 100).toStringAsFixed(1)}%.';
@@ -262,9 +252,13 @@ class AIAutoService {
   }
 
   /// Check if situation requires emergency response
+  /// Only for confirmed real incidents
   bool _requiresEmergency(Map<String, dynamic> aiAnalysis) {
     final severity = _determineSeverity(aiAnalysis);
     final incidentType = _determineIncidentType(aiAnalysis);
+    
+    // No emergency for non-incidents
+    if (incidentType == 'none' || incidentType == 'normal') return false;
     
     // Always create emergency for:
     // - Critical severity

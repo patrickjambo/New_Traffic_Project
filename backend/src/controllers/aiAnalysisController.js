@@ -324,20 +324,31 @@ async function processVideoAsync(file, videoId, userId, latitude, longitude, ses
 
 /**
  * Helper: Determine severity based on incident type and AI confidence
+ * 
+ * Confidence-based severity thresholds:
+ *   Critical : 81% – 100%  (confidence > 0.80)
+ *   High     : 70% – 80%   (confidence >= 0.70)
+ *   Medium   : 50% – 69%   (confidence >= 0.50)
+ *   Low      : below 50%   (confidence < 0.50)
+ * 
+ * Exception: 🔥 FIRE is always CRITICAL regardless of confidence
  */
 function determineSeverity(incidentType, confidence) {
     // 🔥 FIRE is always CRITICAL
     if (incidentType === 'fire') {
         return 'critical';
     }
-    if (incidentType === 'accident') {
-        return confidence > 0.7 ? 'critical' : 'high';
-    } else if (incidentType === 'road_blockage') {
+
+    // Universal confidence-based thresholds for ALL incident types
+    if (confidence > 0.80) {
+        return 'critical';
+    } else if (confidence >= 0.70) {
         return 'high';
-    } else if (incidentType === 'congestion' || incidentType === 'traffic_jam') {
-        return confidence > 0.7 ? 'high' : 'medium';
+    } else if (confidence >= 0.50) {
+        return 'medium';
+    } else {
+        return 'low';
     }
-    return 'low';
 }
 
 /**

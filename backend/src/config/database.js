@@ -14,8 +14,12 @@ const pool = new Pool({
 });
 
 // Test database connection
-pool.on('connect', () => {
-    console.log('✅ Database connected successfully');
+pool.on('connect', (client) => {
+    // Set timezone to Africa/Kigali (UTC+2) for EVERY connection
+    // This ensures NOW(), CURRENT_TIMESTAMP, and all date defaults use Kigali time
+    // Without this, timestamps depend on server OS timezone which may differ
+    client.query("SET timezone = 'Africa/Kigali'");
+    console.log('✅ Database connected successfully (timezone: Africa/Kigali)');
 });
 
 pool.on('error', (err) => {

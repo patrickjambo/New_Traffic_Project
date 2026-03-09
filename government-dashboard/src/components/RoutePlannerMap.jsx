@@ -11,14 +11,37 @@ const markerStyles = `
     .custom-incident-marker {
         background: transparent !important;
         border: none !important;
+        z-index: 500 !important;
     }
     .custom-incident-marker div {
+        pointer-events: none !important;
+    }
+    .leaflet-marker-icon.custom-incident-marker {
         pointer-events: auto !important;
         cursor: pointer !important;
+        transition: transform 0.15s ease;
+    }
+    .leaflet-marker-icon.custom-incident-marker:hover {
+        transform: scale(1.25) !important;
+        z-index: 1000 !important;
     }
     .user-location-marker {
         background: transparent !important;
         border: none !important;
+    }
+    /* Enhanced popup styling for incident details */
+    .leaflet-popup-content-wrapper {
+        padding: 0 !important;
+        border-radius: 8px !important;
+        overflow: hidden !important;
+        box-shadow: 0 10px 25px rgba(0,0,0,0.15) !important;
+    }
+    .leaflet-popup-content {
+        margin: 0 !important;
+        width: auto !important;
+    }
+    .leaflet-popup-tip {
+        box-shadow: 0 3px 10px rgba(0,0,0,0.1) !important;
     }
     @keyframes pulse-ring {
         0% { transform: scale(0.8); opacity: 1; }
@@ -152,7 +175,6 @@ const createIncidentIcon = (type = 'unknown', severity = 'medium') => {
                 border-radius: 50%;
                 box-shadow: 0 2px 8px rgba(6, 182, 212, 0.4);
                 font-size: ${severitySize * 0.5}px;
-                cursor: pointer;
             ">
                 <span style="filter: drop-shadow(0 1px 1px rgba(0,0,0,0.3));">${emoji}</span>
             </div>
@@ -1234,50 +1256,142 @@ const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
                             const incidentType = incident.incident_type || incident.type || 'unknown';
                             const typeConfig = INCIDENT_TYPES[incidentType.toLowerCase()] || INCIDENT_TYPES.hazard || { emoji: '⚠️', label: 'Incident', color: '#06b6d4', description: 'Reported incident' };
                             const isOnRoute = routes[selectedRouteIndex]?.incidents?.some(ri => ri.id === incident.id);
+                            const severityColors = {
+                                critical: { bg: 'bg-red-100', text: 'text-red-700', border: 'border-red-200' },
+                                high: { bg: 'bg-orange-100', text: 'text-orange-700', border: 'border-orange-200' },
+                                medium: { bg: 'bg-yellow-100', text: 'text-yellow-700', border: 'border-yellow-200' },
+                                low: { bg: 'bg-cyan-100', text: 'text-cyan-700', border: 'border-cyan-200' },
+                            };
+                            const sevStyle = severityColors[incident.severity] || severityColors.medium;
+                            const timeAgo = incident.created_at ? (() => {
+                                const diff = Math.floor((Date.now() - new Date(incident.created_at).getTime()) / 1000);
+                                if (diff < 60) return 'Just now';
+                                if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+                                if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+                                return `${Math.floor(diff / 86400)}d ago`;
+                            })() : null;
                             return (
                                 <Marker
                                     key={`incident-${incident.id || idx}`}
                                     position={[incident.latitude, incident.longitude]}
                                     icon={createIncidentIcon(incidentType, incident.severity)}
+                                    eventHandlers={{
+                                        click: (e) => {
+                                            e.target.openPopup();
+                                        },
+                                    }}
                                 >
-                                    <Popup>
-                                        <div className="p-3 min-w-[220px]">
-                                            <div className="flex items-center gap-2 mb-3 pb-2 border-b border-gray-200">
-                                                <span
-                                                    className="w-10 h-10 rounded-full flex items-center justify-center text-xl bg-cyan-500"
-                                                >
+                                    <Popup maxWidth={320} minWidth={260} closeButton={true}>
+                                        <div className="p-0 min-w-[260px]" style={{ fontFamily: 'system-ui, sans-serif' }}>
+                                            {/* Header with severity stripe */}
+                                            <div style={{
+                                                background: incident.severity === 'critical' ? '#dc2626' : incident.severity === 'high' ? '#f97316' : '#06b6d4',
+                                                padding: '10px 14px',
+                                                borderRadius: '4px 4px 0 0',
+                                                marginTop: '-1px',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                gap: '10px',
+                                            }}>
+                                                <span style={{ fontSize: '24px', filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.3))' }}>
                                                     {typeConfig.emoji?.split(' ')[0] || '⚠️'}
                                                 </span>
                                                 <div>
-                                                    <div className="font-bold text-gray-800 text-base">{typeConfig.label || 'Incident'}</div>
-                                                    <div className="text-xs text-gray-500">{typeConfig.description || 'Reported incident'}</div>
+                                                    <div style={{ fontWeight: 700, color: 'white', fontSize: '14px' }}>{typeConfig.label || 'Incident'}</div>
+                                                    <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.85)' }}>
+                                                        {(incident.severity || 'medium').toUpperCase()} SEVERITY
+                                                    </div>
                                                 </div>
                                             </div>
-                                            <div className="space-y-2">
-                                                <div className="text-sm text-gray-700 flex items-start gap-2">
-                                                    <span className="text-cyan-500">📍</span>
-                                                    <span>{incident.location || incident.location_name || 'Unknown location'}</span>
-                                                </div>
-                                                {incident.description && (
-                                                    <div className="text-xs text-gray-600 p-2 bg-gray-50 rounded-lg border border-gray-100">
-                                                        {incident.description.length > 100 ? incident.description.substring(0, 100) + '...' : incident.description}
-                                                    </div>
-                                                )}
-                                                <div className="flex items-center justify-between pt-2">
-                                                    <span className="text-xs px-2 py-1 rounded-full font-semibold bg-cyan-100 text-cyan-800">
-                                                        {(incident.severity || 'medium').toUpperCase()}
+
+                                            {/* Body */}
+                                            <div style={{ padding: '12px 14px' }}>
+                                                {/* Location */}
+                                                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', marginBottom: '8px' }}>
+                                                    <span style={{ color: '#06b6d4', fontSize: '14px', marginTop: '1px' }}>📍</span>
+                                                    <span style={{ fontSize: '13px', color: '#374151', lineHeight: '1.4' }}>
+                                                        {incident.location || incident.location_name || incident.address || 'Kigali, Rwanda'}
                                                     </span>
-                                                    {isOnRoute ? (
-                                                        <span className="text-xs text-red-600 font-medium">⚠️ On your route</span>
-                                                    ) : routes.length > 0 ? (
-                                                        <span className="text-xs text-green-600">✓ Not on route</span>
-                                                    ) : null}
                                                 </div>
-                                                {incident.source && (
-                                                    <div className="text-xs text-gray-400 pt-1">
-                                                        Source: {incident.source === 'manual' ? 'Public Report' : 'AI Detected'}
+
+                                                {/* Description */}
+                                                {incident.description && (
+                                                    <div style={{
+                                                        fontSize: '12px',
+                                                        color: '#4b5563',
+                                                        padding: '8px 10px',
+                                                        background: '#f9fafb',
+                                                        borderRadius: '6px',
+                                                        border: '1px solid #e5e7eb',
+                                                        marginBottom: '10px',
+                                                        lineHeight: '1.5',
+                                                    }}>
+                                                        {incident.description.length > 150 ? incident.description.substring(0, 150) + '...' : incident.description}
                                                     </div>
                                                 )}
+
+                                                {/* Info Grid */}
+                                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', marginBottom: '8px' }}>
+                                                    {/* Status */}
+                                                    <div style={{
+                                                        display: 'flex', alignItems: 'center', gap: '4px',
+                                                        fontSize: '11px', color: '#6b7280',
+                                                        padding: '4px 8px', background: '#f3f4f6', borderRadius: '4px',
+                                                    }}>
+                                                        <span>📊</span>
+                                                        <span style={{ fontWeight: 600 }}>{(incident.status || 'reported').replace('_', ' ')}</span>
+                                                    </div>
+                                                    {/* Time */}
+                                                    {timeAgo && (
+                                                        <div style={{
+                                                            display: 'flex', alignItems: 'center', gap: '4px',
+                                                            fontSize: '11px', color: '#6b7280',
+                                                            padding: '4px 8px', background: '#f3f4f6', borderRadius: '4px',
+                                                        }}>
+                                                            <span>🕐</span>
+                                                            <span>{timeAgo}</span>
+                                                        </div>
+                                                    )}
+                                                    {/* Source */}
+                                                    {incident.source && (
+                                                        <div style={{
+                                                            display: 'flex', alignItems: 'center', gap: '4px',
+                                                            fontSize: '11px', color: '#6b7280',
+                                                            padding: '4px 8px', background: '#f3f4f6', borderRadius: '4px',
+                                                        }}>
+                                                            <span>{incident.source === 'ai' ? '🤖' : incident.source === 'mobile_app' ? '📱' : '👤'}</span>
+                                                            <span>{incident.source === 'ai' ? 'AI Detected' : incident.source === 'mobile_app' ? 'Mobile App' : 'Public Report'}</span>
+                                                        </div>
+                                                    )}
+                                                    {/* Coordinates */}
+                                                    <div style={{
+                                                        display: 'flex', alignItems: 'center', gap: '4px',
+                                                        fontSize: '11px', color: '#6b7280',
+                                                        padding: '4px 8px', background: '#f3f4f6', borderRadius: '4px',
+                                                    }}>
+                                                        <span>🌐</span>
+                                                        <span>{parseFloat(incident.latitude).toFixed(4)}, {parseFloat(incident.longitude).toFixed(4)}</span>
+                                                    </div>
+                                                </div>
+
+                                                {/* Route warning */}
+                                                {isOnRoute ? (
+                                                    <div style={{
+                                                        display: 'flex', alignItems: 'center', gap: '6px',
+                                                        padding: '6px 10px', background: '#fef2f2', border: '1px solid #fecaca',
+                                                        borderRadius: '6px', fontSize: '12px', color: '#dc2626', fontWeight: 600,
+                                                    }}>
+                                                        ⚠️ This incident is on your route!
+                                                    </div>
+                                                ) : routes.length > 0 ? (
+                                                    <div style={{
+                                                        display: 'flex', alignItems: 'center', gap: '6px',
+                                                        padding: '6px 10px', background: '#f0fdf4', border: '1px solid #bbf7d0',
+                                                        borderRadius: '6px', fontSize: '12px', color: '#16a34a', fontWeight: 500,
+                                                    }}>
+                                                        ✅ Not on your route
+                                                    </div>
+                                                ) : null}
                                             </div>
                                         </div>
                                     </Popup>

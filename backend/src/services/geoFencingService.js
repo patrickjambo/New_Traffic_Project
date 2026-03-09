@@ -64,6 +64,8 @@ class GeoFencingService {
             }
 
             // Update officer profile with current location
+            // NOTE: Using user_id (not id) since officerId comes from req.user.id
+            // Also update BOTH timestamp columns for consistency
             const updateResult = await query(`
                 UPDATE officer_profiles 
                 SET 
@@ -71,8 +73,11 @@ class GeoFencingService {
                     current_longitude = $2,
                     current_district_id = $3,
                     location_updated_at = CURRENT_TIMESTAMP,
+                    last_location_update = CURRENT_TIMESTAMP,
+                    is_on_duty = true,
+                    is_online = true,
                     updated_at = CURRENT_TIMESTAMP
-                WHERE id = $4
+                WHERE user_id = $4
                 RETURNING id, badge_number, is_on_duty
             `, [latitude, longitude, districtId, officerId]);
 
@@ -109,7 +114,7 @@ class GeoFencingService {
                     fcm_token = $1,
                     device_id = $2,
                     updated_at = CURRENT_TIMESTAMP
-                WHERE id = $3
+                WHERE user_id = $3
             `, [fcmToken, deviceInfo.deviceId || null, officerId]);
 
             console.log(`📱 FCM token updated for officer ${officerId}`);
@@ -132,7 +137,7 @@ class GeoFencingService {
                     duty_start_time = CASE WHEN $1 = true THEN CURRENT_TIMESTAMP ELSE duty_start_time END,
                     duty_end_time = CASE WHEN $1 = false THEN CURRENT_TIMESTAMP ELSE NULL END,
                     updated_at = CURRENT_TIMESTAMP
-                WHERE id = $2
+                WHERE user_id = $2
             `, [isOnDuty, officerId]);
 
             // Notify admin dashboard

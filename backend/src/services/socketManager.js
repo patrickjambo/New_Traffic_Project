@@ -15,6 +15,7 @@ class SocketManager {
     initialize(io) {
         this.io = io;
         this.setupConnectionHandlers();
+        this._startSelfHealingLoop();
         console.log('📡 SocketManager initialized');
     }
 
@@ -83,8 +84,16 @@ class SocketManager {
                     this.updateClientRoom(socket.id, roomName);
                     console.log(`👮 Client ${socket.id} joined room: ${roomName}`);
                     
+                    // If an admin just joined, send them a snapshot of all online officers
+                    if (role === 'admin' || role === 'district_admin') {
+                        this._sendOnlineOfficersSnapshot(socket);
+                    }
+                    
                     // If police officer joined, notify admins they are ONLINE
                     if (role === 'police' && userId) {
+                        // Mark as notified so location_update handler doesn't double-emit
+                        if (clientData) clientData._notifiedOnline = true;
+                        
                         this.io.to('role:admin').emit('officer:online', {
                             officerId: userId,
                             connectedAt: new Date().toISOString(),
@@ -149,9 +158,11 @@ class SocketManager {
                 }
                 
                 // Update clientData if we got userId from the data payload
-                if (clientData && data.userId) {
-                    clientData.userId = data.userId;
+                if (clientData) {
+                    if (data.userId) clientData.userId = data.userId;
                     if (data.role) clientData.role = data.role;
+                    // If we have a userId sending location, they're a police officer
+                    if (!clientData.role) clientData.role = 'police';
                 }
 
                 const { latitude, longitude, accuracy, speed, heading, address, timestamp } = data;
@@ -172,6 +183,23 @@ class SocketManager {
                         address,
                         timestamp: timestamp || new Date().toISOString(),
                     };
+                    
+                    // If this officer wasn't marked online yet, notify admins now
+                    if (!clientData._notifiedOnline) {
+                        clientData._notifiedOnline = true;
+                        this.io.to('role:admin').emit('officer:online', {
+                            officerId: userId,
+                            connectedAt: new Date().toISOString(),
+                            socketId: socket.id,
+                            latitude,
+                            longitude,
+                        });
+                        console.log(`📱 Officer ${userId} auto-detected ONLINE from location update`);
+                        
+                        // Ensure DB has is_online = true
+                        this._setOfficerOnlineStatus(userId, true)
+                            .catch(err => console.error('Error setting officer online:', err));
+                    }
                 }
 
                 // Broadcast to admin for real-time tracking dashboard
@@ -319,7 +347,9 @@ class SocketManager {
                     current_longitude = $2, 
                     current_address = $3,
                     is_on_duty = true,
-                    location_updated_at = NOW()
+                    is_online = true,
+                    location_updated_at = NOW(),
+                    last_location_update = NOW()
                 WHERE user_id = $4
             `, [location.latitude, location.longitude, location.address || null, officerId]);
             console.log(`✅ DB updated for officer ${officerId}: ${location.latitude}, ${location.longitude}`);
@@ -330,6 +360,10 @@ class SocketManager {
 
     /**
      * Set officer online/offline status in database
+     * NOTE: On disconnect we only clear is_online, NOT is_on_duty.
+     * Officers remain "on duty" until they explicitly go off duty or 
+     * the dashboard checks location_updated_at freshness.
+     * This prevents brief network drops from toggling duty status.
      */
     async _setOfficerOnlineStatus(officerId, isOnline) {
         try {
@@ -337,13 +371,16 @@ class SocketManager {
             if (isOnline) {
                 await query(`
                     UPDATE officer_profiles 
-                    SET is_on_duty = true, location_updated_at = NOW()
+                    SET is_on_duty = true, is_online = true,
+                        location_updated_at = NOW(), last_location_update = NOW()
                     WHERE user_id = $1
                 `, [officerId]);
             } else {
+                // Only mark offline, do NOT set is_on_duty = false
+                // The dashboard uses location_updated_at freshness to determine real status
                 await query(`
                     UPDATE officer_profiles 
-                    SET is_on_duty = false
+                    SET is_online = false
                     WHERE user_id = $1
                 `, [officerId]);
             }
@@ -361,6 +398,147 @@ class SocketManager {
         if (client && !client.rooms.includes(room)) {
             client.rooms.push(room);
         }
+    }
+
+    /**
+     * Send a snapshot of all currently connected police officers to a newly joined admin.
+     * This ensures the admin dashboard shows correct online status even if
+     * the admin connected AFTER the officers did.
+     */
+    _sendOnlineOfficersSnapshot(adminSocket) {
+        try {
+            const onlineOfficers = [];
+            this.connectedClients.forEach((clientData, socketId) => {
+                if (clientData.role === 'police' && clientData.userId) {
+                    const officer = {
+                        officerId: clientData.userId,
+                        socketId: socketId,
+                        connectedAt: clientData.connectedAt?.toISOString(),
+                        isOnline: true,
+                    };
+                    // Include last known location if available
+                    if (clientData.lastLocation) {
+                        officer.latitude = clientData.lastLocation.latitude;
+                        officer.longitude = clientData.lastLocation.longitude;
+                        officer.accuracy = clientData.lastLocation.accuracy;
+                        officer.speed = clientData.lastLocation.speed;
+                        officer.heading = clientData.lastLocation.heading;
+                        officer.address = clientData.lastLocation.address;
+                        officer.timestamp = clientData.lastLocation.timestamp;
+                    }
+                    onlineOfficers.push(officer);
+                }
+            });
+
+            if (onlineOfficers.length > 0) {
+                // Send each online officer as an officer:online event so the dashboard picks it up
+                onlineOfficers.forEach(officer => {
+                    adminSocket.emit('officer:online', officer);
+                    // Also send their last location if available
+                    if (officer.latitude && officer.longitude) {
+                        adminSocket.emit('officer:location', officer);
+                    }
+                });
+                console.log(`📋 Sent snapshot of ${onlineOfficers.length} online officers to admin ${adminSocket.id}`);
+            } else {
+                console.log(`📋 No online officers to snapshot for admin ${adminSocket.id}`);
+            }
+        } catch (error) {
+            console.error('Error sending online officers snapshot:', error.message);
+        }
+    }
+
+    // ============================================
+    // SELF-HEALING HEARTBEAT
+    // ============================================
+
+    /**
+     * Periodic self-healing loop that runs every 60 seconds to:
+     * 1. Sync DB is_online status with actually-connected WebSocket clients
+     * 2. Mark stale officers (no location update in 5 min) as offline in DB
+     * 3. Re-broadcast online officers to admin so dashboard never goes stale
+     * 
+     * This prevents the "silent death" scenario where officers appear offline
+     * even though they are connected, or appear online when they've been gone for days.
+     */
+    _startSelfHealingLoop() {
+        // Run every 60 seconds
+        this._healingInterval = setInterval(async () => {
+            try {
+                const { query: dbQuery } = require('../config/database');
+                
+                // 1. Collect all currently connected police officer userIds
+                const connectedOfficerIds = new Set();
+                this.connectedClients.forEach((clientData) => {
+                    if (clientData.role === 'police' && clientData.userId) {
+                        connectedOfficerIds.add(clientData.userId);
+                    }
+                });
+
+                const connectedArray = Array.from(connectedOfficerIds);
+                
+                // 2. Mark connected officers as online + refresh their timestamps
+                //    This is the KEY fix: even if a WebSocket event was missed,
+                //    this ensures the DB stays accurate
+                if (connectedArray.length > 0) {
+                    await dbQuery(`
+                        UPDATE officer_profiles 
+                        SET is_online = true, is_on_duty = true,
+                            location_updated_at = CASE 
+                                WHEN location_updated_at > NOW() - INTERVAL '2 minutes' THEN location_updated_at 
+                                ELSE NOW() 
+                            END,
+                            last_location_update = CASE 
+                                WHEN last_location_update > NOW() - INTERVAL '2 minutes' THEN last_location_update 
+                                ELSE NOW() 
+                            END
+                        WHERE user_id = ANY($1)
+                    `, [connectedArray]);
+                }
+
+                // 3. Mark officers NOT connected as offline (if they were marked online)
+                //    Only if they have stale location (> 5 minutes)
+                await dbQuery(`
+                    UPDATE officer_profiles 
+                    SET is_online = false
+                    WHERE is_online = true 
+                      AND location_updated_at < NOW() - INTERVAL '5 minutes'
+                      ${connectedArray.length > 0 ? 'AND user_id != ALL($1)' : ''}
+                `, connectedArray.length > 0 ? [connectedArray] : []);
+
+                // 4. Re-broadcast all connected officers to admin room
+                //    This ensures the dashboard stays in sync even after reconnects
+                const adminRoom = this.io?.sockets?.adapter?.rooms?.get('role:admin');
+                if (adminRoom && adminRoom.size > 0 && connectedArray.length > 0) {
+                    connectedArray.forEach(officerId => {
+                        const clientEntry = Array.from(this.connectedClients.entries())
+                            .find(([, data]) => data.userId === officerId && data.role === 'police');
+                        
+                        if (clientEntry) {
+                            const [socketId, clientData] = clientEntry;
+                            if (clientData.lastLocation) {
+                                this.io.to('role:admin').emit('officer:location', {
+                                    officerId,
+                                    socketId,
+                                    latitude: clientData.lastLocation.latitude,
+                                    longitude: clientData.lastLocation.longitude,
+                                    accuracy: clientData.lastLocation.accuracy,
+                                    address: clientData.lastLocation.address,
+                                    timestamp: clientData.lastLocation.timestamp || new Date().toISOString(),
+                                    source: 'heartbeat',
+                                });
+                            }
+                        }
+                    });
+                }
+
+                console.log(`💓 Heartbeat: ${connectedArray.length} officers connected, ${adminRoom?.size || 0} admins watching`);
+            } catch (error) {
+                console.error('❌ Self-healing heartbeat error:', error.message);
+            }
+        }, 60000); // Every 60 seconds
+
+        console.log('💓 Self-healing heartbeat started (every 60s)');
     }
 
     // ============================================
@@ -973,6 +1151,97 @@ class SocketManager {
                 connectedAt: data.connectedAt,
                 rooms: data.rooms,
             })),
+        };
+    }
+
+    /**
+     * Get detailed tracking health information.
+     * Used by the /api/health/tracking endpoint for monitoring.
+     */
+    async getTrackingHealth() {
+        const now = new Date();
+        
+        // Collect connected officers from WebSocket
+        const connectedOfficers = [];
+        const adminSockets = [];
+        this.connectedClients.forEach((clientData, socketId) => {
+            if (clientData.role === 'police' && clientData.userId) {
+                const lastLoc = clientData.lastLocation;
+                connectedOfficers.push({
+                    userId: clientData.userId,
+                    socketId,
+                    connectedAt: clientData.connectedAt,
+                    connectedFor: Math.round((now - clientData.connectedAt) / 1000),
+                    hasLocation: !!lastLoc,
+                    lastLocationTimestamp: lastLoc?.timestamp || null,
+                });
+            }
+            if (clientData.role === 'admin' || clientData.role === 'district_admin') {
+                adminSockets.push({
+                    userId: clientData.userId,
+                    role: clientData.role,
+                    socketId,
+                    connectedAt: clientData.connectedAt,
+                });
+            }
+        });
+
+        // Query DB for officer online state
+        let dbOfficers = [];
+        try {
+            const { query: dbQuery } = require('../config/database');
+            const result = await dbQuery(`
+                SELECT op.user_id, u.full_name, op.is_online, op.is_on_duty,
+                       op.location_updated_at,
+                       CASE WHEN op.location_updated_at > NOW() - INTERVAL '3 minutes' THEN true ELSE false END as is_fresh,
+                       EXTRACT(EPOCH FROM (NOW() - op.location_updated_at)) as seconds_since_update
+                FROM officer_profiles op
+                JOIN users u ON op.user_id = u.id
+                WHERE u.role = 'police'
+                  AND (op.is_online = true OR op.location_updated_at > NOW() - INTERVAL '10 minutes')
+                ORDER BY op.location_updated_at DESC NULLS LAST
+            `);
+            dbOfficers = result.rows;
+        } catch (err) {
+            dbOfficers = [{ error: err.message }];
+        }
+
+        // Detect mismatches: connected but DB says offline, or DB says online but not connected
+        const connectedIds = new Set(connectedOfficers.map(o => o.userId));
+        const dbOnlineIds = new Set(dbOfficers.filter(o => o.is_online).map(o => o.user_id));
+        
+        const mismatches = [];
+        // Connected via WebSocket but DB says offline
+        connectedOfficers.forEach(o => {
+            if (!dbOnlineIds.has(o.userId)) {
+                mismatches.push({ userId: o.userId, issue: 'ws_connected_but_db_offline' });
+            }
+        });
+        // DB says online but not connected via WebSocket
+        dbOfficers.filter(o => o.is_online).forEach(o => {
+            if (!connectedIds.has(o.user_id)) {
+                mismatches.push({ userId: o.user_id, name: o.full_name, issue: 'db_online_but_ws_disconnected' });
+            }
+        });
+
+        return {
+            timestamp: now.toISOString(),
+            uptime: Math.round(process.uptime()),
+            heartbeatActive: !!this._healingInterval,
+            websocket: {
+                totalClients: this.connectedClients.size,
+                connectedOfficers: connectedOfficers.length,
+                adminClients: adminSockets.length,
+                officers: connectedOfficers,
+                admins: adminSockets,
+            },
+            database: {
+                onlineOfficers: dbOfficers.filter(o => o.is_online).length,
+                freshOfficers: dbOfficers.filter(o => o.is_fresh).length,
+                officers: dbOfficers,
+            },
+            mismatches,
+            healthy: mismatches.length === 0 && connectedOfficers.length >= 0,
         };
     }
 

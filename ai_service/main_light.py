@@ -1,19 +1,30 @@
 """
 TrafficGuard AI Service - Lightweight Version
 Uses OpenCV only (~50MB) instead of PyTorch/YOLO (~900MB)
+
+Concurrency model
+─────────────────
+Each incoming video is analysed in its own thread via asyncio's
+run_in_executor (default ThreadPoolExecutor).  Every thread gets a
+*fresh* LightweightTrafficAnalyzer instance so that MOG2 background
+models never leak between cameras.  The SessionManager remains a
+singleton protected by its internal threading.Lock.
 """
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
 import os
 import time
+import uuid
 import shutil
+import asyncio
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager
 
-# Import lightweight analyzer (no PyTorch needed)
-from lightweight_analyzer import analyzer
+# Import the *class* (not the singleton) — we create one instance per request
+from lightweight_analyzer import LightweightTrafficAnalyzer
 from backend_notifier import notify_backend
 from session_manager import session_manager
 
@@ -23,21 +34,32 @@ load_dotenv()
 TEMP_DIR = Path("./temp_uploads")
 TEMP_DIR.mkdir(exist_ok=True)
 
+# Thread pool for CPU-bound video analysis.
+# One thread per concurrent camera.  5 workers = 5 cameras analysed at once.
+# Increase if you have more cores / cameras.
+MAX_CONCURRENT_ANALYSES = int(os.getenv("MAX_CONCURRENT_ANALYSES", "5"))
+_analysis_pool = ThreadPoolExecutor(
+    max_workers=MAX_CONCURRENT_ANALYSES,
+    thread_name_prefix="analyzer",
+)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup and shutdown"""
-    print("""
+    print(f"""
 🤖 TrafficGuard AI Service (Lightweight)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ✅ AI Service initialized
 🧠 Engine: OpenCV-based detection
 📊 Ready for traffic analysis
 💾 Low memory footprint (~50MB)
+📹 Concurrent cameras: {MAX_CONCURRENT_ANALYSES}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     """)
     yield
     # Cleanup on shutdown
+    _analysis_pool.shutdown(wait=False)
     if TEMP_DIR.exists():
         shutil.rmtree(TEMP_DIR, ignore_errors=True)
 
@@ -45,7 +67,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="TrafficGuard AI Service",
     description="Lightweight traffic analysis using OpenCV",
-    version="3.0.0-light",
+    version="3.1.0-light",
     lifespan=lifespan
 )
 
@@ -63,9 +85,10 @@ app.add_middleware(
 async def root():
     return {
         "service": "TrafficGuard AI",
-        "version": "3.0.0-light",
+        "version": "3.1.0-light",
         "status": "running",
-        "engine": "OpenCV"
+        "engine": "OpenCV",
+        "max_concurrent_cameras": MAX_CONCURRENT_ANALYSES,
     }
 
 
@@ -74,7 +97,7 @@ async def health_check():
     return {
         "status": "healthy",
         "service": "TrafficGuard AI",
-        "version": "3.0.0-light",
+        "version": "3.1.0-light",
         "engine": "OpenCV-based detection"
     }
 
@@ -93,6 +116,10 @@ async def analyze_traffic(
 ):
     """
     Analyze traffic video for incidents.
+    
+    **Concurrency**: Each request gets its own LightweightTrafficAnalyzer
+    instance and runs in a dedicated thread.  Up to MAX_CONCURRENT_ANALYSES
+    cameras can be processed simultaneously (default 5).
     
     Supports two modes:
     
@@ -119,8 +146,9 @@ async def analyze_traffic(
     try:
         # Determine video path
         if video:
-            # Save uploaded file
-            temp_path = TEMP_DIR / f"upload_{int(time.time())}_{video.filename}"
+            # UUID guarantees unique filenames even under heavy concurrency
+            unique_id = uuid.uuid4().hex[:12]
+            temp_path = TEMP_DIR / f"upload_{unique_id}_{video.filename}"
             with open(temp_path, "wb") as f:
                 content = await video.read()
                 f.write(content)
@@ -141,20 +169,27 @@ async def analyze_traffic(
             device_id is not None
         )
         
+        # Run the CPU-heavy analysis in the thread pool so the async
+        # event loop stays responsive for other incoming requests.
+        loop = asyncio.get_running_loop()
+        
         if use_session:
             # SESSION MODE: Cross-clip correlation
-            result = session_manager.process_clip(
-                analyzer=analyzer,
-                video_path=analysis_path,
-                user_id=user_id,
-                device_id=device_id,
-                clip_id=clip_id,
-                latitude=latitude,
-                longitude=longitude,
+            # session_manager.process_clip internally creates a fresh
+            # analyzer to avoid MOG2 cross-contamination.
+            result = await loop.run_in_executor(
+                _analysis_pool,
+                _run_session_analysis,
+                analysis_path, user_id, device_id, clip_id,
+                latitude, longitude,
             )
         else:
-            # SINGLE-CLIP MODE: Legacy independent analysis
-            result = analyzer.analyze_video(analysis_path)
+            # SINGLE-CLIP MODE: Fresh analyzer per request
+            result = await loop.run_in_executor(
+                _analysis_pool,
+                _run_single_analysis,
+                analysis_path,
+            )
         
         # Add processing time and location
         result["processing_time_seconds"] = round(time.time() - start_time, 2)
@@ -205,6 +240,33 @@ async def analyze_traffic(
                 pass
 
 
+def _run_single_analysis(video_path: str) -> dict:
+    """Run analysis in a worker thread with a FRESH analyzer instance."""
+    analyzer = LightweightTrafficAnalyzer()
+    return analyzer.analyze_video(video_path)
+
+
+def _run_session_analysis(
+    video_path: str,
+    user_id: str,
+    device_id: str,
+    clip_id: str,
+    latitude: float,
+    longitude: float,
+) -> dict:
+    """Run session-based analysis in a worker thread with a FRESH analyzer."""
+    analyzer = LightweightTrafficAnalyzer()
+    return session_manager.process_clip(
+        analyzer=analyzer,
+        video_path=video_path,
+        user_id=user_id,
+        device_id=device_id,
+        clip_id=clip_id,
+        latitude=latitude,
+        longitude=longitude,
+    )
+
+
 @app.post("/ai/analyze-image")
 async def analyze_image(
     image: UploadFile = File(...),
@@ -216,14 +278,20 @@ async def analyze_image(
     temp_path = None
     
     try:
-        # Save uploaded image
-        temp_path = TEMP_DIR / f"img_{int(time.time())}_{image.filename}"
+        # Save uploaded image (UUID to avoid collisions)
+        unique_id = uuid.uuid4().hex[:12]
+        temp_path = TEMP_DIR / f"img_{unique_id}_{image.filename}"
         with open(temp_path, "wb") as f:
             content = await image.read()
             f.write(content)
         
-        # Analyze image
-        result = analyzer.analyze_image(str(temp_path))
+        # Analyze image in thread pool with fresh analyzer
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(
+            _analysis_pool,
+            _run_image_analysis,
+            str(temp_path),
+        )
         result["processing_time_seconds"] = round(time.time() - start_time, 2)
         result["location"] = {
             "latitude": latitude,
@@ -242,6 +310,12 @@ async def analyze_image(
                 pass
 
 
+def _run_image_analysis(image_path: str) -> dict:
+    """Run image analysis in a worker thread with a FRESH analyzer instance."""
+    analyzer = LightweightTrafficAnalyzer()
+    return analyzer.analyze_image(image_path)
+
+
 @app.get("/ai/status")
 async def get_status():
     """Get AI service status including session manager stats"""
@@ -250,8 +324,9 @@ async def get_status():
         "status": "operational",
         "analyzer": "LightweightTrafficAnalyzer",
         "engine": "OpenCV",
-        "version": "3.0.0-light",
+        "version": "3.1.0-light",
         "memory_footprint": "~50MB",
+        "max_concurrent_cameras": MAX_CONCURRENT_ANALYSES,
         "session_manager": stats,
         "capabilities": [
             "vehicle_detection",
@@ -262,6 +337,7 @@ async def get_status():
             "cross_clip_correlation",
             "duplicate_suppression",
             "session_based_analysis",
+            "concurrent_multi_camera",
         ]
     }
 

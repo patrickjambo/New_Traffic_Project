@@ -180,6 +180,7 @@ const DeploymentsPage = () => {
             const refreshInterval = setInterval(() => {
                 fetchDeployments(true);
                 fetchStats();
+                fetchAvailableOfficers(); // Refresh officer list to get fresh location_updated_at
             }, 10000);
 
             return () => clearInterval(refreshInterval);
@@ -920,7 +921,9 @@ const DeploymentsPage = () => {
                                     ) : (
                                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4 max-h-[350px] overflow-y-auto custom-scrollbar">
                                             {availableOfficers.map((officer) => {
-                                                const isOnline = officer.is_on_duty || officer.status === 'Available' || officer.is_online;
+                                                // Check real-time WebSocket data first, then fall back to API data
+                                                const rtLocation = officerLocations.get(officer.id);
+                                                const isOnline = rtLocation?.isOnline === true || officer.is_on_duty || officer.status === 'Available' || officer.is_online;
                                                 return (
                                                 <div
                                                     key={officer.id}

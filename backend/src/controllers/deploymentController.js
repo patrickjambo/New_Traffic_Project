@@ -311,7 +311,7 @@ const acknowledgeDeployment = async (req, res) => {
         if (latitude && longitude) {
             await query(
                 `UPDATE officer_profiles 
-                 SET current_latitude = $1, current_longitude = $2, current_address = $3, last_location_update = NOW()
+                 SET current_latitude = $1, current_longitude = $2, current_address = $3, last_location_update = NOW(), location_updated_at = NOW(), is_online = TRUE
                  WHERE user_id = $4`,
                 [latitude, longitude, currentAddress || null, officerId]
             ).catch(err => console.error('Error updating officer profile location:', err));
@@ -445,7 +445,7 @@ const updateOfficerDeploymentStatus = async (req, res) => {
         if (latitude && longitude) {
             await query(
                 `UPDATE officer_profiles 
-                 SET current_latitude = $1, current_longitude = $2, current_address = $3, last_location_update = NOW(), is_online = TRUE
+                 SET current_latitude = $1, current_longitude = $2, current_address = $3, last_location_update = NOW(), location_updated_at = NOW(), is_online = TRUE
                  WHERE user_id = $4`,
                 [latitude, longitude, currentAddress || null, officerId]
             ).catch(err => console.error('Error updating officer profile location:', err));

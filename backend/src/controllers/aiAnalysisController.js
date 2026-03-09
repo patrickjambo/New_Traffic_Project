@@ -4,6 +4,8 @@ const db = require('../config/database');
 const fs = require('fs');
 const socketManager = require('../services/socketManager');
 const deduplicationService = require('../services/incidentDeduplicationService');
+const smsService = require('../services/sms_service');
+const fcmService = require('../services/fcmService');
 
 const AI_SERVICE_URL = process.env.AI_SERVICE_URL || 'http://localhost:8000';
 
@@ -296,10 +298,9 @@ async function processVideoAsync(file, videoId, userId, latitude, longitude, ses
             // Step 4: Create notifications for police/admin users
             await createIncidentNotifications(incident, aiResults);
 
-            // Step 5: Automatically create EMERGENCY for critical incidents
-            if (incident.severity === 'critical' || incident.severity === 'high') {
-                await createAutomaticEmergency(incident, aiResults, latitude, longitude);
-            }
+            // Step 5: Automatically create EMERGENCY for ALL AI-detected incidents
+            // Just like manual reports: critical/high get full alarm, medium/low get standard alert
+            await createAutomaticEmergency(incident, aiResults, latitude || incidentLat, longitude || incidentLon, mappedType);
         } else {
             // Even if no incident detected, notify about analysis completion
             socketManager.emitAnalysisComplete({
@@ -439,10 +440,21 @@ async function createIncidentNotifications(incident, aiResults = {}) {
 }
 
 /**
- * Automatically create EMERGENCY for critical/high severity incidents
- * Kigali, Rwanda - Emergency services auto-dispatch
+ * Automatically create EMERGENCY REPORT for ALL AI-detected incidents
+ * Same as manual human reports — saved to database, shows on dashboard
+ * 
+ * BEHAVIOR (matches manual emergency reports):
+ * - ALL incidents → emergency saved to DB → shows on Emergency page & Reports page
+ * - Critical/High → ALSO sends alert to nearby police officers (same as manual)
+ * - Medium/Low → emergency report only (same as manual)
+ * 
+ * @param {object} incident - The incident record from DB
+ * @param {object} aiResults - AI analysis results
+ * @param {number} latitude - GPS latitude
+ * @param {number} longitude - GPS longitude
+ * @param {string} incidentMappedType - The mapped incident type (for dedup cache)
  */
-async function createAutomaticEmergency(incident, aiResults, latitude, longitude) {
+async function createAutomaticEmergency(incident, aiResults, latitude, longitude, incidentMappedType) {
     try {
         // Determine emergency type based on incident type
         let emergencyType = 'traffic';
@@ -459,22 +471,29 @@ async function createAutomaticEmergency(incident, aiResults, latitude, longitude
         if (incident.type === 'fire') {
             emergencyType = 'fire';
             servicesNeeded = ['fire_department', 'ambulance', 'police'];
-            description = `🔥 AUTOMATIC ALERT: FIRE/BURNING VEHICLE detected at ${emergencyTime} in Kigali! Fire coverage: ${aiResults.fire_percentage?.toFixed(1) || 'N/A'}%. IMMEDIATE fire response required. Ambulance dispatched for potential casualties.`;
+            description = `🔥 AI DETECTED FIRE/BURNING VEHICLE at ${emergencyTime} in Kigali. Fire coverage: ${aiResults.fire_percentage?.toFixed(1) || 'N/A'}%. ${aiResults.vehicles_detected || 0} vehicles nearby. Confidence: ${Math.round((aiResults.confidence || 0) * 100)}%. IMMEDIATE fire response required.`;
         } else if (incident.type === 'accident') {
             emergencyType = 'accident';
             servicesNeeded = ['police', 'ambulance'];
-            description = `🚨 AUTOMATIC ALERT: Traffic accident detected at ${emergencyTime} in Kigali. ${aiResults.stationary_count || aiResults.vehicles_detected || 0} vehicles involved. Immediate response needed.`;
+            description = `🚨 AI DETECTED ACCIDENT at ${emergencyTime} in Kigali. ${aiResults.stationary_count || aiResults.vehicles_detected || 0} vehicles involved. Confidence: ${Math.round((aiResults.confidence || 0) * 100)}%. Emergency response needed.`;
         } else if (incident.type === 'road_blockage') {
             emergencyType = 'road_blockage';
             servicesNeeded = ['police'];
-            description = `🚧 AUTOMATIC ALERT: Road blockage detected at ${emergencyTime} in Kigali. ${aiResults.vehicles_detected || 0} vehicles affected. Traffic control needed.`;
+            description = `🚧 AI DETECTED ROAD BLOCKAGE at ${emergencyTime} in Kigali. ${aiResults.vehicles_detected || 0} vehicles affected. Traffic control needed.`;
         } else if (incident.type === 'traffic_jam' || incident.type === 'congestion') {
             emergencyType = 'traffic';
             servicesNeeded = ['traffic_police'];
-            description = `🚦 AUTOMATIC ALERT: Heavy traffic congestion detected at ${emergencyTime} in Kigali. ${aiResults.vehicles_detected || 0} vehicles in frame. Traffic management required.`;
+            description = `� AI DETECTED TRAFFIC JAM at ${emergencyTime} in Kigali. ${aiResults.vehicles_detected || 0} vehicles in frame. Confidence: ${Math.round((aiResults.confidence || 0) * 100)}%. Traffic management required.`;
         }
 
-        // Create emergency in database - use correct column names
+        const emergencyLat = latitude || incident.latitude || -1.9536;
+        const emergencyLon = longitude || incident.longitude || 30.0606;
+
+        // ============================================================
+        // STEP 1: INSERT EMERGENCY INTO DATABASE
+        // This is what makes it show on the dashboard (Emergency page + Reports page)
+        // Same as manual reports — the dashboard reads from emergencies table
+        // ============================================================
         const result = await db.query(
             `INSERT INTO emergencies (
                 user_id, emergency_type, type, severity, location_name, location_description,
@@ -489,8 +508,8 @@ async function createAutomaticEmergency(incident, aiResults, latitude, longitude
                 incident.severity,
                 incident.address || 'Kigali, Rwanda',
                 `AI-Detected ${incident.type}. Confidence: ${Math.round((aiResults.confidence || 0) * 100)}%. Vehicles: ${aiResults.vehicles_detected || 0}.`,
-                latitude || incident.latitude || -1.9536,
-                longitude || incident.longitude || 30.0606,
+                emergencyLat,
+                emergencyLon,
                 JSON.stringify(servicesNeeded),
                 description,
                 '112', // Emergency hotline number for Rwanda
@@ -502,18 +521,41 @@ async function createAutomaticEmergency(incident, aiResults, latitude, longitude
 
         const emergency = result.rows[0];
 
-        console.log(`🚨 AUTOMATIC EMERGENCY CREATED: ID ${emergency.id}, Type: ${emergencyType}, Location: Kigali`);
+        console.log(`🚨 AI EMERGENCY REPORT CREATED: ID ${emergency.id}, Type: ${emergencyType}, Severity: ${incident.severity}`);
 
-        // Update deduplication cache with emergency ID
-        deduplicationService.registerNewIncident(
-            incident.id,
-            mappedType,
-            incidentLat,
-            incidentLon,
-            emergency.id // Include emergency ID
-        );
+        // ============================================================
+        // STEP 2: CREATE EMERGENCY NOTIFICATIONS IN DATABASE
+        // Same as manual reports — notifications for all police/admin users
+        // ============================================================
+        try {
+            const usersResult = await db.query(
+                `SELECT id FROM users WHERE role IN ('police', 'admin')`
+            );
+            if (usersResult.rows.length > 0) {
+                const notifications = usersResult.rows.map(user => [
+                    emergency.id,
+                    user.id,
+                    'new_emergency',
+                    `AI Detected ${incident.severity.toUpperCase()} ${emergencyType}`,
+                    `${description} | Location: ${incident.address || 'Kigali, Rwanda'}`,
+                ]);
+                const notifQuery = `
+                    INSERT INTO emergency_notifications
+                    (emergency_id, user_id, notification_type, title, message)
+                    VALUES ${notifications.map((_, i) =>
+                        `($${i * 5 + 1}, $${i * 5 + 2}, $${i * 5 + 3}, $${i * 5 + 4}, $${i * 5 + 5})`
+                    ).join(', ')}
+                `;
+                await db.query(notifQuery, notifications.flat());
+                console.log(`📬 Emergency notifications created for ${usersResult.rows.length} police/admin users`);
+            }
+        } catch (notifError) {
+            console.error('⚠️ Emergency notifications failed (non-critical):', notifError.message);
+        }
 
-        // Broadcast via WebSocket using SocketManager - NEW emergency
+        // ============================================================
+        // STEP 3: BROADCAST VIA WEBSOCKET (real-time update on dashboard)
+        // ============================================================
         socketManager.emitEmergencyNew({
             ...emergency,
             latitude: parseFloat(emergency.latitude),
@@ -523,71 +565,88 @@ async function createAutomaticEmergency(incident, aiResults, latitude, longitude
             source: 'ai'
         });
 
-        // 🔥🔥🔥 BROADCAST EMERGENCY ALARM to ALL police & admin for full alert experience
-        // This triggers same alarm as public-reported emergencies: siren, vibration, red screen
-        const alertDetectedAt = aiResults.detected_at || new Date().toISOString().replace('T', ' ').substring(0, 19);
-        socketManager.broadcastGeoFencedAlert({
-            alertId: emergency.id,
-            emergencyId: emergency.id,
-            incidentId: incident.id,
-            type: emergencyType,
-            emergency_type: emergencyType,
-            severity: 'critical',
-            priority: 1,
-            title: `🚨 AI DETECTED: ${emergencyType.toUpperCase()} at ${alertDetectedAt}`,
-            message: description,
-            description: description,
-            detected_at: alertDetectedAt,
-            detected_at_human: emergencyTime,
-            location: {
-                lat: parseFloat(latitude || incident.latitude || -1.9536),
-                lng: parseFloat(longitude || incident.longitude || 30.0606),
-                address: incident.address || 'Kigali, Rwanda'
-            },
-            latitude: parseFloat(latitude || incident.latitude || -1.9536),
-            longitude: parseFloat(longitude || incident.longitude || 30.0606),
-            location_name: incident.address || 'Kigali, Rwanda',
-            locationName: incident.address || 'Kigali, Rwanda',
-            automatic: true,
-            source: 'ai',
-            ai: {
-                confidence: aiResults.confidence,
-                vehiclesDetected: aiResults.vehicles_detected || 0,
-                detectionType: incident.type
-            },
-            aiConfidence: aiResults.confidence,
-            isEmergency: true,  // This triggers 'emergency:alarm' event
-            requiresFullScreen: true,
-            overrideDoNotDisturb: true,
-            soundType: 'siren',
-            vibrationPattern: 'emergency',
-            created_at: emergency.created_at,
-            timestamp: new Date().toISOString()
-        }, []);  // Empty array for additional target rooms - police & admin are default
-
-        console.log('🚨📡 AI EMERGENCY ALARM BROADCAST to ALL police & admin (siren/vibration/red screen)');
-
         // ============================================================
-        // TRIGGER GEO-FENCED ALERT TO NEARBY OFFICERS
+        // STEP 4: CRITICAL/HIGH → SEND ALERT TO NEARBY POLICE OFFICERS
+        // Same behavior as manual reports:
+        //   - ALL severities → geo-fenced alert to nearby officers + FCM push
+        //   - Critical/High → ALSO broadcast emergency alarm (siren, vibration, red screen) + SMS
+        //   - Medium/Low → standard alert notification (no siren)
         // ============================================================
+
+        // STEP 4a: Critical/High → Broadcast EMERGENCY ALARM (siren, vibration, red screen)
+        if (incident.severity === 'critical' || incident.severity === 'high') {
+            console.log(`🚨 ${incident.severity.toUpperCase()} severity — sending EMERGENCY ALARM to all officers`);
+
+            const alertDetectedAt = aiResults.detected_at || new Date().toISOString().replace('T', ' ').substring(0, 19);
+            socketManager.broadcastGeoFencedAlert({
+                alertId: emergency.id,
+                emergencyId: emergency.id,
+                incidentId: incident.id,
+                type: emergencyType,
+                emergency_type: emergencyType,
+                severity: incident.severity,
+                priority: incident.severity === 'critical' ? 1 : 2,
+                title: `🚨 AI DETECTED: ${emergencyType.toUpperCase()} at ${alertDetectedAt}`,
+                message: description,
+                description: description,
+                detected_at: alertDetectedAt,
+                detected_at_human: emergencyTime,
+                location: {
+                    lat: parseFloat(emergencyLat),
+                    lng: parseFloat(emergencyLon),
+                    address: incident.address || 'Kigali, Rwanda'
+                },
+                latitude: parseFloat(emergencyLat),
+                longitude: parseFloat(emergencyLon),
+                location_name: incident.address || 'Kigali, Rwanda',
+                locationName: incident.address || 'Kigali, Rwanda',
+                automatic: true,
+                source: 'ai',
+                ai: {
+                    confidence: aiResults.confidence,
+                    vehiclesDetected: aiResults.vehicles_detected || 0,
+                    detectionType: incident.type
+                },
+                aiConfidence: aiResults.confidence,
+                isEmergency: true,
+                requiresFullScreen: true,
+                overrideDoNotDisturb: true,
+                soundType: 'siren',
+                vibrationPattern: 'emergency',
+                created_at: emergency.created_at,
+                timestamp: new Date().toISOString()
+            }, []);
+
+            console.log('🚨📡 AI EMERGENCY ALARM BROADCAST to ALL police & admin (siren/vibration/red screen)');
+
+            // Send SMS alert for critical/high (same as manual)
+            try {
+                const smsResult = await smsService.sendEmergencySMS(emergency);
+                if (smsResult.success) {
+                    console.log(`📱 SMS alert sent to ${smsResult.successful} dispatch center(s)`);
+                }
+            } catch (smsError) {
+                console.error('⚠️ SMS alert failed (non-critical):', smsError.message);
+            }
+        } else {
+            console.log(`ℹ️ ${incident.severity.toUpperCase()} severity — standard alert (no siren)`);
+        }
+
+        // STEP 4b: ALL severities → Geo-fenced alert to nearby officers (same as manual)
         try {
             const geoFencingService = require('../services/geoFencingService');
-            
-            // Determine if this is an emergency-level alert
-            const isEmergencyAlert = incident.severity === 'critical' || 
-                                     incident.type === 'accident' ||
-                                     emergencyType === 'accident';
+            // ALL emergencies trigger alerts - same as manual: every report matters!
+            const isEmergencyAlert = true;
 
-            // Create targeted geo-fenced alert
             const alertResult = await geoFencingService.createTargetedAlert({
                 id: incident.id,
                 emergency_id: emergency.id,
                 type: incident.type || emergencyType,
                 severity: incident.severity,
-                latitude: latitude || incident.latitude || -1.9536,
-                longitude: longitude || incident.longitude || 30.0606,
+                latitude: emergencyLat,
+                longitude: emergencyLon,
                 address: incident.address || 'Kigali, Rwanda',
-                location_name: incident.location_name || 'Kigali',
+                location_name: incident.address || 'Kigali, Rwanda',
                 description: description,
                 media_urls: incident.video_url ? [incident.video_url] : [],
                 reported_by: null // AI-generated
@@ -596,14 +655,57 @@ async function createAutomaticEmergency(incident, aiResults, latitude, longitude
                 confidence: aiResults.confidence,
                 detectedObject: incident.type,
                 detectionMethod: 'AI Traffic Analysis',
-                vehicleCount: aiResults.vehicle_count,
-                stationaryCount: aiResults.stationary_count
+                vehicleCount: aiResults.vehicle_count || aiResults.vehicles_detected || 0,
+                stationaryCount: aiResults.stationary_count || 0
             });
 
             console.log(`🎯 GEO-FENCED ALERT sent to ${alertResult.targetedOfficers} officers in ${alertResult.district}`);
         } catch (geoError) {
-            console.error('⚠️ Geo-fencing alert failed (non-critical):', geoError && geoError.message ? geoError.message : geoError);
-            // Continue even if geo-fencing fails - the emergency was still created
+            console.error('⚠️ Geo-fencing alert failed (non-critical):', geoError?.message || geoError);
+        }
+
+        // STEP 4c: ALL severities → FCM push to all officers with tokens (same as manual)
+        try {
+            const officersResult = await db.query(`
+                SELECT u.id, u.full_name, op.fcm_token, op.emergency_alert_enabled
+                FROM users u
+                LEFT JOIN officer_profiles op ON u.id = op.user_id
+                WHERE u.role IN ('police', 'admin')
+                AND op.fcm_token IS NOT NULL
+                AND op.emergency_alert_enabled = true
+            `);
+            if (officersResult.rows.length > 0) {
+                const fcmResult = await fcmService.sendEmergencyAlarm(officersResult.rows, {
+                    alertId: emergency.id,
+                    emergencyId: emergency.id,
+                    title: `🚨 AI: ${incident.severity.toUpperCase()} ${emergencyType.toUpperCase()}`,
+                    message: `${description}\n📍 ${incident.address || 'Kigali, Rwanda'}`,
+                    type: emergencyType,
+                    location: {
+                        latitude: emergencyLat,
+                        longitude: emergencyLon,
+                        address: incident.address || 'Kigali, Rwanda'
+                    }
+                });
+                if (fcmResult.success) {
+                    console.log(`📱 FCM push sent: ${fcmResult.successCount} success`);
+                }
+            }
+        } catch (fcmError) {
+            console.error('⚠️ FCM push failed (non-critical):', fcmError.message);
+        }
+
+        // Update deduplication cache with emergency ID
+        try {
+            deduplicationService.registerNewIncident(
+                incident.id,
+                incidentMappedType || incident.type,
+                emergencyLat,
+                emergencyLon,
+                emergency.id
+            );
+        } catch (dedupError) {
+            console.error('⚠️ Dedup cache update failed (non-critical):', dedupError.message);
         }
 
         return emergency;
@@ -680,17 +782,15 @@ const testIncidentDetection = async (req, res) => {
         });
         console.log('📡 TEST INCIDENT broadcast via SocketManager');
 
-        // Step 4: Automatically create EMERGENCY for critical/high incidents
+        // Step 4: Automatically create EMERGENCY for ALL incidents (same as real AI flow)
         let emergency = null;
-        if (incident.severity === 'critical' || incident.severity === 'high') {
-            const aiResults = {
-                vehicle_count,
-                stationary_count,
-                avg_speed,
-                confidence
-            };
-            emergency = await createAutomaticEmergency(incident, aiResults, latitude, longitude);
-        }
+        const testAiResults = {
+            vehicle_count,
+            stationary_count,
+            avg_speed,
+            confidence
+        };
+        emergency = await createAutomaticEmergency(incident, testAiResults, latitude, longitude, type);
 
         // Return success response
         return res.status(200).json({

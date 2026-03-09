@@ -33,6 +33,9 @@ export const WebSocketProvider = ({ children }) => {
     const reconnectAttempts = useRef(0);
     const reconnectTimeout = useRef(null);
     const eventSubscribers = useRef(new Map());
+    const pendingJoins = useRef([]); // [{roomType, data}]
+    const joinedRooms = useRef(new Set());
+    const pendingEmits = useRef([]); // [{eventName, data}]
 
     // Subscribe to socket events
     const subscribe = useCallback((eventName, callback) => {
@@ -59,10 +62,27 @@ export const WebSocketProvider = ({ children }) => {
         }
     }, [socket, isConnected]);
 
+    // Enhanced emit: queue events when offline and flush on next connect
+    const enhancedEmit = useCallback((eventName, data) => {
+        if (socket && isConnected) {
+            socket.emit(eventName, data);
+        } else {
+            console.warn('⚠️ Socket offline — queuing emit:', eventName);
+            pendingEmits.current.push({ eventName, data });
+        }
+    }, [socket, isConnected]);
+
     // Join room helper
     const joinRoom = useCallback((roomType, data) => {
+        const key = `${roomType}:${data && data.userId ? data.userId : JSON.stringify(data || {})}`;
+        // Record requested join so we can re-join after reconnects
+        if (!joinedRooms.current.has(key)) joinedRooms.current.add(key);
+
         if (socket && isConnected) {
             socket.emit(`join:${roomType}`, data);
+        } else {
+            // Queue join for when socket connects
+            pendingJoins.current.push({ roomType, data, key });
         }
     }, [socket, isConnected]);
 
@@ -87,18 +107,33 @@ export const WebSocketProvider = ({ children }) => {
                 setConnectionStatus('connected');
                 reconnectAttempts.current = 0;
 
-                // Join role-based room based on user
+                // Join role-based room based on user (and flush any pending joins/emits)
                 const userStr = localStorage.getItem('user');
                 if (userStr) {
                     try {
                         const user = JSON.parse(userStr);
-                        newSocket.emit('join:role', {
-                            role: user.role || 'public',
-                            userId: user.id
-                        });
+                        const joinData = { role: user.role || 'public', userId: user.id };
+                        // Use joinRoom helper so it records the join key
+                        joinRoom('role', joinData);
                     } catch (e) {
                         console.error('Error parsing user for socket room:', e);
                     }
+                }
+
+                // Flush any queued joins
+                if (pendingJoins.current.length > 0) {
+                    pendingJoins.current.forEach(({ roomType, data }) => {
+                        try { newSocket.emit(`join:${roomType}`, data); } catch (e) { /* ignore */ }
+                    });
+                    pendingJoins.current = [];
+                }
+
+                // Flush any queued emits
+                if (pendingEmits.current.length > 0) {
+                    pendingEmits.current.forEach(({ eventName, data }) => {
+                        try { newSocket.emit(eventName, data); } catch (e) { /* ignore */ }
+                    });
+                    pendingEmits.current = [];
                 }
             });
 
@@ -155,6 +190,7 @@ export const WebSocketProvider = ({ children }) => {
                 'incident:new',
                 'incident:update',
                 'incident:alert',
+                'incident:resolved',
                 'emergency:new',
                 'emergency:update',
                 'emergency:alert',
@@ -162,7 +198,8 @@ export const WebSocketProvider = ({ children }) => {
                 'emergency:accepted',
                 'emergency:officer_response',
                 'emergency:status_change',
-                'emergency:status_changed', // Backend emits this from emitEmergencyUpdate
+                'emergency:status_changed',
+                'emergency:resolved',
                 'analysis:complete',
                 'notification:new',
                 'deployment:new',
@@ -172,6 +209,11 @@ export const WebSocketProvider = ({ children }) => {
                 'deployment:officer_status',
                 'officer:assigned',
                 'officer:location',
+                'officer:online',
+                'officer:offline',
+                'officer:duty_status',
+                'officer:status_changed',
+                'ai:incident_detected',
                 'pong',
             ];
             events.forEach(forwardEvent);
@@ -208,7 +250,7 @@ export const WebSocketProvider = ({ children }) => {
         isConnected,
         connectionStatus,
         subscribe,
-        emit,
+        emit: enhancedEmit,
         joinRoom,
     };
 

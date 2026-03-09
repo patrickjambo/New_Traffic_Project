@@ -187,6 +187,16 @@ app.get('/api/health', (req, res) => {
     });
 });
 
+// Detailed tracking health endpoint — shows WebSocket + DB sync state
+app.get('/api/health/tracking', async (req, res) => {
+    try {
+        const health = await socketManager.getTrackingHealth();
+        res.json({ success: true, ...health });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 // Webhook endpoint for AI service analysis callbacks
 app.post('/webhook/analysis-complete', async (req, res) => {
     try {

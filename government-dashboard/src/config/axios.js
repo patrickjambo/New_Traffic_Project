@@ -5,9 +5,14 @@ import axios from 'axios';
 axios.defaults.timeout = 10000; // 10 seconds
 axios.defaults.headers.common['Content-Type'] = 'application/json';
 
-// Add request interceptor for debugging
+// Add request interceptor to include auth token and debug logging
 axios.interceptors.request.use(
     (config) => {
+        // Attach auth token from localStorage
+        const token = localStorage.getItem('token');
+        if (token) {
+            config.headers.Authorization = `Bearer ${token}`;
+        }
         console.log(`📡 API Request: ${config.method?.toUpperCase()} ${config.url}`);
         return config;
     },

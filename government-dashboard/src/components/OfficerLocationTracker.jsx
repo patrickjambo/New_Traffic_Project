@@ -245,11 +245,52 @@ const OfficerLocationTracker = ({ officers = [], deployments = [], onOfficerClic
     const [locationLoading, setLocationLoading] = useState(false);
     const [incidents, setIncidents] = useState([]);
     const [emergencies, setEmergencies] = useState([]);
+    const [trackingHealth, setTrackingHealth] = useState(null);
 
     // District-specific configuration
     const isDistrictAdmin = user?.role === 'district_admin';
     const userDistrictId = user?.districtId;
     const userDistrictName = user?.districtName;
+
+    // Seed officerLocations from the officers prop (HTTP-fetched data) on initial load.
+    // This ensures officers with fresh DB data appear online before any WebSocket event arrives.
+    useEffect(() => {
+        if (!officers || officers.length === 0) return;
+        
+        setOfficerLocations(prev => {
+            const newMap = new Map(prev);
+            officers.forEach(officer => {
+                // Only seed if we don't already have real-time WebSocket data for this officer
+                if (newMap.has(officer.id)) return;
+                
+                const lat = officer.current_latitude;
+                const lng = officer.current_longitude;
+                const updatedAt = officer.location_updated_at;
+                
+                if (lat && lng && updatedAt) {
+                    const updatedTime = new Date(updatedAt).getTime();
+                    const twoMinutesAgo = Date.now() - 2 * 60 * 1000;
+                    const isFresh = updatedTime > twoMinutesAgo;
+                    
+                    // Also consider is_on_duty from DB
+                    const isOnDuty = officer.is_on_duty === true || officer.is_on_duty === 't';
+                    
+                    if (isFresh || isOnDuty) {
+                        newMap.set(officer.id, {
+                            officerId: officer.id,
+                            latitude: parseFloat(lat),
+                            longitude: parseFloat(lng),
+                            address: officer.current_address,
+                            receivedAt: new Date(updatedAt),
+                            isOnline: isFresh, // Only show green dot if location is actually fresh
+                            source: 'db_seed',
+                        });
+                    }
+                }
+            });
+            return newMap;
+        });
+    }, [officers]);
 
     // 4-hour expiry time in milliseconds
     const EXPIRY_TIME_MS = 4 * 60 * 60 * 1000; // 4 hours
@@ -302,6 +343,27 @@ const OfficerLocationTracker = ({ officers = [], deployments = [], onOfficerClic
         return () => clearInterval(refreshInterval);
     }, [fetchIncidentsAndEmergencies]);
 
+    // Fetch tracking health status every 30s for the monitoring indicator
+    useEffect(() => {
+        const fetchHealth = async () => {
+            try {
+                const token = localStorage.getItem('token');
+                const res = await fetch('http://localhost:3000/api/health/tracking', {
+                    headers: token ? { Authorization: `Bearer ${token}` } : {},
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    setTrackingHealth(data);
+                }
+            } catch (e) {
+                // Silently fail — health check is informational
+            }
+        };
+        fetchHealth();
+        const interval = setInterval(fetchHealth, 30000);
+        return () => clearInterval(interval);
+    }, []);
+
     // Default location (Kigali center) for fallback
     const defaultLocation = { latitude: -1.9441, longitude: 30.0619 };
 
@@ -311,9 +373,9 @@ const OfficerLocationTracker = ({ officers = [], deployments = [], onOfficerClic
         setLocationLoading(true);
         
         if (!navigator.geolocation) {
-            console.log('❌ Geolocation not supported, using default');
-            setAdminLocation(defaultLocation);
-            setAdminLocationEnabled(true);
+            console.log('❌ Geolocation not supported - distance display disabled');
+            setAdminLocation(null);
+            setAdminLocationEnabled(false);
             setLocationPermissionAsked(true);
             setLocationLoading(false);
             return;
@@ -347,15 +409,13 @@ const OfficerLocationTracker = ({ officers = [], deployments = [], onOfficerClic
             },
             (error) => {
                 console.log('❌ Location permission denied:', error.message);
-                console.log('📍 Using default location (Kigali center)');
-                // Use default location as fallback
-                const fallbackLoc = { latitude: -1.9441, longitude: 30.0619 };
-                console.log('📍 Setting admin location to:', fallbackLoc);
-                setAdminLocation(fallbackLoc);
-                setAdminLocationEnabled(true);
+                console.log('📍 Geolocation unavailable - distance display disabled');
+                // Do NOT use a fallback location - it would show wrong distances.
+                // Leave adminLocation as null so distance isn't displayed.
+                setAdminLocation(null);
+                setAdminLocationEnabled(false);
                 setLocationPermissionAsked(true);
                 setLocationLoading(false);
-                console.log('✅ Admin location should now be enabled');
             },
             { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
         );
@@ -544,24 +604,58 @@ const OfficerLocationTracker = ({ officers = [], deployments = [], onOfficerClic
         };
     }, [isConnected, subscribe, fetchIncidentsAndEmergencies]);
 
-    // Mark officers as offline if no update in 2 minutes
+    // Mark officers as offline if no update in 3 minutes
+    // But also re-seed from the officers prop (HTTP data) as a fallback
+    // This ensures the dashboard recovers even if WebSocket is flaky
     useEffect(() => {
         const interval = setInterval(() => {
-            const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000);
+            const threeMinutesAgo = new Date(Date.now() - 3 * 60 * 1000);
             
             setOfficerLocations(prev => {
                 const newMap = new Map(prev);
+                
+                // Mark stale WebSocket entries as offline
                 newMap.forEach((location, officerId) => {
-                    if (location.receivedAt < twoMinutesAgo) {
+                    if (location.receivedAt < threeMinutesAgo && location.isOnline) {
                         newMap.set(officerId, { ...location, isOnline: false });
                     }
                 });
+                
+                // Re-seed from officers prop (HTTP-fetched data) for any officer 
+                // that has fresh DB data but no WebSocket entry
+                if (officers && officers.length > 0) {
+                    officers.forEach(officer => {
+                        const existing = newMap.get(officer.id);
+                        const updatedAt = officer.location_updated_at;
+                        const lat = officer.current_latitude;
+                        const lng = officer.current_longitude;
+                        
+                        if (lat && lng && updatedAt) {
+                            const updatedTime = new Date(updatedAt).getTime();
+                            const isFresh = updatedTime > (Date.now() - 3 * 60 * 1000);
+                            
+                            // If DB says fresh but our map says offline or missing, restore it
+                            if (isFresh && (!existing || !existing.isOnline)) {
+                                newMap.set(officer.id, {
+                                    officerId: officer.id,
+                                    latitude: parseFloat(lat),
+                                    longitude: parseFloat(lng),
+                                    address: officer.current_address,
+                                    receivedAt: new Date(updatedAt),
+                                    isOnline: true,
+                                    source: 'db_resync',
+                                });
+                            }
+                        }
+                    });
+                }
+                
                 return newMap;
             });
         }, 30000); // Check every 30 seconds
 
         return () => clearInterval(interval);
-    }, []);
+    }, [officers]);
 
     // Sort officers: online first, then by login time (most recent first)
     const sortedOfficers = useMemo(() => {
@@ -705,6 +799,21 @@ const OfficerLocationTracker = ({ officers = [], deployments = [], onOfficerClic
                     <span className="text-xs text-gray-500">
                         Updated {formatTimeAgo(lastUpdate)}
                     </span>
+                )}
+                {/* Tracking health micro-indicator */}
+                {trackingHealth && (
+                    <div className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                        trackingHealth.healthy && trackingHealth.heartbeatActive 
+                            ? 'bg-green-50 text-green-600 border border-green-200' 
+                            : trackingHealth.mismatches?.length > 0 
+                                ? 'bg-yellow-50 text-yellow-600 border border-yellow-200'
+                                : 'bg-red-50 text-red-600 border border-red-200'
+                    }`} title={`WS: ${trackingHealth.websocket?.connectedOfficers || 0} officers, ${trackingHealth.websocket?.adminClients || 0} admins | DB: ${trackingHealth.database?.onlineOfficers || 0} online, ${trackingHealth.database?.freshOfficers || 0} fresh | Heartbeat: ${trackingHealth.heartbeatActive ? 'ON' : 'OFF'} | Mismatches: ${trackingHealth.mismatches?.length || 0}`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${
+                            trackingHealth.healthy && trackingHealth.heartbeatActive ? 'bg-green-500 animate-pulse' : 'bg-yellow-500'
+                        }`} />
+                        <span>Sync {trackingHealth.healthy ? '✓' : '!'}</span>
+                    </div>
                 )}
             </div>
 

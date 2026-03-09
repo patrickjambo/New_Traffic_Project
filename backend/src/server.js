@@ -291,7 +291,7 @@ app.use((err, req, res, next) => {
 // Start server
 const PORT = process.env.PORT || 3000;
 
-server.listen(PORT, () => {
+server.listen(PORT, async () => {
     console.log(`
 🚦 TrafficGuard AI Backend Server
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -301,6 +301,20 @@ server.listen(PORT, () => {
 🗄️  Database: ${process.env.DB_NAME || 'trafficguard'}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   `);
+
+    // ═══════════════════════════════════════════════════════════
+    // STARTUP SELF-TEST — catches broken code immediately
+    // DO NOT REMOVE — this prevents silent failures in AI
+    // emergency reports, officer alerts, and timezone handling
+    // ═══════════════════════════════════════════════════════════
+    try {
+        const { runStartupSelfTest } = require('./utils/startupSelfTest');
+        await runStartupSelfTest();
+    } catch (selfTestError) {
+        console.error('❌ STARTUP SELF-TEST COULD NOT RUN:', selfTestError.message);
+        console.error('⚠️  This means the self-test file is missing or broken!');
+        console.error('⚠️  File: backend/src/utils/startupSelfTest.js');
+    }
 });
 
 // Graceful shutdown

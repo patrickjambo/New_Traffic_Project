@@ -22,13 +22,14 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useWebSocket } from '../context/WebSocketContext';
-import { deploymentService, incidentService, emergencyService, adminService } from '../services/api';
+// Services now use proxy-based axios from config/axios
+import axios from '../config/axios';
 import OfficerLocationTracker from '../components/OfficerLocationTracker';
 import toast from 'react-hot-toast';
 
 const DeploymentsPage = () => {
     const { isAuthenticated } = useAuth();
-    const { subscribe, isConnected } = useWebSocket();
+    const { subscribe, isConnected, onReconnect } = useWebSocket();
     const [deployments, setDeployments] = useState([]);
     const [stats, setStats] = useState({
         total_deployments: 0,
@@ -75,8 +76,8 @@ const DeploymentsPage = () => {
     const fetchDeployments = async (silent = false) => {
         try {
             if (!silent) setLoading(true);
-            const response = await deploymentService.getAll();
-            setDeployments(response.data || []);
+            const response = await axios.get('/api/deployments');
+            setDeployments(response.data?.data || []);
             setLastUpdated(new Date());
         } catch (error) {
             console.error('Error fetching deployments:', error);
@@ -88,9 +89,9 @@ const DeploymentsPage = () => {
 
     const fetchStats = async () => {
         try {
-            const response = await deploymentService.getStats();
-            if (response.success) {
-                setStats(response.data);
+            const response = await axios.get('/api/deployments/stats');
+            if (response.data?.success) {
+                setStats(response.data.data);
             }
         } catch (error) {
             console.error('Error fetching stats:', error);
@@ -99,8 +100,8 @@ const DeploymentsPage = () => {
 
     const fetchAvailableOfficers = async () => {
         try {
-            const response = await deploymentService.getAvailableOfficers();
-            const officers = response.data || [];
+            const response = await axios.get('/api/deployments/officers/available');
+            const officers = response.data?.data || [];
             
             // Remove duplicates based on officer id
             const uniqueOfficersMap = new Map();
@@ -111,20 +112,18 @@ const DeploymentsPage = () => {
             });
             const uniqueOfficers = Array.from(uniqueOfficersMap.values());
             
-            // Sort officers: online/active first (by last_login time), then offline
+            // Sort officers: truly online first (is_online from DB + fresh location), then offline
             const sortedOfficers = uniqueOfficers.sort((a, b) => {
-                // Check if officer is online/on duty
-                const aIsOnline = a.is_on_duty || a.status === 'Available' || a.is_online;
-                const bIsOnline = b.is_on_duty || b.status === 'Available' || b.is_online;
+                // Real online status: use is_online from DB (set by WebSocket connect/disconnect)
+                const aIsOnline = a.is_online === true;
+                const bIsOnline = b.is_online === true;
                 
                 // Online officers come first
                 if (aIsOnline && !bIsOnline) return -1;
                 if (!aIsOnline && bIsOnline) return 1;
                 
-                // If both have same online status, sort by last_login (most recent first)
-                const aLogin = a.last_login ? new Date(a.last_login).getTime() : 0;
-                const bLogin = b.last_login ? new Date(b.last_login).getTime() : 0;
-                return bLogin - aLogin;
+                // Then sort by name
+                return (a.full_name || '').localeCompare(b.full_name || '');
             });
             
             setAvailableOfficers(sortedOfficers);
@@ -137,14 +136,16 @@ const DeploymentsPage = () => {
         try {
             console.log('Fetching active events...');
             const [incidentsRes, emergenciesRes] = await Promise.all([
-                incidentService.getAll({ status: 'reported' }),
-                emergencyService.getAll()
+                axios.get('/api/incidents', { params: { status: 'reported' } }),
+                axios.get('/api/emergency')
             ]);
 
-            console.log('Incidents Res:', incidentsRes);
-            console.log('Emergencies Res:', emergenciesRes);
+            const incidentsData = incidentsRes.data?.data || incidentsRes.data || [];
+            const emergenciesData = emergenciesRes.data?.data || emergenciesRes.data || [];
 
-            const activeIncidents = (incidentsRes.data || incidentsRes || []).map(i => ({
+            console.log('Incidents:', incidentsData.length, 'Emergencies:', emergenciesData.length);
+
+            const activeIncidents = (Array.isArray(incidentsData) ? incidentsData : []).map(i => ({
                 ...i,
                 eventType: 'incident',
                 label: i.incident_type || i.type,
@@ -152,7 +153,7 @@ const DeploymentsPage = () => {
                 severity: i.severity || 'medium'
             }));
 
-            const activeEmergencies = (emergenciesRes.data || emergenciesRes || [])
+            const activeEmergencies = (Array.isArray(emergenciesData) ? emergenciesData : [])
                 .filter(e => ['pending', 'active', 'dispatched'].includes(e.status))
                 .map(e => ({
                     ...e,
@@ -162,8 +163,13 @@ const DeploymentsPage = () => {
                     severity: e.severity || 'high'
                 }));
 
-            const events = [...activeIncidents, ...activeEmergencies];
-            console.log('Processed Events:', events);
+            // Sort newest first by created_at so recently reported events appear first
+            const events = [...activeIncidents, ...activeEmergencies].sort((a, b) => {
+                const dateA = new Date(a.created_at || a.createdAt || 0);
+                const dateB = new Date(b.created_at || b.createdAt || 0);
+                return dateB - dateA; // newest first
+            });
+            console.log('Processed Events:', events.length, 'items (newest first)');
             setActiveEvents(events);
         } catch (error) {
             console.error('Error fetching active events:', error);
@@ -175,17 +181,32 @@ const DeploymentsPage = () => {
             fetchDeployments();
             fetchStats();
             fetchAvailableOfficers(); // Load officers for tracker
+            fetchActiveEvents(); // Load active events immediately
             
             // Auto-refresh every 10 seconds
             const refreshInterval = setInterval(() => {
                 fetchDeployments(true);
                 fetchStats();
                 fetchAvailableOfficers(); // Refresh officer list to get fresh location_updated_at
+                fetchActiveEvents(); // Keep active events & live count fresh
             }, 10000);
 
             return () => clearInterval(refreshInterval);
         }
     }, [isAuthenticated]);
+
+    // Auto-recover all data when WebSocket reconnects or tab becomes visible
+    useEffect(() => {
+        if (!isAuthenticated || !onReconnect) return;
+        const unsubReconnect = onReconnect(() => {
+            console.log('🔄 Connection restored — refreshing all deployment data...');
+            fetchDeployments(true);
+            fetchStats();
+            fetchAvailableOfficers();
+            fetchActiveEvents();
+        });
+        return () => unsubReconnect();
+    }, [isAuthenticated, onReconnect]);
 
     // Real-time WebSocket subscriptions for deployment updates
     useEffect(() => {
@@ -257,7 +278,6 @@ const DeploymentsPage = () => {
 
         // Listen for real-time officer location updates
         const unsubLocation = subscribe('officer:location', (data) => {
-            console.log('📍 Real-time officer location:', data);
             setOfficerLocations(prev => {
                 const newMap = new Map(prev);
                 newMap.set(data.officerId, {
@@ -267,38 +287,115 @@ const DeploymentsPage = () => {
                 });
                 return newMap;
             });
+            // Also update officer online status in the available officers list
+            setAvailableOfficers(prev => prev.map(o => 
+                o.id === data.officerId ? { ...o, is_online: true } : o
+            ));
         });
 
-        // Listen for new incidents in real-time
+        // Listen for officer coming online
+        const unsubOfficerOnline = subscribe('officer:online', (data) => {
+            console.log('🟢 Officer came online:', data);
+            const officerId = data.officerId || data.userId;
+            if (officerId) {
+                setAvailableOfficers(prev => prev.map(o =>
+                    o.id === officerId ? { ...o, is_online: true } : o
+                ));
+                setOfficerLocations(prev => {
+                    const newMap = new Map(prev);
+                    const existing = newMap.get(officerId) || {};
+                    newMap.set(officerId, { ...existing, isOnline: true, receivedAt: new Date() });
+                    return newMap;
+                });
+            }
+        });
+
+        // Listen for officer going offline
+        const unsubOfficerOffline = subscribe('officer:offline', (data) => {
+            console.log('🔴 Officer went offline:', data);
+            const officerId = data.officerId || data.userId;
+            if (officerId) {
+                setAvailableOfficers(prev => prev.map(o =>
+                    o.id === officerId ? { ...o, is_online: false } : o
+                ));
+                setOfficerLocations(prev => {
+                    const newMap = new Map(prev);
+                    const existing = newMap.get(officerId) || {};
+                    newMap.set(officerId, { ...existing, isOnline: false });
+                    return newMap;
+                });
+            }
+        });
+
+        // Listen for new incidents in real-time — instant add + background refresh
         const unsubIncident = subscribe('incident:new', (data) => {
             console.log('🚨 New incident reported:', data);
             toast.error(`New Incident: ${data.incident_type || data.type}`, { icon: '🚨', duration: 5000 });
+            // Instantly prepend the new incident to the list (newest first)
+            const newEvent = {
+                ...data,
+                eventType: 'incident',
+                label: data.incident_type || data.type || 'Incident',
+                location: data.address || data.location,
+                severity: data.severity || 'medium',
+                created_at: data.createdAt || data.created_at || new Date().toISOString()
+            };
+            setActiveEvents(prev => [newEvent, ...prev]);
+            // Also do a full refresh to get complete data
             fetchActiveEvents();
         });
 
-        // Listen for incident updates
+        // Listen for incident updates — remove resolved/cancelled from active list
         const unsubIncidentUpdate = subscribe('incident:update', (data) => {
             console.log('🔄 Incident updated:', data);
+            if (['resolved', 'cancelled', 'closed'].includes(data.status)) {
+                // Instantly remove from active events
+                setActiveEvents(prev => prev.filter(e => !(e.eventType === 'incident' && e.id === data.id)));
+            }
             fetchActiveEvents();
         });
 
-        // Listen for new emergencies in real-time
+        // Listen for new emergencies in real-time — instant add + background refresh
         const unsubEmergency = subscribe('emergency:new', (data) => {
             console.log('🆘 New emergency reported:', data);
-            toast.error(`New Emergency: ${data.emergency_type || 'Alert'}`, { icon: '🆘', duration: 5000 });
+            toast.error(`🆘 New Emergency: ${data.type || data.emergency_type || 'Alert'}`, { icon: '🆘', duration: 5000 });
+            // Instantly prepend the new emergency to the list (newest first)
+            const newEvent = {
+                ...data,
+                eventType: 'emergency',
+                label: data.type || data.emergency_type || 'Emergency',
+                location: data.location_name || data.location?.name || 'Unknown',
+                severity: data.severity || 'high',
+                created_at: data.createdAt || data.created_at || new Date().toISOString()
+            };
+            setActiveEvents(prev => [newEvent, ...prev]);
+            // Also do a full refresh to get complete data
             fetchActiveEvents();
         });
 
-        // Listen for emergency updates
+        // Listen for emergency updates — remove resolved/cancelled from active list
         const unsubEmergencyUpdate = subscribe('emergency:update', (data) => {
             console.log('🔄 Emergency updated:', data);
+            if (['resolved', 'cancelled', 'closed', 'completed'].includes(data.status)) {
+                // Instantly remove from active events
+                setActiveEvents(prev => prev.filter(e => !(e.eventType === 'emergency' && (e.id === data.id || e.id === data.emergencyId))));
+            }
             fetchActiveEvents();
         });
 
-        // Listen for AI-detected incidents
+        // Listen for AI-detected incidents — instant add
         const unsubAIIncident = subscribe('ai:incident_detected', (data) => {
             console.log('🤖 AI detected incident:', data);
             toast(`AI Detected: ${data.type || 'Traffic Event'}`, { icon: '🤖', duration: 5000 });
+            const newEvent = {
+                ...data,
+                eventType: 'incident',
+                label: data.type || data.incident_type || 'AI Detected',
+                location: data.address || data.location || 'Unknown',
+                severity: data.severity || 'medium',
+                created_at: data.createdAt || new Date().toISOString()
+            };
+            setActiveEvents(prev => [newEvent, ...prev]);
             fetchActiveEvents();
         });
 
@@ -308,6 +405,8 @@ const DeploymentsPage = () => {
             unsubNew();
             unsubUpdate();
             unsubLocation();
+            unsubOfficerOnline();
+            unsubOfficerOffline();
             unsubIncident();
             unsubIncidentUpdate();
             unsubEmergency();
@@ -346,29 +445,60 @@ const DeploymentsPage = () => {
         e.preventDefault();
         try {
             setFormLoading(true);
+            
+            // Determine priority based on linked event
+            let priority = 'normal';
+            if (formData.linkedEvent) {
+                const severity = formData.linkedEvent.severity?.toLowerCase();
+                if (severity === 'critical') priority = 'critical';
+                else if (severity === 'high') priority = 'high';
+                else priority = 'normal';
+                
+                // Emergency events default to high priority
+                if (formData.linkedEvent.eventType === 'emergency' && priority === 'normal') {
+                    priority = 'high';
+                }
+            }
+
+            // Use linked event location if available
+            const eventLat = formData.linkedEvent?.latitude;
+            const eventLng = formData.linkedEvent?.longitude;
+
             const payload = {
                 unitName: formData.unitName,
                 location: {
                     address: formData.address,
-                    latitude: -1.9441, // Default Kigali coordinates
-                    longitude: 30.0619
+                    latitude: eventLat ? parseFloat(eventLat) : -1.9441,
+                    longitude: eventLng ? parseFloat(eventLng) : 30.0619
                 },
                 officers: formData.selectedOfficers,
-                status: 'Active'
-            };
-
-            await deploymentService.create({
-                ...payload,
+                status: 'Active',
+                priority: priority,
+                instructions: formData.linkedEvent 
+                    ? `Respond to ${formData.linkedEvent.eventType}: ${formData.linkedEvent.label} at ${formData.address}`
+                    : `Patrol deployment at ${formData.address}`,
                 incidentId: formData.linkedEvent?.eventType === 'incident' ? formData.linkedEvent.id : null,
                 emergencyId: formData.linkedEvent?.eventType === 'emergency' ? formData.linkedEvent.id : null
-            });
-            setIsModalOpen(false);
-            setFormData({ unitName: '', address: '', selectedOfficers: [], linkedEvent: null });
-            fetchDeployments();
-            fetchStats();
+            };
+
+            console.log('🚔 Creating deployment:', payload);
+            const response = await axios.post('/api/deployments', payload);
+            const result = response.data;
+
+            if (result.success) {
+                toast.success(`🚔 ${formData.selectedOfficers.length} officer(s) deployed!`, { duration: 5000 });
+                setIsModalOpen(false);
+                setFormData({ unitName: '', address: '', selectedOfficers: [], linkedEvent: null });
+                fetchDeployments();
+                fetchStats();
+                fetchAvailableOfficers();
+            } else {
+                toast.error(result.message || 'Failed to create deployment');
+            }
         } catch (error) {
             console.error('Error creating deployment:', error);
-            alert('Failed to create deployment. Please try again.');
+            const errorMsg = error.response?.data?.error || error.response?.data?.message || error.message;
+            toast.error(`Deployment failed: ${errorMsg}`);
         } finally {
             setFormLoading(false);
         }
@@ -377,8 +507,8 @@ const DeploymentsPage = () => {
     const handleUpdateStatus = async (id, newStatus) => {
         try {
             console.log('Updating deployment', id, 'to status:', newStatus);
-            const response = await deploymentService.updateStatus(id, newStatus);
-            console.log('Update response:', response);
+            const response = await axios.put(`/api/deployments/${id}/status`, { status: newStatus });
+            console.log('Update response:', response.data);
             toast.success(`Deployment status updated to ${newStatus}`);
             fetchDeployments();
             fetchStats();
@@ -393,7 +523,7 @@ const DeploymentsPage = () => {
             return;
         }
         try {
-            await deploymentService.delete(id);
+            await axios.delete(`/api/deployments/${id}`);
             toast.success('Deployment deleted successfully');
             fetchDeployments();
             fetchStats();
@@ -449,7 +579,7 @@ const DeploymentsPage = () => {
         e.preventDefault();
         try {
             setFormLoading(true);
-            await adminService.createOfficer(addOfficerFormData);
+            await axios.post('/api/admin/officers', addOfficerFormData);
             setIsAddOfficerModalOpen(false);
             setAddOfficerFormData({
                 email: '',
@@ -921,9 +1051,12 @@ const DeploymentsPage = () => {
                                     ) : (
                                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4 max-h-[350px] overflow-y-auto custom-scrollbar">
                                             {availableOfficers.map((officer) => {
-                                                // Check real-time WebSocket data first, then fall back to API data
+                                                // Check real-time WebSocket data first, then fall back to DB is_online field
                                                 const rtLocation = officerLocations.get(officer.id);
-                                                const isOnline = rtLocation?.isOnline === true || officer.is_on_duty || officer.status === 'Available' || officer.is_online;
+                                                // Real online = active WebSocket connection (rtLocation received recently) OR DB is_online flag
+                                                // Do NOT use is_on_duty as it stays true even when officer disconnects
+                                                const hasRecentRtData = rtLocation && rtLocation.receivedAt && (Date.now() - new Date(rtLocation.receivedAt).getTime() < 120000); // within 2 min
+                                                const isOnline = hasRecentRtData || officer.is_online === true;
                                                 return (
                                                 <div
                                                     key={officer.id}
@@ -1092,7 +1225,7 @@ const DeploymentsPage = () => {
                                 onClick={async () => {
                                     try {
                                         setFormLoading(true);
-                                        await deploymentService.updateOfficers(selectedDeployment.id, formData.selectedOfficers);
+                                        await axios.put(`/api/deployments/${selectedDeployment.id}/officers`, { officers: formData.selectedOfficers });
                                         setIsManageOfficersOpen(false);
                                         fetchDeployments();
                                         fetchStats();

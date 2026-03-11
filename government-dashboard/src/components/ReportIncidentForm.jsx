@@ -68,16 +68,11 @@ function ReportIncidentForm(props) {
     }
   }, [incidentType, isEmergency]);
 
-  // Auto-generate description based on selections
+  // Auto-generate description based on selections — works for both emergency and non-emergency
   useEffect(() => {
-    if (isEmergency && incidentType) {
+    if (incidentType) {
       // Get incident type label
       const incidentLabel = EMERGENCY_TYPE_OPTIONS.find(opt => opt.value === incidentType)?.label || incidentType;
-      
-      // Get selected services labels
-      const selectedServices = emergencyHelp.map(serviceValue => {
-        return EMERGENCY_SERVICES.find(s => s.value === serviceValue)?.label || serviceValue;
-      });
       
       // Build automatic description
       let autoDescription = '';
@@ -101,21 +96,26 @@ function ReportIncidentForm(props) {
       // Add severity
       const severityLabel = SEVERITY_OPTIONS.find(s => s.value === severity)?.label || severity;
       autoDescription += `. Severity: ${severityLabel.toUpperCase()}`;
-      
-      // Add casualties if any
-      if (deadCount > 0 || injuredCount > 0) {
-        autoDescription += '. ⚠️ CASUALTIES:';
-        if (deadCount > 0) {
-          autoDescription += ` ${deadCount} dead`;
+
+      if (isEmergency) {
+        // Add casualties if any
+        if (deadCount > 0 || injuredCount > 0) {
+          autoDescription += '. ⚠️ CASUALTIES:';
+          if (deadCount > 0) {
+            autoDescription += ` ${deadCount} dead`;
+          }
+          if (injuredCount > 0) {
+            autoDescription += deadCount > 0 ? `, ${injuredCount} injured` : ` ${injuredCount} injured`;
+          }
         }
-        if (injuredCount > 0) {
-          autoDescription += deadCount > 0 ? `, ${injuredCount} injured` : ` ${injuredCount} injured`;
+        
+        // Add services needed
+        const selectedServices = emergencyHelp.map(serviceValue => {
+          return EMERGENCY_SERVICES.find(s => s.value === serviceValue)?.label || serviceValue;
+        });
+        if (selectedServices.length > 0) {
+          autoDescription += `. Emergency services needed: ${selectedServices.join(', ')}`;
         }
-      }
-      
-      // Add services needed
-      if (selectedServices.length > 0) {
-        autoDescription += `. Emergency services needed: ${selectedServices.join(', ')}`;
       }
       
       // Add urgency based on severity
@@ -252,43 +252,45 @@ function ReportIncidentForm(props) {
       return;
     }
 
+    // Phone number is required
+    if (!contactPhone || contactPhone.trim().length < 10) {
+      toast.error('Please enter a valid phone number (at least 10 digits)');
+      return;
+    }
+
     setSubmitting(true);
     setError('');
     setSuccess(false);
-
-    // Generate current timestamp
-    const reportedAt = new Date().toISOString();
 
     try {
       let result;
       if (isEmergency) {
         result = await reportEmergency({
           emergencyType: incidentType,
-          severity: severity, // User-selected severity
+          severity: severity,
           locationName: location,
           locationDescription: location,
           latitude,
           longitude,
           description,
-          casualtiesCount: deadCount + injuredCount, // Total casualties
+          casualtiesCount: deadCount + injuredCount,
           injuredCount: injuredCount,
           deadCount: deadCount,
           vehiclesInvolved: 0,
           servicesNeeded: emergencyHelp,
-          contactPhone: contactPhone || '0780000000',
+          contactPhone: contactPhone,
           contactName: 'Public User',
-          reportedAt: reportedAt
         });
       } else {
         result = await reportIncident({
           type: incidentType,
-          severity: severity, // User-selected severity
+          severity: severity,
           latitude,
           longitude,
           address: location,
           description,
-          isAnonymous: true,
-          reportedAt: reportedAt
+          contactPhone: contactPhone,
+          isAnonymous: false,
         });
       }
 
@@ -527,7 +529,7 @@ function ReportIncidentForm(props) {
           </div>
         </div>
         <div>
-          <label className="block text-sm font-semibold text-cyan-300 mb-2">Your Phone (optional)</label>
+          <label className="block text-sm font-semibold text-cyan-300 mb-2">Your Phone *</label>
           <div className="relative">
             <FaPhone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-cyan-400" />
             <input
@@ -536,9 +538,10 @@ function ReportIncidentForm(props) {
               placeholder="07X XXX XXXX"
               value={contactPhone}
               onChange={e => setContactPhone(e.target.value)}
+              required
             />
           </div>
-          <p className="text-xs text-slate-400 mt-1">For follow-up if needed</p>
+          <p className="text-xs text-slate-400 mt-1">Required for follow-up</p>
         </div>
       </div>
 
@@ -553,7 +556,7 @@ function ReportIncidentForm(props) {
       {/* Submit Button */}
       <button
         type="submit"
-        disabled={submitting || !incidentType || !location}
+        disabled={submitting || !incidentType || !location || !contactPhone || contactPhone.trim().length < 10}
         className={`w-full flex items-center justify-center gap-2 py-3.5 rounded-xl font-bold text-base shadow-lg transition-all duration-200 ${
           isEmergency
             ? 'bg-gradient-to-r from-cyan-500 to-teal-500 hover:from-cyan-400 hover:to-teal-400 text-slate-900 shadow-cyan-500/30 disabled:from-slate-600 disabled:to-slate-700 disabled:text-slate-400'

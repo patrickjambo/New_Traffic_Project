@@ -745,21 +745,25 @@ class WebSocketService {
         onDeploymentAssigned!(assignmentData);
       }
       
-      // [NOTIFY] TRIGGER DEPLOYMENT ALERT with sound & vibration
+      // [NOTIFY] TRIGGER DEPLOYMENT ALERT with sound & MANDATORY vibration
       final deploymentAlertService = DeploymentAlertService();
       final priority = assignmentData['priority']?.toString().toLowerCase() ?? 'normal';
+      final deployType = assignmentData['type']?.toString().toLowerCase() ?? '';
+      final hasEmergencyId = assignmentData['emergency_id'] != null || assignmentData['emergencyId'] != null;
       
-      if (priority == 'high' || priority == 'urgent' || priority == 'critical') {
-        // High priority - stronger alert
+      // Use URGENT alert for: high/urgent/critical priority, emergency-type, or has emergencyId
+      if (priority == 'high' || priority == 'urgent' || priority == 'critical' || 
+          deployType == 'emergency' || hasEmergencyId) {
+        // Emergency/high priority - maximum alert with continuous vibration
         deploymentAlertService.showUrgentDeploymentAlert(assignmentData);
       } else {
-        // Normal priority
+        // Normal priority - still strong vibration
         deploymentAlertService.showDeploymentAlert(assignmentData);
       }
       
       // Also add to notification list
       _notificationService.addNotification(
-        title: '� NEW DEPLOYMENT',
+        title: '🚨 NEW DEPLOYMENT',
         message: 'You have been assigned to ${assignmentData['unit_name'] ?? assignmentData['unitName'] ?? 'a deployment'} at ${assignmentData['address'] ?? 'assigned location'}. Tap to acknowledge.',
         type: 'deployment',
       );

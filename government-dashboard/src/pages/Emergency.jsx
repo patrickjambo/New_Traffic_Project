@@ -6,12 +6,11 @@ import { useWebSocket } from '../context/WebSocketContext';
 import { Users, Phone, MapPin, Clock, AlertTriangle, CheckCircle, XCircle, Download, Activity, Shield, Navigation, Send, X, UserCheck, Radio } from 'lucide-react';
 import axios from '../config/axios';
 import toast from 'react-hot-toast';
-import { deploymentService } from '../services/api';
 
 const Emergency = () => {
   const { isAuthenticated } = useAuth();
   const { emergencies, loading, fetchEmergencies, downloadEmergencyReport, isConnected } = useData();
-  const { subscribe } = useWebSocket();
+  const { subscribe, onReconnect } = useWebSocket();
   
   // Deploy Officer Modal State
   const [showDeployModal, setShowDeployModal] = useState(false);
@@ -197,11 +196,34 @@ const Emergency = () => {
     };
   }, [isConnected, subscribe]);
 
+  // Auto-recover data when WebSocket reconnects or tab becomes visible
+  useEffect(() => {
+    if (!onReconnect) return;
+    const unsub = onReconnect(() => {
+      console.log('🔄 Emergency page: connection restored — refreshing emergencies...');
+      fetchEmergencies();
+      if (showDeployModal) {
+        fetchAvailableOfficers();
+      }
+    });
+    return () => unsub();
+  }, [onReconnect, showDeployModal]);
+
   const fetchAvailableOfficers = async () => {
     try {
       setLoadingOfficers(true);
-      const response = await deploymentService.getAvailableOfficers();
-      setAvailableOfficers(response.data || []);
+      const response = await axios.get('/api/deployments/officers/available');
+      const officers = response.data?.data || [];
+      // Deduplicate by officer ID (safety net)
+      const uniqueOfficers = [];
+      const seenIds = new Set();
+      for (const officer of officers) {
+        if (!seenIds.has(officer.id)) {
+          seenIds.add(officer.id);
+          uniqueOfficers.push(officer);
+        }
+      }
+      setAvailableOfficers(uniqueOfficers);
     } catch (error) {
       console.error('Error fetching officers:', error);
       toast.error('Failed to load available officers');
@@ -255,13 +277,15 @@ const Emergency = () => {
         officers: selectedOfficers,
         status: 'Active',
         emergencyId: selectedEmergency.id,
-        priority: selectedEmergency.severity === 'critical' ? 'urgent' : 'high',
+        priority: selectedEmergency.severity === 'critical' ? 'critical' : 'high',
         instructions: deploymentInstructions
       };
 
-      const response = await deploymentService.create(deploymentData);
+      console.log('🚔 Deploying officers with data:', deploymentData);
+      const response = await axios.post('/api/deployments', deploymentData);
+      const result = response.data;
       
-      if (response.success) {
+      if (result.success) {
         toast.success(`🚔 ${selectedOfficers.length} officer(s) deployed! Waiting for acknowledgment...`, {
           duration: 5000
         });
@@ -272,22 +296,30 @@ const Emergency = () => {
           const officer = availableOfficers.find(o => o.id === id);
           newDeployed[id] = {
             name: officer?.full_name || 'Officer',
-            deploymentId: response.data?.id,
+            deploymentId: result.data?.id,
             acknowledged: false,
             status: 'assigned'
           };
         });
         setDeployedOfficers(prev => ({ ...prev, ...newDeployed }));
         
-        // Update emergency status to dispatched
-        await axios.put(`/api/emergency/${selectedEmergency.id}/status`, { status: 'active' });
+        // Update emergency status to active/dispatched
+        try {
+          await axios.put(`/api/emergency/${selectedEmergency.id}/status`, { status: 'active' });
+        } catch (statusError) {
+          console.warn('Could not update emergency status:', statusError);
+        }
         
         setShowDeployModal(false);
         setSelectedOfficers([]);
+        fetchEmergencies();
+      } else {
+        toast.error(result.message || 'Failed to deploy officers');
       }
     } catch (error) {
       console.error('Error deploying officers:', error);
-      toast.error('Failed to deploy officers');
+      const errorMsg = error.response?.data?.error || error.response?.data?.message || error.message || 'Failed to deploy officers';
+      toast.error(`Deployment failed: ${errorMsg}`);
     } finally {
       setDeploying(false);
     }
@@ -340,12 +372,7 @@ const Emergency = () => {
                 <div className="flex flex-col md:flex-row justify-between gap-6">
                   <div className="flex-1">
                     <div className="flex items-center gap-3 mb-3">
-                      <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider border ${
-                        emergency.severity === 'critical' ? 'bg-red-500/20 text-red-400 border-red-500/30' :
-                        emergency.severity === 'high' ? 'bg-orange-500/20 text-orange-400 border-orange-500/30' :
-                        emergency.severity === 'medium' ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' :
-                        'bg-green-500/20 text-green-400 border-green-500/30'
-                      }`}>
+                      <span className="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider border bg-cyan-900/60 text-cyan-200 border-cyan-700/40">
                         {emergency.severity} Priority
                       </span>
                       {emergency.source === 'ai' ? (
@@ -545,11 +572,7 @@ const Emergency = () => {
             {/* Emergency Details */}
             <div className="p-4 border-b border-slate-700 bg-slate-800/50 flex-shrink-0">
               <div className="flex items-center gap-4 text-sm">
-                <span className={`px-3 py-1 rounded-full font-bold uppercase ${
-                  selectedEmergency.severity === 'critical' ? 'bg-red-500 text-white' :
-                  selectedEmergency.severity === 'high' ? 'bg-orange-500 text-white' :
-                  'bg-yellow-500 text-white'
-                }`}>
+                <span className="px-3 py-1 rounded-full font-bold uppercase bg-cyan-900/60 text-cyan-200 border border-cyan-700/40">
                   {selectedEmergency.severity}
                 </span>
                 <div className="flex items-center gap-2 text-gray-300">

@@ -323,23 +323,11 @@ const Reports = () => {
                   <div>
                     <div className="flex items-center gap-2 flex-wrap">
                       <h4 className="font-medium text-white">{report.title}</h4>
-                      <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${
-                        report.source === 'AI' 
-                          ? 'bg-cyan-500/20 text-cyan-300' 
-                          : 'bg-cyan-700/20 text-cyan-400'
-                        }`}>
+                      <span className="text-[10px] px-2 py-0.5 rounded font-bold bg-cyan-900/60 text-cyan-200 border border-cyan-700/40">
                         {report.source}
                       </span>
                       {report.severity && (
-                        <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${
-                          report.severity === 'critical' 
-                            ? 'bg-cyan-400 text-gray-900' 
-                            : report.severity === 'high' 
-                              ? 'bg-cyan-500 text-white' 
-                              : report.severity === 'medium'
-                                ? 'bg-cyan-600 text-white'
-                                : 'bg-cyan-700 text-white'
-                          }`}>
+                        <span className="text-[10px] px-2 py-0.5 rounded font-bold bg-cyan-900/60 text-cyan-200 border border-cyan-700/40">
                           {report.severity.toUpperCase()}
                         </span>
                       )}

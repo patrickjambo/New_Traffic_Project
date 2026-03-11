@@ -4,11 +4,11 @@ import toast from 'react-hot-toast';
 
 const WebSocketContext = createContext(null);
 
-// Configuration - Optimized for real-time performance
+// Configuration - Hardened for persistent real-time connections
 const SOCKET_URL = 'http://localhost:3000';
-const RECONNECT_ATTEMPTS = 20;
+const RECONNECT_ATTEMPTS = Infinity; // NEVER give up reconnecting
 const INITIAL_RECONNECT_DELAY = 500; // Faster initial reconnect
-const MAX_RECONNECT_DELAY = 10000; // Cap at 10 seconds
+const MAX_RECONNECT_DELAY = 5000; // Cap at 5 seconds (more aggressive)
 
 export const useWebSocket = () => {
     const context = useContext(WebSocketContext);
@@ -21,6 +21,7 @@ export const useWebSocket = () => {
             subscribe: () => () => { },
             emit: () => { },
             joinRoom: () => { },
+            onReconnect: () => () => { },
         };
     }
     return context;
@@ -36,6 +37,8 @@ export const WebSocketProvider = ({ children }) => {
     const pendingJoins = useRef([]); // [{roomType, data}]
     const joinedRooms = useRef(new Set());
     const pendingEmits = useRef([]); // [{eventName, data}]
+    const socketRef = useRef(null); // Keep socket ref for visibility change handler
+    const reconnectCallbacks = useRef(new Set()); // Callbacks to run after reconnect
 
     // Subscribe to socket events
     const subscribe = useCallback((eventName, callback) => {
@@ -72,6 +75,12 @@ export const WebSocketProvider = ({ children }) => {
         }
     }, [socket, isConnected]);
 
+    // Register a callback to run when connection is restored (for data refresh)
+    const onReconnect = useCallback((callback) => {
+        reconnectCallbacks.current.add(callback);
+        return () => reconnectCallbacks.current.delete(callback);
+    }, []);
+
     // Join room helper
     const joinRoom = useCallback((roomType, data) => {
         const key = `${roomType}:${data && data.userId ? data.userId : JSON.stringify(data || {})}`;
@@ -97,14 +106,19 @@ export const WebSocketProvider = ({ children }) => {
                 reconnectionAttempts: RECONNECT_ATTEMPTS,
                 reconnectionDelay: INITIAL_RECONNECT_DELAY,
                 reconnectionDelayMax: MAX_RECONNECT_DELAY,
-                timeout: 10000,
+                timeout: 15000,
+                forceNew: false,
+                autoConnect: true,
             });
+
+            socketRef.current = newSocket;
 
             // Connection established
             newSocket.on('connect', () => {
                 console.log('✅ WebSocket connected:', newSocket.id);
                 setIsConnected(true);
                 setConnectionStatus('connected');
+                const wasReconnect = reconnectAttempts.current > 0;
                 reconnectAttempts.current = 0;
 
                 // Join role-based room based on user (and flush any pending joins/emits)
@@ -135,6 +149,32 @@ export const WebSocketProvider = ({ children }) => {
                     });
                     pendingEmits.current = [];
                 }
+
+                // Re-join all previously joined rooms (survives reconnects)
+                joinedRooms.current.forEach(key => {
+                    const [roomType, ...rest] = key.split(':');
+                    try {
+                        const data = JSON.parse(rest.join(':'));
+                        newSocket.emit(`join:${roomType}`, data);
+                    } catch (e) {
+                        // Fallback: re-join role room from user
+                        const userStr2 = localStorage.getItem('user');
+                        if (userStr2) {
+                            try {
+                                const u = JSON.parse(userStr2);
+                                newSocket.emit(`join:${roomType}`, { role: u.role, userId: u.id });
+                            } catch (e2) { /* ignore */ }
+                        }
+                    }
+                });
+
+                // Fire reconnect callbacks so pages can refresh their data
+                if (wasReconnect) {
+                    console.log('🔄 Reconnected — firing data refresh callbacks...');
+                    reconnectCallbacks.current.forEach(cb => {
+                        try { cb(); } catch (e) { console.error('Reconnect callback error:', e); }
+                    });
+                }
             });
 
             // Connection lost
@@ -143,9 +183,14 @@ export const WebSocketProvider = ({ children }) => {
                 setIsConnected(false);
                 setConnectionStatus('disconnected');
 
-                if (reason === 'io server disconnect') {
-                    // Server initiated disconnect, try to reconnect
-                    newSocket.connect();
+                // Always try to reconnect regardless of reason
+                if (reason === 'io server disconnect' || reason === 'transport close' || reason === 'transport error') {
+                    setTimeout(() => {
+                        if (!newSocket.connected) {
+                            console.log('🔄 Force reconnecting after disconnect...');
+                            newSocket.connect();
+                        }
+                    }, 1000);
                 }
             });
 
@@ -168,11 +213,17 @@ export const WebSocketProvider = ({ children }) => {
                 toast.success('Connection restored', { icon: '🔌' });
             });
 
-            // Reconnection failed
+            // Reconnection failed — but we NEVER give up, schedule manual retry
             newSocket.on('reconnect_failed', () => {
-                console.log('❌ Reconnection failed');
+                console.log('⚠️ Auto-reconnection exhausted, scheduling manual retry...');
                 setConnectionStatus('error');
-                toast.error('Unable to connect to server. Please refresh the page.');
+                // Manual retry after 5 seconds — never stop trying
+                setTimeout(() => {
+                    if (!newSocket.connected) {
+                        console.log('🔄 Manual reconnection attempt...');
+                        newSocket.connect();
+                    }
+                }, 5000);
             });
 
             // Setup event forwarding to subscribers
@@ -194,6 +245,7 @@ export const WebSocketProvider = ({ children }) => {
                 'emergency:new',
                 'emergency:update',
                 'emergency:alert',
+                'emergency:alarm',
                 'emergency:nearby',
                 'emergency:accepted',
                 'emergency:officer_response',
@@ -214,6 +266,7 @@ export const WebSocketProvider = ({ children }) => {
                 'officer:duty_status',
                 'officer:status_changed',
                 'ai:incident_detected',
+                'incident_update',
                 'pong',
             ];
             events.forEach(forwardEvent);
@@ -223,26 +276,77 @@ export const WebSocketProvider = ({ children }) => {
 
         connectSocket();
 
+        // Reconnect when tab becomes visible again (user switches back to dashboard)
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'visible') {
+                const currentSocket = socketRef.current;
+                if (currentSocket && !currentSocket.connected) {
+                    console.log('👁️ Tab visible again — reconnecting WebSocket...');
+                    currentSocket.connect();
+                } else if (currentSocket && currentSocket.connected) {
+                    // Tab is back — fire reconnect callbacks to refresh stale data
+                    console.log('👁️ Tab visible — refreshing data...');
+                    reconnectCallbacks.current.forEach(cb => {
+                        try { cb(); } catch (e) { console.error('Visibility refresh error:', e); }
+                    });
+                }
+            }
+        };
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+
+        // Also reconnect on network recovery
+        const handleOnline = () => {
+            const currentSocket = socketRef.current;
+            if (currentSocket && !currentSocket.connected) {
+                console.log('🌐 Network online — reconnecting WebSocket...');
+                setTimeout(() => currentSocket.connect(), 1000);
+            }
+        };
+        window.addEventListener('online', handleOnline);
+
         // Cleanup on unmount
         return () => {
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+            window.removeEventListener('online', handleOnline);
             if (reconnectTimeout.current) {
                 clearTimeout(reconnectTimeout.current);
             }
-            if (socket) {
-                socket.disconnect();
+            if (socketRef.current) {
+                socketRef.current.disconnect();
             }
         };
     }, []);
 
-    // Heartbeat to keep connection alive
+    // Heartbeat to keep connection alive + detect zombie connections
     useEffect(() => {
         if (!socket || !isConnected) return;
 
-        const heartbeat = setInterval(() => {
-            socket.emit('ping');
-        }, 15000); // Every 15 seconds (faster heartbeat to improve liveness)
+        let missedPongs = 0;
+        const pongHandler = () => { missedPongs = 0; };
+        socket.on('pong', pongHandler);
 
-        return () => clearInterval(heartbeat);
+        const heartbeat = setInterval(() => {
+            if (socket.connected) {
+                socket.emit('ping');
+                missedPongs++;
+                // If we missed 3 consecutive pongs, connection is probably dead
+                if (missedPongs >= 3) {
+                    console.log('💀 Missed 3 pongs — forcing reconnect...');
+                    missedPongs = 0;
+                    socket.disconnect();
+                    setTimeout(() => socket.connect(), 500);
+                }
+            } else {
+                // Socket thinks it's connected but isn't — force reconnect
+                console.log('⚠️ Heartbeat: socket not connected, forcing reconnect...');
+                socket.connect();
+            }
+        }, 10000); // Every 10 seconds (tighter heartbeat)
+
+        return () => {
+            clearInterval(heartbeat);
+            socket.off('pong', pongHandler);
+        };
     }, [socket, isConnected]);
 
     const value = {
@@ -252,6 +356,7 @@ export const WebSocketProvider = ({ children }) => {
         subscribe,
         emit: enhancedEmit,
         joinRoom,
+        onReconnect,
     };
 
     return (

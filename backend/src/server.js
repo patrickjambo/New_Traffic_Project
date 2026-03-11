@@ -32,13 +32,19 @@ const deploymentRoutes = require('./routes/deployments');
 const app = express();
 const server = http.createServer(app);
 
-// Initialize Socket.IO
+// Initialize Socket.IO — hardened for persistent real-time connections
 const io = new Server(server, {
     cors: {
         origin: '*', // Allow all origins for development
         methods: ['GET', 'POST'],
         credentials: true,
     },
+    pingTimeout: 30000,      // Wait 30s for pong before considering disconnected
+    pingInterval: 15000,     // Send ping every 15s to keep connection alive
+    upgradeTimeout: 15000,   // Allow 15s for transport upgrade
+    maxHttpBufferSize: 1e6,  // 1MB max message size
+    connectTimeout: 20000,   // 20s to establish connection
+    allowEIO3: true,         // Allow older Engine.IO clients
 });
 
 // Initialize Socket Manager with io instance

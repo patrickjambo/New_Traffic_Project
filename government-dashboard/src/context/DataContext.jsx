@@ -548,7 +548,14 @@ export const DataProvider = ({ children }) => {
     setIncidents(prev => [optimisticIncident, ...prev]);
 
     try {
-      const response = await axios.post('/api/incidents/report', incidentData);
+      // Send as FormData because the backend route uses multer (multipart/form-data)
+      const formData = new FormData();
+      Object.entries(incidentData).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) {
+          formData.append(key, value);
+        }
+      });
+      const response = await axios.post('/api/incidents/report', formData);
       if (response.data.success) {
         const newIncident = response.data.data;
         // Replace optimistic entry with real data

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -63,16 +64,17 @@ class DeploymentAlertService {
         .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
     
     if (androidPlugin != null) {
-      // Deployment channel - high priority but different from emergency
+      // Deployment channel - MAX priority, strong vibration, always alerting
       await androidPlugin.createNotificationChannel(
         const AndroidNotificationChannel(
           'deployment_channel',
           'Deployment Alerts',
-          description: 'Notifications for new deployment assignments',
-          importance: Importance.high,
+          description: 'Critical deployment assignments requiring immediate response',
+          importance: Importance.max,
           playSound: true,
           enableVibration: true,
           enableLights: true,
+          showBadge: true,
           ledColor: Color(0xFF2196F3), // Blue for deployments
         ),
       );
@@ -90,13 +92,13 @@ class DeploymentAlertService {
     }
   }
 
-  /// Show deployment alert with notification, sound, and vibration
-  /// URGENT deployments trigger the mandatory emergency alarm
+  /// Show deployment alert with notification, sound, and MANDATORY vibration
+  /// ALL deployment alerts trigger strong vibration - officer safety is paramount
   Future<void> showDeploymentAlert(Map<String, dynamic> deployment) async {
     print('📋 DEPLOYMENT ALERT: ${deployment['unit_name'] ?? deployment['unitName']}');
 
     final priority = deployment['priority']?.toString().toLowerCase() ?? 'normal';
-    final isUrgent = priority == 'high' || priority == 'urgent' || priority == 'emergency';
+    final isUrgent = priority == 'high' || priority == 'urgent' || priority == 'emergency' || priority == 'critical';
 
     // For URGENT deployments, use critical alarm (mandatory sound)
     if (isUrgent) {
@@ -123,14 +125,14 @@ class DeploymentAlertService {
       return;
     }
 
-    // Standard priority - use normal deployment alert
-    // 1. Show notification
+    // Standard priority - still use STRONG alert (all deployments are important)
+    // 1. Show notification with full-screen intent
     await _showDeploymentNotification(deployment);
 
-    // 2. Play deployment sound (different from emergency)
+    // 2. Play deployment sound
     await _playDeploymentSound();
 
-    // 3. Vibrate (shorter pattern than emergency)
+    // 3. MANDATORY strong vibration - repeats to ensure officer notices
     await _vibrateForDeployment();
 
     // 4. Trigger callback for UI
@@ -144,34 +146,34 @@ class DeploymentAlertService {
     final priority = deployment['priority'] ?? 'normal';
     final instructions = deployment['instructions'] ?? '';
 
-    // Priority-based styling
-    final isHighPriority = priority == 'high' || priority == 'urgent';
-
+    // ALL deployments are high importance - officer must see them
     final androidDetails = AndroidNotificationDetails(
       'deployment_channel',
       'Deployment Alerts',
       channelDescription: 'Deployment assignment notifications',
-      importance: isHighPriority ? Importance.max : Importance.high,
-      priority: isHighPriority ? Priority.max : Priority.high,
-      fullScreenIntent: isHighPriority, // Full screen for high priority
-      category: AndroidNotificationCategory.message,
+      importance: Importance.max,
+      priority: Priority.max,
+      fullScreenIntent: true, // Always show full-screen for deployments
+      category: AndroidNotificationCategory.alarm,
       visibility: NotificationVisibility.public,
       ongoing: true, // Keep until acknowledged
       autoCancel: false,
       playSound: true,
       enableVibration: true,
+      // Strong vibration pattern for the notification itself
+      vibrationPattern: Int64List.fromList([0, 500, 200, 500, 200, 500, 200, 500]),
       colorized: true,
       color: const Color(0xFF2196F3), // Blue
       ledColor: const Color(0xFF2196F3),
       ledOnMs: 300,
       ledOffMs: 300,
-      ticker: 'New Deployment Assignment',
+      ticker: 'DEPLOYMENT: Respond Immediately',
       styleInformation: BigTextStyleInformation(
         '$address\n\n$instructions',
         htmlFormatBigText: false,
-        contentTitle: '📋 $unitName',
+        contentTitle: '� DEPLOYMENT: $unitName',
         htmlFormatContentTitle: false,
-        summaryText: priority.toUpperCase(),
+        summaryText: 'RESPOND NOW - ${priority.toUpperCase()}',
         htmlFormatSummaryText: false,
       ),
     );
@@ -197,15 +199,15 @@ class DeploymentAlertService {
     );
   }
 
-  /// Play deployment sound (3 short beeps - different from emergency siren)
+  /// Play deployment sound (5 urgent beeps)
   Future<void> _playDeploymentSound() async {
     try {
       _isAlertPlaying = true;
       
-      // Play 3 short alert sounds
-      for (int i = 0; i < 3 && _isAlertPlaying; i++) {
+      // Play 5 alert sounds for all deployments
+      for (int i = 0; i < 5 && _isAlertPlaying; i++) {
         await SystemSound.play(SystemSoundType.alert);
-        await Future.delayed(const Duration(milliseconds: 400));
+        await Future.delayed(const Duration(milliseconds: 350));
       }
       
       print('🔔 Deployment sound played');
@@ -214,20 +216,46 @@ class DeploymentAlertService {
     }
   }
 
-  /// Vibrate for deployment (shorter pattern than emergency)
+  /// MANDATORY strong vibration for ALL deployments
+  /// Repeats 3 times with max intensity to ensure officer notices
   Future<void> _vibrateForDeployment() async {
     try {
       final hasVibrator = await Vibration.hasVibrator() ?? false;
       if (!hasVibrator) return;
 
-      // Pattern: 3 short vibrations
-      // [wait, vibrate, wait, vibrate, wait, vibrate]
+      // Cancel any existing vibration timer
+      _vibrationTimer?.cancel();
+
+      // Initial strong vibration burst
+      // Pattern: [wait, vibrate, pause, vibrate, pause, vibrate, pause, vibrate]
+      // Long, strong vibrations that are impossible to miss
       await Vibration.vibrate(
-        pattern: [0, 200, 100, 200, 100, 200],
-        intensities: [0, 200, 0, 200, 0, 200],
+        pattern: [0, 500, 150, 500, 150, 500, 150, 500],
+        intensities: [0, 255, 0, 255, 0, 255, 0, 255],
       );
 
-      print('📳 Deployment vibration completed');
+      // Repeat vibration 2 more times after short delays
+      int repeatCount = 0;
+      _vibrationTimer = Timer.periodic(const Duration(seconds: 3), (timer) async {
+        repeatCount++;
+        if (repeatCount >= 2 || !_isAlertPlaying) {
+          timer.cancel();
+          _vibrationTimer = null;
+          return;
+        }
+        
+        try {
+          await Vibration.vibrate(
+            pattern: [0, 500, 150, 500, 150, 500, 150, 500],
+            intensities: [0, 255, 0, 255, 0, 255, 0, 255],
+          );
+        } catch (e) {
+          timer.cancel();
+          _vibrationTimer = null;
+        }
+      });
+
+      print('📳 Deployment STRONG vibration triggered (repeating 3x)');
     } catch (e) {
       print('Error with vibration: $e');
     }
@@ -248,31 +276,65 @@ class DeploymentAlertService {
     print('✅ Deployment notification cancelled');
   }
 
-  /// Show high-priority deployment with stronger alert
+  /// Show high-priority deployment with MAXIMUM alert
+  /// Continuous vibration until officer acknowledges
   Future<void> showUrgentDeploymentAlert(Map<String, dynamic> deployment) async {
     print('🚨 URGENT DEPLOYMENT ALERT!');
 
-    // 1. Show notification
+    // 1. Show notification with urgent styling
     await _showDeploymentNotification({
       ...deployment,
       'priority': 'urgent',
     });
 
-    // 2. Play more urgent sound (5 beeps)
+    // 2. Play urgent sound (7 rapid beeps)
     _isAlertPlaying = true;
-    for (int i = 0; i < 5 && _isAlertPlaying; i++) {
+    for (int i = 0; i < 7 && _isAlertPlaying; i++) {
       await SystemSound.play(SystemSoundType.alert);
-      await Future.delayed(const Duration(milliseconds: 300));
+      await Future.delayed(const Duration(milliseconds: 250));
     }
 
-    // 3. Stronger vibration pattern
+    // 3. CONTINUOUS strong vibration - repeats every 3s until stopped
+    _vibrationTimer?.cancel();
+    
+    // Initial burst
     final hasVibrator = await Vibration.hasVibrator() ?? false;
     if (hasVibrator) {
       await Vibration.vibrate(
-        pattern: [0, 300, 100, 300, 100, 300, 100, 300],
-        intensities: [0, 255, 0, 255, 0, 255, 0, 255],
+        pattern: [0, 800, 100, 800, 100, 400, 100, 400, 100, 800],
+        intensities: [0, 255, 0, 255, 0, 255, 0, 255, 0, 255],
       );
     }
+
+    // Continuous vibration timer - keeps vibrating until acknowledged
+    _vibrationTimer = Timer.periodic(const Duration(seconds: 4), (timer) async {
+      if (!_isAlertPlaying) {
+        timer.cancel();
+        _vibrationTimer = null;
+        return;
+      }
+      
+      try {
+        final hasVib = await Vibration.hasVibrator() ?? false;
+        if (hasVib) {
+          await Vibration.vibrate(
+            pattern: [0, 800, 100, 800, 100, 400, 100, 400, 100, 800],
+            intensities: [0, 255, 0, 255, 0, 255, 0, 255, 0, 255],
+          );
+        }
+      } catch (e) {
+        timer.cancel();
+        _vibrationTimer = null;
+      }
+    });
+
+    // Auto-stop after 30 seconds to prevent infinite vibration
+    Future.delayed(const Duration(seconds: 30), () {
+      if (_isAlertPlaying) {
+        stopDeploymentAlert();
+        print('⏱️ Auto-stopped urgent deployment vibration after 30s');
+      }
+    });
 
     // 4. Trigger callback
     onDeploymentReceived?.call(deployment);

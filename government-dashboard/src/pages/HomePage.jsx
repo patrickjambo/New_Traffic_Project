@@ -1,12 +1,70 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { MapPin, Navigation, AlertTriangle, Clock, Menu, X, Activity, Camera, Phone, ChevronRight, ArrowRight, CheckCircle, Eye, Bell, Car, Flame, ChevronLeft, Globe, Shield, Send, Users, Radio, AlertCircle, MapPinned, FileWarning, Truck, Siren, TrendingUp, Mail } from 'lucide-react';
+import { MapPin, Navigation, AlertTriangle, Clock, Menu, X, Activity, Camera, Phone, ChevronRight, ArrowRight, CheckCircle, Eye, Bell, Car, Flame, ChevronLeft, Globe, Shield, Send, Users, Radio, AlertCircle, MapPinned, FileWarning, Truck, Siren, TrendingUp, Mail, WifiOff } from 'lucide-react';
 import { useData } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
 import ReportIncidentForm from '../components/ReportIncidentForm';
 import Modal from '../components/Modal';
 import DailyIncidentsModal from '../components/DailyIncidentsModal';
 import RoutePlannerMap from '../components/RoutePlannerMap';
+
+// ============================================
+// Animated Counter Component - smooth number transitions
+// ============================================
+const AnimatedCounter = ({ value, duration = 800, suffix = '' }) => {
+  const [displayValue, setDisplayValue] = useState(value);
+  const [isAnimating, setIsAnimating] = useState(false);
+  const prevValueRef = useRef(value);
+  const animationRef = useRef(null);
+
+  useEffect(() => {
+    const prevValue = prevValueRef.current;
+    const numValue = typeof value === 'number' ? value : parseInt(value) || 0;
+    const numPrev = typeof prevValue === 'number' ? prevValue : parseInt(prevValue) || 0;
+
+    if (numValue !== numPrev) {
+      setIsAnimating(true);
+      const startTime = performance.now();
+      const diff = numValue - numPrev;
+
+      const animate = (currentTime) => {
+        const elapsed = currentTime - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        // Ease-out cubic for smooth deceleration
+        const eased = 1 - Math.pow(1 - progress, 3);
+        const current = Math.round(numPrev + diff * eased);
+        setDisplayValue(current);
+
+        if (progress < 1) {
+          animationRef.current = requestAnimationFrame(animate);
+        } else {
+          setDisplayValue(numValue);
+          setTimeout(() => setIsAnimating(false), 300);
+        }
+      };
+
+      if (animationRef.current) cancelAnimationFrame(animationRef.current);
+      animationRef.current = requestAnimationFrame(animate);
+      prevValueRef.current = value;
+    }
+
+    return () => {
+      if (animationRef.current) cancelAnimationFrame(animationRef.current);
+    };
+  }, [value, duration]);
+
+  // Initial render
+  useEffect(() => {
+    setDisplayValue(typeof value === 'number' ? value : parseInt(value) || 0);
+    prevValueRef.current = value;
+  }, []);
+
+  return (
+    <span className={isAnimating ? 'animate-pulse-once' : ''}>
+      {displayValue}{suffix}
+    </span>
+  );
+};
 
 const heroSlides = [
   { id: 1, image: '/assets/hero/traffic-police-kigali.png', title: 'Report Traffic Congestion', subtitle: 'Help fellow citizens avoid delays by reporting traffic jams', gradient: 'from-blue-600', accent: 'blue' },
@@ -18,7 +76,7 @@ const heroSlides = [
 ];
 
 const HomePage = () => {
-  const { incidents, emergencies, loading, statistics, wsConnected } = useData();
+  const { incidents, emergencies, loading, statistics, isConnected } = useData();
   const { user } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showIncidentModal, setShowIncidentModal] = useState(false);
@@ -28,6 +86,9 @@ const HomePage = () => {
   const [currentSlide, setCurrentSlide] = useState(0);
   const [selectedIncident, setSelectedIncident] = useState(null);
   const [waveOffset, setWaveOffset] = useState(0);
+  const [lastUpdated, setLastUpdated] = useState(new Date());
+  const [statsFlash, setStatsFlash] = useState(false);
+  const prevStatsRef = useRef(null);
 
   // Combine incidents and emergencies into a unified feed, sorted by newest first
   const allReports = React.useMemo(() => {
@@ -145,11 +206,169 @@ const HomePage = () => {
     };
   }, [allReports]);
 
+  // Track when stats change - update timestamp and flash effect
+  useEffect(() => {
+    if (prevStatsRef.current) {
+      const prev = prevStatsRef.current;
+      const changed = prev.totalReports !== realTimeStats.totalReports ||
+        prev.activeNow !== realTimeStats.activeNow ||
+        prev.resolvedToday !== realTimeStats.resolvedToday ||
+        prev.avgResponseTime !== realTimeStats.avgResponseTime;
+      if (changed) {
+        setLastUpdated(new Date());
+        setStatsFlash(true);
+        setTimeout(() => setStatsFlash(false), 1500);
+      }
+    }
+    prevStatsRef.current = { ...realTimeStats };
+  }, [realTimeStats]);
+
+  // Format "last updated" as relative time, re-renders every 10s
+  const [, forceUpdate] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => forceUpdate(v => v + 1), 10000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const formatLastUpdated = useCallback(() => {
+    const seconds = Math.floor((Date.now() - lastUpdated.getTime()) / 1000);
+    if (seconds < 5) return 'Just now';
+    if (seconds < 60) return `${seconds}s ago`;
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+    return `${Math.floor(seconds / 3600)}h ago`;
+  }, [lastUpdated]);
+
+  // ============================================
+  // Keyboard Navigation
+  // ============================================
+  const pageSections = ['section-hero', 'section-stats', 'section-dashboard', 'about', 'section-footer'];
+  const activeSectionRef = useRef(0);
+
+  // Track which section is currently in view via scroll position
+  useEffect(() => {
+    const handleScroll = () => {
+      const scrollY = window.scrollY + window.innerHeight / 3;
+      for (let i = pageSections.length - 1; i >= 0; i--) {
+        const el = document.getElementById(pageSections[i]);
+        if (el && el.offsetTop <= scrollY) {
+          activeSectionRef.current = i;
+          break;
+        }
+      }
+    };
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  useEffect(() => {
+    const anyModalOpen = showIncidentModal || showEmergencyModal || showDailyIncidentsModal || !!selectedIncident;
+
+    const handleKeyDown = (e) => {
+      // Skip if user is typing in an input/textarea/select
+      const tag = e.target.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target.isContentEditable) return;
+
+      // Escape - close any open modal
+      if (e.key === 'Escape') {
+        if (showIncidentModal) { setShowIncidentModal(false); return; }
+        if (showEmergencyModal) { setShowEmergencyModal(false); return; }
+        if (showDailyIncidentsModal) { setShowDailyIncidentsModal(false); return; }
+        if (selectedIncident) { setSelectedIncident(null); return; }
+        if (showRoutePlanner) { setShowRoutePlanner(false); return; }
+        return;
+      }
+
+      // Don't handle arrow/shortcut keys when a modal is open
+      if (anyModalOpen) return;
+
+      // Arrow Up / Arrow Down - scroll between sections
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        const idx = activeSectionRef.current;
+        const nextIdx = e.key === 'ArrowDown'
+          ? Math.min(idx + 1, pageSections.length - 1)
+          : Math.max(idx - 1, 0);
+        
+        if (nextIdx !== idx) {
+          activeSectionRef.current = nextIdx;
+          const el = document.getElementById(pageSections[nextIdx]);
+          if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }
+        }
+        return;
+      }
+
+      // Arrow Left / Arrow Right - navigate hero slides
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        setCurrentSlide(p => (p - 1 + heroSlides.length) % heroSlides.length);
+        return;
+      }
+      if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        setCurrentSlide(p => (p + 1) % heroSlides.length);
+        return;
+      }
+
+      // Keyboard shortcuts (letter keys)
+      const key = e.key.toLowerCase();
+
+      // R - Report Incident
+      if (key === 'r' && !e.ctrlKey && !e.metaKey) {
+        setShowIncidentModal(true);
+        return;
+      }
+
+      // E - Emergency Report
+      if (key === 'e' && !e.ctrlKey && !e.metaKey) {
+        setShowEmergencyModal(true);
+        return;
+      }
+
+      // L - Live Incidents
+      if (key === 'l' && !e.ctrlKey && !e.metaKey) {
+        setShowDailyIncidentsModal(true);
+        return;
+      }
+
+      // P - Toggle Route Planner
+      if (key === 'p' && !e.ctrlKey && !e.metaKey) {
+        setShowRoutePlanner(prev => {
+          if (!prev) {
+            setTimeout(() => document.getElementById('route-planner')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
+          }
+          return !prev;
+        });
+        return;
+      }
+
+      // Home - scroll to top
+      if (e.key === 'Home') {
+        e.preventDefault();
+        activeSectionRef.current = 0;
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        return;
+      }
+
+      // End - scroll to bottom
+      if (e.key === 'End') {
+        e.preventDefault();
+        activeSectionRef.current = pageSections.length - 1;
+        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showIncidentModal, showEmergencyModal, showDailyIncidentsModal, selectedIncident, showRoutePlanner]);
+
   const stats = [
-    { label: 'Total Reports', value: realTimeStats.totalReports, icon: FileWarning },
-    { label: 'Active Now', value: realTimeStats.activeNow, icon: Radio },
-    { label: 'Avg Response', value: realTimeStats.avgResponseTime + 'min', icon: Clock },
-    { label: 'Resolved Today', value: realTimeStats.resolvedToday, icon: CheckCircle }
+    { label: 'Total Reports', value: realTimeStats.totalReports, rawValue: realTimeStats.totalReports, icon: FileWarning },
+    { label: 'Active Now', value: realTimeStats.activeNow, rawValue: realTimeStats.activeNow, icon: Radio },
+    { label: 'Avg Response', value: realTimeStats.avgResponseTime + 'min', rawValue: realTimeStats.avgResponseTime, suffix: 'min', icon: Clock },
+    { label: 'Resolved Today', value: realTimeStats.resolvedToday, rawValue: realTimeStats.resolvedToday, icon: CheckCircle }
   ];
 
   return (
@@ -283,13 +502,15 @@ const HomePage = () => {
       </header>
 
       {/* HERO - FULL WIDTH BACKGROUND IMAGE */}
-      <section className="relative h-[85vh] min-h-[600px] max-h-[850px] overflow-hidden">
+      <section id="section-hero" className="relative h-[85vh] min-h-[600px] max-h-[850px] overflow-hidden">
         {/* Background Images - Fullscreen Rotating */}
         {heroSlides.map((slide, i) => (
           <div key={slide.id} className={"absolute inset-0 transition-all duration-1000 ease-in-out " + (i === currentSlide ? 'opacity-100 scale-100' : 'opacity-0 scale-105')}>
             <img src={slide.image} alt={slide.title} className="w-full h-full object-cover" />
-            <div className="absolute inset-0 bg-gradient-to-r from-slate-900/90 via-slate-900/70 to-transparent" />
-            <div className="absolute inset-0 bg-gradient-to-t from-slate-900/80 via-transparent to-slate-900/40" />
+            {/* Light gradient on text side only - keeps photos visible */}
+            <div className="absolute inset-0 bg-gradient-to-r from-slate-900/70 via-slate-900/30 to-transparent" />
+            {/* Subtle top/bottom vignette for text contrast */}
+            <div className="absolute inset-0 bg-gradient-to-t from-slate-900/60 via-transparent to-slate-900/20" />
           </div>
         ))}
         
@@ -301,8 +522,8 @@ const HomePage = () => {
                 <span className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span></span>
                 <span className="text-white text-sm font-medium">Live Traffic Monitoring</span>
               </div>
-              <h1 className="text-4xl sm:text-5xl lg:text-6xl font-black text-white leading-tight mb-4 drop-shadow-2xl">{heroSlides[currentSlide].title}</h1>
-              <p className="text-lg sm:text-xl text-white/90 max-w-xl mb-8">{heroSlides[currentSlide].subtitle}</p>
+              <h1 className="text-4xl sm:text-5xl lg:text-6xl font-black text-white leading-tight mb-4 drop-shadow-2xl" style={{ textShadow: '0 2px 12px rgba(0,0,0,0.6), 0 1px 3px rgba(0,0,0,0.4)' }}>{heroSlides[currentSlide].title}</h1>
+              <p className="text-lg sm:text-xl text-white/95 max-w-xl mb-8" style={{ textShadow: '0 1px 8px rgba(0,0,0,0.5)' }}>{heroSlides[currentSlide].subtitle}</p>
               
               {/* Action Buttons - Plan Route & Emergency Report */}
               <div className="flex flex-col sm:flex-row gap-4">
@@ -326,7 +547,7 @@ const HomePage = () => {
       </section>
 
       {/* STATS - Compact Section */}
-      <section className="relative bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 py-6 overflow-hidden">
+      <section id="section-stats" className="relative bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 py-6 overflow-hidden">
         {/* Subtle Background Effects */}
         <div className="absolute inset-0">
           <div className="absolute inset-0 opacity-5" style={{backgroundImage: 'radial-gradient(circle at 2px 2px, cyan 1px, transparent 0)', backgroundSize: '40px 40px'}} />
@@ -340,6 +561,23 @@ const HomePage = () => {
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-cyan-500/10 backdrop-blur border border-cyan-400/30">
               <Activity className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
               <span className="text-cyan-300 text-xs font-semibold">Real-Time Statistics</span>
+              <span className="mx-1 w-px h-3 bg-cyan-400/30" />
+              {isConnected ? (
+                <span className="flex items-center gap-1 text-emerald-400 text-[10px] font-medium">
+                  <span className="relative flex h-1.5 w-1.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                  </span>
+                  LIVE
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 text-amber-400 text-[10px] font-medium">
+                  <WifiOff className="w-2.5 h-2.5" />
+                  Polling
+                </span>
+              )}
+              <span className="mx-1 w-px h-3 bg-cyan-400/30" />
+              <span className="text-slate-500 text-[10px]">Updated {formatLastUpdated()}</span>
             </div>
           </div>
 
@@ -348,20 +586,30 @@ const HomePage = () => {
             {stats.map((stat, i) => (
               <div 
                 key={i} 
-                className="group relative p-4 rounded-2xl bg-slate-800/50 backdrop-blur-xl border border-cyan-400/20 hover:border-cyan-400/40 transition-all duration-300 overflow-hidden"
+                className={`group relative p-4 rounded-2xl bg-slate-800/50 backdrop-blur-xl border transition-all duration-500 overflow-hidden ${
+                  statsFlash 
+                    ? 'border-cyan-400/60 shadow-lg shadow-cyan-500/20' 
+                    : 'border-cyan-400/20 hover:border-cyan-400/40'
+                }`}
               >
                 {/* Hover Effect */}
                 <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/0 to-cyan-500/0 group-hover:from-cyan-500/5 group-hover:to-cyan-500/10 transition-all duration-300" />
+                {/* Flash overlay on update */}
+                <div className={`absolute inset-0 bg-cyan-400/10 transition-opacity duration-700 ${statsFlash ? 'opacity-100' : 'opacity-0'}`} />
                 {/* Content */}
                 <div className="relative z-10 flex items-center gap-3">
                   {/* Icon */}
-                  <div className="p-2.5 rounded-xl bg-gradient-to-br from-cyan-500 to-teal-400 shadow-lg">
+                  <div className={`p-2.5 rounded-xl bg-gradient-to-br from-cyan-500 to-teal-400 shadow-lg transition-transform duration-500 ${statsFlash ? 'scale-110' : ''}`}>
                     <stat.icon className="w-5 h-5 text-cyan-50" />
                   </div>
                   {/* Text */}
                   <div>
                     <p className="text-2xl font-black text-white">
-                      {stat.value}
+                      {typeof stat.rawValue === 'number' ? (
+                        <AnimatedCounter value={stat.rawValue} suffix={stat.suffix || ''} />
+                      ) : (
+                        stat.value
+                      )}
                     </p>
                     <p className="text-xs font-medium text-slate-400">
                       {stat.label}
@@ -375,7 +623,7 @@ const HomePage = () => {
       </section>
 
       {/* TRAFFIC INCIDENTS DASHBOARD - Advanced Dynamic Section */}
-      <section className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 py-16 relative overflow-hidden">
+      <section id="section-dashboard" className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 py-16 relative overflow-hidden">
         {/* Animated Background Effects */}
         <div className="absolute inset-0">
           {/* Grid Pattern */}
@@ -673,11 +921,11 @@ const HomePage = () => {
                 <div className="space-y-2">
                   <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-700/30 border border-slate-600/30">
                     <span className="text-sm text-slate-400">Avg Response</span>
-                    <span className="text-lg font-bold text-emerald-400">{realTimeStats.avgResponseTime} min</span>
+                    <span className="text-lg font-bold text-emerald-400"><AnimatedCounter value={realTimeStats.avgResponseTime} /> min</span>
                   </div>
                   <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-700/30 border border-slate-600/30">
                     <span className="text-sm text-slate-400">Resolved Today</span>
-                    <span className="text-lg font-bold text-cyan-400">{realTimeStats.resolvedToday}</span>
+                    <span className="text-lg font-bold text-cyan-400"><AnimatedCounter value={realTimeStats.resolvedToday} /></span>
                   </div>
                 </div>
               </div>
@@ -731,15 +979,15 @@ const HomePage = () => {
           
           <div className="mt-12 grid md:grid-cols-4 gap-4 text-center">
             <div className="bg-white/5 backdrop-blur-md rounded-xl p-4 border border-cyan-400/20">
-              <p className="text-3xl font-black text-cyan-400">{realTimeStats.totalReports}</p>
+              <p className="text-3xl font-black text-cyan-400"><AnimatedCounter value={realTimeStats.totalReports} /></p>
               <p className="text-slate-400 text-sm">Total Reports</p>
             </div>
             <div className="bg-white/5 backdrop-blur-md rounded-xl p-4 border border-cyan-400/20">
-              <p className="text-3xl font-black text-cyan-400">{realTimeStats.activeNow}</p>
+              <p className="text-3xl font-black text-cyan-400"><AnimatedCounter value={realTimeStats.activeNow} /></p>
               <p className="text-slate-400 text-sm">Active Now</p>
             </div>
             <div className="bg-white/5 backdrop-blur-md rounded-xl p-4 border border-cyan-400/20">
-              <p className="text-3xl font-black text-cyan-400">{realTimeStats.avgResponseTime}min</p>
+              <p className="text-3xl font-black text-cyan-400"><AnimatedCounter value={realTimeStats.avgResponseTime} suffix="min" /></p>
               <p className="text-slate-400 text-sm">Avg Response Time</p>
             </div>
             <div className="bg-white/5 backdrop-blur-md rounded-xl p-4 border border-cyan-400/20">
@@ -751,7 +999,7 @@ const HomePage = () => {
       </section>
 
       {/* FOOTER - Advanced Professional Design */}
-      <footer className="relative bg-gradient-to-b from-slate-900 via-slate-950 to-black text-white overflow-hidden">
+      <footer id="section-footer" className="relative bg-gradient-to-b from-slate-900 via-slate-950 to-black text-white overflow-hidden">
         {/* Animated Background Elements */}
         <div className="absolute inset-0 pointer-events-none">
           <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-cyan-500/50 to-transparent" />
@@ -903,12 +1151,31 @@ const HomePage = () => {
                 </div>
               </div>
             </div>
+            {/* Keyboard Shortcuts Hint */}
+            <div className="hidden lg:flex items-center justify-center gap-4 mt-4 pt-4 border-t border-slate-800/30">
+              <span className="text-slate-600 text-[10px] uppercase tracking-widest font-semibold">Keyboard</span>
+              <div className="flex items-center gap-3 text-[10px] text-slate-600">
+                <span className="flex items-center gap-1"><kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400 font-mono">↑</kbd><kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400 font-mono">↓</kbd> Scroll sections</span>
+                <span className="text-slate-700">•</span>
+                <span className="flex items-center gap-1"><kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400 font-mono">←</kbd><kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400 font-mono">→</kbd> Hero slides</span>
+                <span className="text-slate-700">•</span>
+                <span className="flex items-center gap-1"><kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400 font-mono">R</kbd> Report</span>
+                <span className="text-slate-700">•</span>
+                <span className="flex items-center gap-1"><kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400 font-mono">E</kbd> Emergency</span>
+                <span className="text-slate-700">•</span>
+                <span className="flex items-center gap-1"><kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400 font-mono">L</kbd> Live</span>
+                <span className="text-slate-700">•</span>
+                <span className="flex items-center gap-1"><kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400 font-mono">P</kbd> Route</span>
+                <span className="text-slate-700">•</span>
+                <span className="flex items-center gap-1"><kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400 font-mono">Esc</kbd> Close</span>
+              </div>
+            </div>
           </div>
         </div>
       </footer>
 
       {/* MODALS */}
-      <Modal isOpen={showIncidentModal} onClose={() => setShowIncidentModal(false)} title="Report Traffic Incident"><ReportIncidentForm onSuccess={() => setShowIncidentModal(false)} /></Modal>
+      <Modal isOpen={showIncidentModal} onClose={() => setShowIncidentModal(false)} title="Report Traffic Incident" theme="dark"><ReportIncidentForm onSuccess={() => setShowIncidentModal(false)} /></Modal>
       <Modal isOpen={showEmergencyModal} onClose={() => setShowEmergencyModal(false)} title="🚨 Emergency Report" size="lg" theme="dark"><ReportIncidentForm isEmergency onSuccess={() => setShowEmergencyModal(false)} /></Modal>
 
       <Modal isOpen={!!selectedIncident} onClose={() => setSelectedIncident(null)} title="Incident Details">

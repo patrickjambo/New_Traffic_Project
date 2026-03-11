@@ -113,8 +113,8 @@ class SessionManager:
     # Minimum consecutive clips to confirm an incident
     MIN_CLIPS_TO_CONFIRM = {
         'fire': 2,       # Fire: 2 clips (~6 sec) for confirmation
-        'accident': 2,   # Accident: 2 clips
-        'traffic_jam': 2, # Traffic jam: 2 clips
+        'accident': 3,   # Accident: 3 clips (~9 sec) — raised from 2 to reduce false positives
+        'traffic_jam': 3, # Traffic jam: 3 clips (~9 sec) — raised from 2
         'congestion': 3,  # Congestion: 3 clips (higher bar, less urgent)
     }
     

@@ -10,6 +10,19 @@ class SocketManager {
     }
 
     /**
+     * Safe emit — wraps io.emit in try-catch so a failed emit never crashes the server
+     */
+    _safeEmit(target, event, data) {
+        try {
+            if (target && typeof target.emit === 'function') {
+                target.emit(event, data);
+            }
+        } catch (error) {
+            console.error(`❌ Safe emit failed [${event}]:`, error.message);
+        }
+    }
+
+    /**
      * Initialize the socket manager with Socket.IO instance
      */
     initialize(io) {
@@ -453,20 +466,42 @@ class SocketManager {
     // ============================================
 
     /**
-     * Periodic self-healing loop that runs every 60 seconds to:
+     * Periodic self-healing loop that runs every 30 seconds to:
      * 1. Sync DB is_online status with actually-connected WebSocket clients
      * 2. Mark stale officers (no location update in 5 min) as offline in DB
      * 3. Re-broadcast online officers to admin so dashboard never goes stale
+     * 4. Clean up zombie connections in the connectedClients map
      * 
      * This prevents the "silent death" scenario where officers appear offline
      * even though they are connected, or appear online when they've been gone for days.
      */
     _startSelfHealingLoop() {
-        // Run every 60 seconds
+        // Run every 30 seconds (more aggressive healing)
         this._healingInterval = setInterval(async () => {
             try {
                 const { query: dbQuery } = require('../config/database');
                 
+                // 0. Clean up zombie entries in connectedClients
+                //    Remove entries whose socket is no longer in the io.sockets.sockets map
+                const activeSockets = this.io?.sockets?.sockets;
+                if (activeSockets) {
+                    for (const [socketId, clientData] of this.connectedClients.entries()) {
+                        if (!activeSockets.has(socketId)) {
+                            console.log(`🧹 Removing zombie client: ${socketId} (user: ${clientData.userId})`);
+                            // If it was a police officer, mark offline
+                            if (clientData.role === 'police' && clientData.userId) {
+                                this._setOfficerOnlineStatus(clientData.userId, false).catch(() => {});
+                                this.io.to('role:admin').emit('officer:offline', {
+                                    officerId: clientData.userId,
+                                    disconnectedAt: new Date().toISOString(),
+                                    reason: 'zombie_cleanup',
+                                });
+                            }
+                            this.connectedClients.delete(socketId);
+                        }
+                    }
+                }
+
                 // 1. Collect all currently connected police officer userIds
                 const connectedOfficerIds = new Set();
                 this.connectedClients.forEach((clientData) => {
@@ -478,8 +513,6 @@ class SocketManager {
                 const connectedArray = Array.from(connectedOfficerIds);
                 
                 // 2. Mark connected officers as online + refresh their timestamps
-                //    This is the KEY fix: even if a WebSocket event was missed,
-                //    this ensures the DB stays accurate
                 if (connectedArray.length > 0) {
                     await dbQuery(`
                         UPDATE officer_profiles 
@@ -497,17 +530,25 @@ class SocketManager {
                 }
 
                 // 3. Mark officers NOT connected as offline (if they were marked online)
-                //    Only if they have stale location (> 5 minutes)
-                await dbQuery(`
-                    UPDATE officer_profiles 
-                    SET is_online = false
-                    WHERE is_online = true 
-                      AND location_updated_at < NOW() - INTERVAL '5 minutes'
-                      ${connectedArray.length > 0 ? 'AND user_id != ALL($1)' : ''}
-                `, connectedArray.length > 0 ? [connectedArray] : []);
+                //    Only if they have stale location (> 3 minutes) — more aggressive cleanup
+                if (connectedArray.length > 0) {
+                    await dbQuery(`
+                        UPDATE officer_profiles 
+                        SET is_online = false
+                        WHERE is_online = true 
+                          AND location_updated_at < NOW() - INTERVAL '3 minutes'
+                          AND user_id != ALL($1)
+                    `, [connectedArray]);
+                } else {
+                    await dbQuery(`
+                        UPDATE officer_profiles 
+                        SET is_online = false
+                        WHERE is_online = true 
+                          AND location_updated_at < NOW() - INTERVAL '3 minutes'
+                    `);
+                }
 
                 // 4. Re-broadcast all connected officers to admin room
-                //    This ensures the dashboard stays in sync even after reconnects
                 const adminRoom = this.io?.sockets?.adapter?.rooms?.get('role:admin');
                 if (adminRoom && adminRoom.size > 0 && connectedArray.length > 0) {
                     connectedArray.forEach(officerId => {
@@ -532,13 +573,13 @@ class SocketManager {
                     });
                 }
 
-                console.log(`💓 Heartbeat: ${connectedArray.length} officers connected, ${adminRoom?.size || 0} admins watching`);
+                console.log(`💓 Heartbeat: ${connectedArray.length} officers connected, ${adminRoom?.size || 0} admins watching, ${this.connectedClients.size} total clients`);
             } catch (error) {
                 console.error('❌ Self-healing heartbeat error:', error.message);
             }
-        }, 60000); // Every 60 seconds
+        }, 30000); // Every 30 seconds (hardened)
 
-        console.log('💓 Self-healing heartbeat started (every 60s)');
+        console.log('💓 Self-healing heartbeat started (every 30s)');
     }
 
     // ============================================
@@ -549,11 +590,15 @@ class SocketManager {
      * Emit new incident to all connected clients
      */
     emitIncidentNew(incident) {
-        if (!this.io) return;
+        if (!this.io) {
+            console.warn('⚠️ emitIncidentNew called but io not initialized');
+            return;
+        }
 
         const payload = {
             id: incident.id,
             type: incident.type,
+            incident_type: incident.incident_type || incident.type,
             severity: incident.severity,
             location: incident.location,
             address: incident.address,

@@ -846,6 +846,10 @@ class LightweightTrafficAnalyzer:
             is_dark_video = avg_overall_brightness < 40
             
             # --- ACCIDENT: Multi-evidence motion-drop detection ---
+            # v3 HARDENED: Much tighter thresholds to avoid false positives
+            # on normal flowing traffic. Normal traffic has natural motion
+            # variation (traffic lights, lane changes) that previously
+            # triggered accident indicators.
             if len(motion_history) >= 6 and not is_dark_video:
                 mid = len(motion_history) // 2
                 first_half_motion = np.mean(motion_history[:mid]) if mid > 0 else 0
@@ -855,84 +859,58 @@ class LightweightTrafficAnalyzer:
                 motion_drop_ratio = ((first_half_motion - second_half_motion) / 
                                      max(first_half_motion, 0.001))
                 
-                # Classic motion drop: high motion → low motion
-                if (first_half_motion > 0.02 and 
-                    motion_drop_ratio > 0.5 and 
-                    first_half_vehicles >= 2):
+                # Classic motion drop: VERY high motion → near-zero motion
+                # TIGHTENED: 70% drop (was 50%), higher floor (0.04 vs 0.02),
+                # and second half must be nearly still (<0.01)
+                if (first_half_motion > 0.04 and 
+                    motion_drop_ratio > 0.70 and
+                    second_half_motion < 0.01 and
+                    first_half_vehicles >= 3):
                     collision_indicators += 2
                     stopped_vehicle_frames += mid
                 
-                # NEW: Gradual deceleration detection (not just sudden drop)
-                # Split into 3 segments and check for monotonic decrease
+                # Gradual deceleration: 3 segments, each significantly lower
+                # TIGHTENED: final < 20% of first (was 40%), higher floor
                 if len(motion_history) >= 9:
                     seg_len = len(motion_history) // 3
                     seg1 = np.mean(motion_history[:seg_len])
                     seg2 = np.mean(motion_history[seg_len:2*seg_len])
                     seg3 = np.mean(motion_history[2*seg_len:])
                     
-                    # Each segment is lower than previous (consistent deceleration)
                     if (seg1 > seg2 > seg3 and 
-                        seg1 > 0.015 and 
-                        seg3 < seg1 * 0.4 and  # Final segment < 40% of first
-                        first_half_vehicles >= 2):
+                        seg1 > 0.03 and  # Was 0.015
+                        seg3 < seg1 * 0.20 and  # Was 0.40
+                        seg3 < 0.008 and  # NEW: final segment must be near-still
+                        first_half_vehicles >= 3):  # Was 2
                         collision_indicators += 2
-                        stopped_vehicle_frames += seg_len  # Last segment = stopped
+                        stopped_vehicle_frames += seg_len
                 
-                # NEW: Overall motion trend — compare first quarter vs last quarter
-                if len(motion_history) >= 8:
-                    q_len = len(motion_history) // 4
-                    first_q = np.mean(motion_history[:q_len])
-                    last_q = np.mean(motion_history[-q_len:])
-                    if (first_q > 0.01 and last_q < first_q * 0.3 
-                        and np.mean(vehicle_history[:q_len]) >= 2):
-                        collision_indicators += 1
+                # REMOVED: Overall motion trend (first_q vs last_q)
+                # — Too easily triggered by normal traffic variation
                 
-                # Sliding window deceleration (catches sharp braking in gradual stops)
-                if len(motion_deltas) >= 4:
-                    for wi in range(len(motion_deltas) - 3):
-                        window = motion_deltas[wi:wi+4]
-                        neg_count = sum(1 for d in window if d < -0.003)
-                        total_drop = sum(d for d in window if d < 0)
-                        if neg_count >= 3 and total_drop < -0.02:
-                            collision_indicators += 1
-                            break
+                # REMOVED: Sliding window deceleration
+                # — Normal traffic light changes produce this pattern constantly
             
             # Frame-diff spike detection (sudden scene change = impact)
+            # TIGHTENED: need 4x mean (was 3x) and higher absolute floor
             if len(frame_diff_scores) >= 3 and not is_dark_video:
                 mean_diff = np.mean(frame_diff_scores)
                 for fds in frame_diff_scores:
-                    if fds > max(mean_diff * 3.0, 0.05):
+                    if fds > max(mean_diff * 4.0, 0.08):  # Was 3.0 / 0.05
                         collision_indicators += 1
                         break
             
-            # NEW: Frame-diff deceleration detection
-            # If frame diffs consistently decrease (vehicles slowing down),
-            # that's evidence of deceleration independent of MOG2
-            if len(frame_diff_scores) >= 8 and not is_dark_video:
-                fd_mid = len(frame_diff_scores) // 2
-                fd_first = np.mean(frame_diff_scores[:fd_mid])
-                fd_second = np.mean(frame_diff_scores[fd_mid:])
-                fd_min = min(frame_diff_scores[fd_mid:])
-                
-                # Frame diffs dropping by 30%+ = vehicles decelerating
-                if (fd_first > 0.005 and fd_second < fd_first * 0.7 and
-                    np.mean(vehicle_history) >= 2):
-                    collision_indicators += 1
-                
-                # Check for sustained decrease trend across frame diffs
-                # (using linear regression slope)
-                x_vals = np.arange(len(frame_diff_scores))
-                if np.std(x_vals) > 0:
-                    slope = np.corrcoef(x_vals, frame_diff_scores)[0, 1]
-                    # Strong negative correlation = consistent slowdown
-                    if slope < -0.5 and fd_first > 0.005 and np.mean(vehicle_history) >= 2:
-                        collision_indicators += 1
+            # REMOVED: Frame-diff deceleration detection
+            # — Normal flowing traffic constantly has declining frame diffs
+            # These were major false positive sources. The _score_accident()
+            # function handles spike-only detection with proper thresholds.
             
             # Cluster score — vehicles clustered in later frames
+            # TIGHTENED: need score >0.6 (was 0.4) and more vehicles (5 vs 3)
             if len(cluster_scores_history) >= 4 and not is_dark_video:
                 later_clusters = cluster_scores_history[len(cluster_scores_history)//2:]
                 avg_cluster = np.mean(later_clusters) if later_clusters else 0
-                if avg_cluster > 0.4 and np.mean(vehicle_history) >= 3:
+                if avg_cluster > 0.6 and np.mean(vehicle_history) >= 5:
                     collision_indicators += 1
             
             # Average fire percentage
@@ -1250,39 +1228,44 @@ class LightweightTrafficAnalyzer:
             )
             
             # ─────────────────────────────────────────────
-            # 💥 Screen-accident detection (trained on 25 real accident videos)
+            # 💥 Screen-accident detection v3 HARDENED
             #
-            # Accident scenes in screen-recorded videos have TWO clear
-            # signatures that separate them from traffic jams:
+            # PROBLEM: The previous detector was triggering on normal
+            # traffic videos because:
+            #   - fd_avg < 0.127 catches ANY low-motion video (parked cars,
+            #     slow traffic, camera on a tripod)
+            #   - first_motion >= 0.17 catches camera startup/auto-focus
             #
-            #   1. LOW frame_diff_avg: crashed/stopped vehicles → very
-            #      static scene (ACC avg=0.085, TJ avg=0.166)
-            #   2. HIGH first-frame motion spike: the crash impact or
-            #      sudden camera jerk (ACC avg=0.251, TJ avg=0.105)
+            # v3 FIX: Require BOTH signals simultaneously (AND, not OR).
+            # A real accident has BOTH a static aftermath AND an initial
+            # impact spike. Normal traffic has neither or only one.
             #
-            # Thresholds tuned on 25 ACC + 11 TJ (0 false positives):
-            #   Rule 1: fd_avg < 0.127        (catches 24/25 ACC, 0/11 TJ)
-            #   Rule 2: first_motion >= 0.17  (catches 18/25 ACC, 0/11 TJ)
-            #   Rule 3: fd_avg < 0.128 AND first_motion >= 0.16
-            #           (catches borderline ACC05, rejects TJ-L7)
-            #   Combined: 25/25 ACC, 0/11 TJ false positives
-            #
-            # Also require some vehicles visible (edge-based) so we don't
-            # trigger on empty dark roads.
+            # Additionally require:
+            #   - Motion variance is HIGH (chaotic, not smooth)
+            #   - Late-video motion is very LOW (vehicles stopped)
+            #   - At least 3 signals agreeing
             # ─────────────────────────────────────────────
             fd_avg = np.mean(frame_diff_scores) if frame_diff_scores else 0.5
             first_motion = motion_scores[0] if motion_scores else 0.0
+            last_quarter_motion = (np.mean(motion_scores[-max(len(motion_scores)//4, 1):])
+                                   if motion_scores else 0.5)
+            motion_variance = np.std(motion_scores) if len(motion_scores) >= 3 else 0
             
-            # Vehicles visible via either method
-            has_vehicles = (max_vehicles >= 3 or max_static >= 3 or
-                            avg_vehicles >= 1.5 or avg_static >= 1.5)
+            # Vehicles visible via either method — require MORE vehicles
+            has_vehicles = (max_vehicles >= 4 or max_static >= 4 or
+                            avg_vehicles >= 2.5 or avg_static >= 2.5)
             
-            screen_accident_low_fd = fd_avg < 0.127
-            screen_accident_high_spike = first_motion >= 0.17
-            screen_accident_borderline = fd_avg < 0.128 and first_motion >= 0.16
-            screen_accident_signal = (screen_accident_low_fd or
-                                       screen_accident_high_spike or
-                                       screen_accident_borderline)
+            # TIGHTENED thresholds — require BOTH low fd AND high spike
+            screen_accident_low_fd = fd_avg < 0.100  # Was 0.127 — much tighter
+            screen_accident_high_spike = first_motion >= 0.22  # Was 0.17 — much tighter
+            screen_accident_motion_drop = last_quarter_motion < 0.01  # Vehicles must be STOPPED
+            screen_accident_chaotic = motion_variance > 0.02  # Motion must be chaotic
+            
+            # REQUIRE ALL: low fd + high spike + motion drop + chaotic
+            # Previously only needed ONE of these — that's why it false-triggered
+            screen_accident_signal = (screen_accident_low_fd and
+                                       screen_accident_high_spike and
+                                       screen_accident_motion_drop)
             
             # Confidence scoring based on how many signals agree
             sa_signals = 0
@@ -1290,26 +1273,30 @@ class LightweightTrafficAnalyzer:
                 sa_signals += 1
             if screen_accident_high_spike:
                 sa_signals += 1
-            if screen_accident_borderline and not screen_accident_low_fd:
-                sa_signals += 1  # borderline adds half-weight
+            if screen_accident_motion_drop:
+                sa_signals += 1
+            if screen_accident_chaotic:
+                sa_signals += 1
             # Extra signal: very low frame diffs (strong stillness)
-            if fd_avg < 0.090:
+            if fd_avg < 0.060:
                 sa_signals += 1
             # Extra signal: very high spike
-            if first_motion >= 0.30:
+            if first_motion >= 0.35:
                 sa_signals += 1
             
             # Guard: require minimum frame-diff activity to confirm this is
             # a real video (screen flicker/noise) and not a synthetic test.
-            # Real accident videos have fd_avg >= 0.039 and fd_std >= 0.011;
-            # synthetic tests have fd_avg ~0.024 and fd_std ~0.001.
             fd_std = np.std(frame_diff_scores) if len(frame_diff_scores) >= 2 else 0.0
             is_real_video = fd_avg >= 0.020 and fd_std >= 0.005
             
+            # REQUIRE at least 3 signals (was any 1)
             screen_accident_detected = (screen_accident_signal and
-                                         has_vehicles and is_real_video)
+                                         has_vehicles and is_real_video and
+                                         sa_signals >= 3)
             
-            # Build candidates list: (type, is_detected, evidence, confidence, severity)
+            # Build candidates list — ONLY genuine detections qualify.
+            # If nothing passes the thresholds, NO incident is reported.
+            # Normal traffic (cars driving, low-moderate density) = no report.
             candidates = []
             if acc['is_accident']:
                 candidates.append(('accident', acc))
@@ -1318,61 +1305,38 @@ class LightweightTrafficAnalyzer:
             if cong['is_congestion']:
                 candidates.append(('congestion', cong))
             
-            # ─── Screen-accident override ───
-            # If the trained screen-accident detector fires, inject an
-            # accident candidate with evidence proportional to signals.
-            # This ensures accident scenes (aftermath) get detected even
-            # when the motion-based _score_accident() doesn't trigger.
-            if screen_accident_detected:
-                sa_evidence = 1.0 + sa_signals * 0.6  # 1.6 – 3.4
-                sa_conf = min(0.75 + sa_signals * 0.05, 0.92)
-                sa_sev = "high" if sa_signals >= 3 else "medium"
-                sa_score = {
-                    'is_accident': True,
-                    'confidence': round(sa_conf, 2),
-                    'severity': sa_sev,
-                    'evidence_count': round(sa_evidence, 1),
-                }
-                # If accident wasn't already in candidates, add it
-                if not any(c[0] == 'accident' for c in candidates):
-                    candidates.append(('accident', sa_score))
-                else:
-                    # Boost existing accident evidence with screen-accident
-                    for ci, c in enumerate(candidates):
-                        if c[0] == 'accident':
-                            boosted_ev = c[1]['evidence_count'] + sa_signals * 0.4
-                            c[1]['evidence_count'] = round(boosted_ev, 1)
-                            c[1]['confidence'] = max(c[1]['confidence'], sa_conf)
-                            break
+            # ─── Screen-accident boost (NOT override) ───
+            # Only boost if screen-accident detection fired with very strong
+            # evidence. It can NO LONGER inject a new accident candidate 
+            # by itself — the _score_accident() must also agree.
+            if screen_accident_detected and sa_signals >= 4:
+                for ci, c in enumerate(candidates):
+                    if c[0] == 'accident':
+                        boosted_ev = c[1]['evidence_count'] + sa_signals * 0.3
+                        c[1]['evidence_count'] = round(boosted_ev, 1)
+                        break
+                # NOTE: If _score_accident() didn't fire, screen-accident
+                # alone does NOT create an accident candidate anymore.
+                # This prevents false positives from the screen detector.
             
-            # Disambiguation between accident and traffic_jam
+            # ─── Disambiguation: pick the BEST candidate ───
+            # Rule: If both accident and traffic_jam fired, prefer traffic_jam
+            # UNLESS accident has overwhelmingly more evidence (2x+).
+            # A false accident alert is far more dangerous than a false jam.
             if len(candidates) > 1:
-                # Sort by evidence count (highest first), then confidence
                 candidates.sort(
                     key=lambda c: (c[1]['evidence_count'], c[1]['confidence']),
                     reverse=True
                 )
                 
-                # If screen-accident detected → ALWAYS prefer accident
-                # over traffic_jam. The screen-accident detector was
-                # trained to have zero false positives on traffic videos.
-                if screen_accident_detected:
-                    if candidates[0][0] != 'accident':
-                        for ci, c in enumerate(candidates):
-                            if c[0] == 'accident':
-                                candidates[0], candidates[ci] = candidates[ci], candidates[0]
-                                break
-                
-                # If screen-accident NOT detected but both accident and
-                # traffic_jam fire from motion signals alone, prefer
-                # traffic_jam (motion artifacts in screen videos).
-                elif (candidates[0][0] == 'accident' and
-                      any(c[0] == 'traffic_jam' for c in candidates)):
+                # If top pick is accident but traffic_jam also present:
+                # Only keep accident if it has 2x the jam evidence
+                if (candidates[0][0] == 'accident' and
+                    any(c[0] == 'traffic_jam' for c in candidates)):
                     jam_ev = next(c[1]['evidence_count'] for c in candidates if c[0] == 'traffic_jam')
                     acc_ev = candidates[0][1]['evidence_count']
-                    hd_ratio = high_density_frames / max(total_frames, 1)
-                    if (jam_ev >= acc_ev * 0.7 or
-                        (hd_ratio > 0.15 and avg_vehicles >= 3)):
+                    if acc_ev < jam_ev * 2.0:
+                        # Not enough accident evidence — prefer traffic_jam
                         for ci, c in enumerate(candidates):
                             if c[0] == 'traffic_jam':
                                 candidates[0], candidates[ci] = candidates[ci], candidates[0]
@@ -1418,11 +1382,15 @@ class LightweightTrafficAnalyzer:
                         f"edge-based avg {avg_static:.1f}")
                     incident_detected = True
             else:
-                # No incident detected
+                # ═══════════════════════════════════════════
+                # NO INCIDENT — normal traffic, nothing to report.
+                # Cars are present but traffic is flowing normally.
+                # This is the CORRECT result for most videos.
+                # ═══════════════════════════════════════════
                 incident_type = "none"
                 severity = "none"
                 confidence = 0.0
-                description = "No incident detected"
+                description = "Normal traffic flow — no incident detected"
                 incident_detected = False
         
         now = datetime.now()
@@ -1469,96 +1437,113 @@ class LightweightTrafficAnalyzer:
         Score accident evidence from multiple independent signals.
         Each signal contributes points; total determines confidence.
         
+        v3 HARDENED — dramatically tightened to eliminate false positives
+        on normal traffic videos. Only triggers on truly anomalous patterns
+        (sudden impact + vehicles stopping + clustering at a point).
+        
         Evidence signals:
-         1. collision_indicators (sudden stops / motion drop)
-         2. stopped_frames ratio
-         3. Deceleration curve (sustained negative motion deltas)
-         4. Frame-diff spike (sudden scene change)
-         5. Vehicle clustering in later frames
+         1. collision_indicators (sudden stops / motion drop) — need 4+
+         2. stopped_frames ratio — need >50% stopped
+         3. Deceleration curve — need 5+ consecutive drops
+         4. Frame-diff IMPACT SPIKE (single large spike, not gradual decline)
+         5. Vehicle clustering in later frames — need very tight bunching
+         
+        REMOVED: declining frame-diff trends and correlation-based trends
+        because these trigger constantly on normal flowing traffic.
         """
         evidence = 0
-        max_evidence = 6  # 5 signals with sub-signals
+        max_evidence = 6
         
         # Signal 1: Collision indicators (motion-drop + sudden stops)
-        if collision_indicators >= 3:
+        # TIGHTENED: need 4+ (was 1+). Normal traffic easily produces 1-3.
+        if collision_indicators >= 6:
             evidence += 1.0
-        elif collision_indicators >= 2:
-            evidence += 0.8
-        elif collision_indicators >= 1:
-            evidence += 0.4
+        elif collision_indicators >= 4:
+            evidence += 0.7
+        elif collision_indicators >= 3:
+            evidence += 0.3
+        # Below 3 = no evidence (normal traffic noise)
         
         # Signal 2: Stopped frames ratio
+        # TIGHTENED: need >50% stopped (was 15%+). In normal traffic,
+        # vehicles at lights or crossings easily produce 15-40%.
         stop_ratio = stopped_frames / max(total_frames, 1)
-        if stop_ratio > 0.4:
+        if stop_ratio > 0.6:
             evidence += 1.0
-        elif stop_ratio > 0.25:
+        elif stop_ratio > 0.5:
             evidence += 0.6
-        elif stop_ratio > 0.15:
+        elif stop_ratio > 0.4:
             evidence += 0.3
+        # Below 40% = no evidence
         
-        # Signal 3: Deceleration curve (3+ frames of negative motion change)
+        # Signal 3: Deceleration curve (5+ consecutive negative motion deltas)
+        # TIGHTENED: need 5+ (was 2+) and stronger threshold per delta
         if motion_deltas:
             neg_run = 0
             max_neg_run = 0
             for d in motion_deltas:
-                if d < -0.003:
+                if d < -0.005:  # Stronger threshold (was -0.003)
                     neg_run += 1
                     max_neg_run = max(max_neg_run, neg_run)
                 else:
                     neg_run = 0
-            if max_neg_run >= 4:
+            if max_neg_run >= 6:
                 evidence += 1.0
-            elif max_neg_run >= 3:
-                evidence += 0.6
-            elif max_neg_run >= 2:
-                evidence += 0.3
+            elif max_neg_run >= 5:
+                evidence += 0.5
+            # Below 5 = no evidence (traffic light changes produce 3-4)
         
-        # Signal 4: Frame-diff analysis
-        # (a) Spike = impact, (b) declining trend = deceleration
+        # Signal 4: Frame-diff IMPACT SPIKE ONLY
+        # CHANGED: Only count a single massive spike (3x mean), NOT declining
+        # trends. Declining frame-diffs are NORMAL in regular traffic.
         if frame_diff_scores:
             mean_diff = np.mean(frame_diff_scores)
             max_diff = max(frame_diff_scores)
-            # (a) Spike detection
-            if mean_diff > 0 and max_diff > mean_diff * 2.5:
+            # Only a HUGE spike counts (impact event) — 3.5x mean
+            if mean_diff > 0.01 and max_diff > mean_diff * 3.5:
                 evidence += 0.8
-            elif mean_diff > 0 and max_diff > mean_diff * 2.0:
+            elif mean_diff > 0.01 and max_diff > mean_diff * 3.0:
                 evidence += 0.4
-            
-            # (b) Declining trend = vehicles decelerating
-            if len(frame_diff_scores) >= 6:
-                fd_mid = len(frame_diff_scores) // 2
-                fd_first = np.mean(frame_diff_scores[:fd_mid])
-                fd_second = np.mean(frame_diff_scores[fd_mid:])
-                # 30%+ drop in frame diffs = significant slowdown
-                if fd_first > 0.003 and fd_second < fd_first * 0.7:
-                    evidence += 0.6
-                elif fd_first > 0.003 and fd_second < fd_first * 0.85:
-                    evidence += 0.3
-            
-            # (c) Correlation-based trend (strong negative = consistent slowdown)
-            if len(frame_diff_scores) >= 8:
-                x_vals = np.arange(len(frame_diff_scores))
-                corr = np.corrcoef(x_vals, frame_diff_scores)[0, 1]
-                if corr < -0.7:
-                    evidence += 0.6  # Very strong declining trend
-                elif corr < -0.5:
-                    evidence += 0.3
+            # REMOVED: declining trend detection (false positive source)
+            # REMOVED: correlation-based trend (false positive source)
         
-        # Signal 5: Cluster score (vehicles bunched in later frames)
+        # Signal 5: Cluster score — vehicles bunched VERY tightly in later frames
+        # TIGHTENED: need score >0.6 (was 0.3+)
         if cluster_scores:
             later = cluster_scores[len(cluster_scores)//2:]
             avg_cluster = np.mean(later) if later else 0
-            if avg_cluster > 0.5:
+            if avg_cluster > 0.7:
                 evidence += 1.0
-            elif avg_cluster > 0.3:
+            elif avg_cluster > 0.6:
                 evidence += 0.5
+            # Below 0.6 = no evidence (normal lane traffic clusters easily)
         
         # Must have vehicles present
-        if avg_vehicles < 1.5:
+        if avg_vehicles < 2.0:  # Raised from 1.5
             evidence = 0
         
+        # ─── NORMAL TRAFFIC SUPPRESSION ───
+        # If motion is CONSISTENT (smooth traffic flow), this is NOT an accident.
+        # Accidents produce chaotic, irregular motion patterns.
+        if motion_deltas and len(motion_deltas) >= 6:
+            motion_std = np.std(motion_deltas)
+            motion_mean = np.mean([abs(d) for d in motion_deltas])
+            # Smooth consistent motion = normal traffic. Suppress accident.
+            if motion_std < 0.008 and motion_mean < 0.006:
+                evidence = min(evidence, 0.5)  # Cap evidence — not an accident
+        
+        # If frame diffs are consistent (no spikes), not an accident
+        if frame_diff_scores and len(frame_diff_scores) >= 4:
+            fd_std = np.std(frame_diff_scores)
+            fd_mean = np.mean(frame_diff_scores)
+            fd_max = max(frame_diff_scores)
+            # No spike (max < 2x mean) and consistent → normal traffic
+            if fd_max < fd_mean * 2.0 and fd_std < 0.03:
+                evidence = min(evidence, 0.5)  # Not an accident
+        
         # Determine result
-        is_accident = evidence >= 1.8  # Need at least ~2 solid signals
+        # TIGHTENED: need 3.0 evidence (was 1.8). Must have multiple STRONG signals.
+        is_accident = evidence >= 3.0
         
         # Confidence: scale evidence to 0.70–0.92
         raw_conf = min(evidence / max_evidence, 1.0)
@@ -1659,17 +1644,25 @@ class LightweightTrafficAnalyzer:
         elif best_avg >= 3:
             evidence += 0.2
         
-        # ── Decision thresholds (lowered for screen-recorded videos) ──
-        # Very strong: high peak count alone is strong evidence
-        is_jam = best_max >= 12 and evidence >= 1.5
-        # Strong: high peak + reasonable evidence
-        is_jam = is_jam or (best_max >= 10 and evidence >= 1.5)
-        # Medium: moderate peak + multi-signal evidence
-        is_jam = is_jam or (best_max >= 8 and evidence >= 2.0)
-        # Average-based: sustained moderate density
-        is_jam = is_jam or (best_avg >= 6 and evidence >= 2.5)
-        # High evidence from multiple signals even with lower counts
-        is_jam = is_jam or (best_max >= 6 and evidence >= 3.0)
+        # ── Decision thresholds — v3 HARDENED ──
+        # A traffic jam means vehicles are ACTUALLY stuck. 
+        # Normal flowing traffic with some cars = NOT a jam.
+        # Need genuinely high vehicle counts AND sustained density.
+        # Very strong: many vehicles sustained
+        is_jam = best_max >= 15 and evidence >= 2.0
+        # Strong: high peak + strong evidence
+        is_jam = is_jam or (best_max >= 12 and evidence >= 2.5)
+        # Moderate: 10+ vehicles with multi-signal evidence
+        is_jam = is_jam or (best_max >= 10 and evidence >= 3.0)
+        # Average-based: sustained high density
+        is_jam = is_jam or (best_avg >= 8 and evidence >= 3.5)
+        
+        # REMOVED: best_max >= 6 thresholds — 6 vehicles is normal traffic
+        
+        # Additional gate: need sustained density (>20% of frames with 5+ vehicles)
+        # A brief spike is NOT a traffic jam
+        if sustained_ratio < 0.20:
+            is_jam = False
         
         # Confidence: scale to 0.70–0.92
         raw_conf = min(evidence / max_evidence, 1.0)
@@ -1741,24 +1734,25 @@ class LightweightTrafficAnalyzer:
         elif best_max >= 5:
             evidence += 0.3
         
-        # Need 4+ avg vehicles and at least some evidence
-        is_congestion = best_avg >= 5 and evidence >= 1.5
-        # Also: 4+ with strong persistence
-        is_congestion = is_congestion or (best_avg >= 4 and evidence >= 2.0)
-        # Also: high peak with moderate average
-        is_congestion = is_congestion or (best_max >= 6 and best_avg >= 3 and evidence >= 1.5)
+        # Need genuinely elevated vehicle counts — v3 HARDENED
+        # Normal traffic with a few cars is NOT congestion.
+        is_congestion = best_avg >= 7 and evidence >= 2.0
+        # Also: 6+ avg with strong persistence and high evidence
+        is_congestion = is_congestion or (best_avg >= 6 and evidence >= 2.5)
+        # Also: very high peak with moderate average
+        is_congestion = is_congestion or (best_max >= 10 and best_avg >= 5 and evidence >= 2.0)
         
-        # Low counts (below 3 avg) is NOT a reportable incident
-        if best_avg < 3:
+        # Low counts = NOT a reportable incident
+        if best_avg < 5:
             is_congestion = False
         
         # Confidence: 0.70–0.88
         raw_conf = min(evidence / 3.5, 1.0)
         confidence = 0.70 + raw_conf * 0.18
         
-        if best_avg >= 8:
+        if best_avg >= 10:
             severity = "high"
-        elif best_avg >= 5:
+        elif best_avg >= 7:
             severity = "medium"
         else:
             severity = "low"

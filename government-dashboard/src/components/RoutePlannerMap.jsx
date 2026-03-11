@@ -6,42 +6,19 @@ import { MapPin, Navigation, AlertTriangle, Clock, Route, ChevronRight, Loader2,
 import { searchKigaliLocation, getLocationCoordinates, kigaliLocations } from '../data/kigaliLocations';
 import toast from 'react-hot-toast';
 
-// CSS styles for custom markers - ensure popups work on click
+// CSS styles for custom markers
 const markerStyles = `
-    .custom-incident-marker {
-        background: transparent !important;
-        border: none !important;
-        z-index: 500 !important;
-    }
-    .custom-incident-marker div {
-        pointer-events: none !important;
-    }
-    .leaflet-marker-icon.custom-incident-marker {
-        pointer-events: auto !important;
-        cursor: pointer !important;
-        transition: transform 0.15s ease;
-    }
-    .leaflet-marker-icon.custom-incident-marker:hover {
-        transform: scale(1.25) !important;
-        z-index: 1000 !important;
-    }
     .user-location-marker {
         background: transparent !important;
         border: none !important;
     }
-    /* Enhanced popup styling for incident details */
-    .leaflet-popup-content-wrapper {
-        padding: 0 !important;
-        border-radius: 8px !important;
-        overflow: hidden !important;
-        box-shadow: 0 10px 25px rgba(0,0,0,0.15) !important;
+    .incident-marker-icon {
+        background: transparent !important;
+        border: none !important;
+        cursor: pointer !important;
     }
-    .leaflet-popup-content {
-        margin: 0 !important;
-        width: auto !important;
-    }
-    .leaflet-popup-tip {
-        box-shadow: 0 3px 10px rgba(0,0,0,0.1) !important;
+    .incident-marker-icon * {
+        pointer-events: none !important;
     }
     @keyframes pulse-ring {
         0% { transform: scale(0.8); opacity: 1; }
@@ -133,71 +110,48 @@ const createUserLocationIcon = () => {
     });
 };
 
-// Custom icon for incidents - uses consistent cyan color scheme
-const createIncidentIcon = (type = 'unknown', severity = 'medium') => {
-    // Emoji mapping for incident types
-    const emojiMap = {
-        // Emergency types from public reporting
-        accident: '🚗',
-        fire: '🔥',
-        traffic_jam: '🚦',
-        damaged_road: '🛣️',
-        tree_fall: '🌳',
-        // AI/system detected types
-        congestion: '🚦',
-        road_blockage: '🚧',
-        construction: '🏗️',
-        police_activity: '👮',
-        weather: '🌧️',
-        hazard: '⚠️',
-        medical: '🚑',
-        crime: '🚨',
-        unknown: '⚡'
-    };
-
-    const emoji = emojiMap[type?.toLowerCase()] || emojiMap.unknown;
-    
-    // Use consistent cyan color for all incidents
-    const color = '#06b6d4'; // cyan-500
-    const severitySize = severity === 'critical' ? 36 : severity === 'high' ? 32 : 28;
-
-    return L.divIcon({
-        className: 'custom-incident-marker',
-        html: `
-            <div style="
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                width: ${severitySize}px;
-                height: ${severitySize}px;
-                background: ${color};
-                border: 3px solid white;
-                border-radius: 50%;
-                box-shadow: 0 2px 8px rgba(6, 182, 212, 0.4);
-                font-size: ${severitySize * 0.5}px;
-            ">
-                <span style="filter: drop-shadow(0 1px 1px rgba(0,0,0,0.3));">${emoji}</span>
-            </div>
-        `,
-        iconSize: [severitySize, severitySize],
-        iconAnchor: [severitySize / 2, severitySize / 2],
-        popupAnchor: [0, -severitySize / 2]
-    });
-};
-
 // Incident type configuration for legend
 const INCIDENT_TYPES = {
     // Main emergency types (from public reporting)
     accident: { emoji: '🚗💥', color: '#dc2626', label: 'Accident', description: 'Vehicle collision or crash' },
     fire: { emoji: '🔥', color: '#f97316', label: 'Fire', description: 'Fire emergency reported' },
     traffic_jam: { emoji: '🚦', color: '#f59e0b', label: 'Traffic Jam', description: 'Heavy traffic, slow movement' },
-    damaged_road: { emoji: '�️', color: '#eab308', label: 'Damaged Road', description: 'Potholes or road damage' },
+    damaged_road: { emoji: '🛣️', color: '#eab308', label: 'Damaged Road', description: 'Potholes or road damage' },
     tree_fall: { emoji: '🌳', color: '#22c55e', label: 'Tree Fall', description: 'Fallen tree blocking road' },
     // AI/system types
     congestion: { emoji: '🚦', color: '#f59e0b', label: 'Congestion', description: 'AI detected traffic buildup' },
-    road_blockage: { emoji: '�', color: '#ef4444', label: 'Road Blocked', description: 'Road completely blocked' },
-    construction: { emoji: '�️', color: '#f97316', label: 'Construction', description: 'Road work in progress' },
+    road_blockage: { emoji: '🚧', color: '#ef4444', label: 'Road Blocked', description: 'Road completely blocked' },
+    construction: { emoji: '🏗️', color: '#f97316', label: 'Construction', description: 'Road work in progress' },
     hazard: { emoji: '⚠️', color: '#eab308', label: 'Road Hazard', description: 'Debris or danger on road' }
+};
+
+// Create incident map icon — matches the legend icons exactly
+// Legend: w-5 h-5 (20px) colored circle with white emoji inside
+const createIncidentIcon = (type = 'unknown') => {
+    const config = INCIDENT_TYPES[type?.toLowerCase()] || INCIDENT_TYPES.hazard || { emoji: '⚠️', color: '#06b6d4' };
+    const color = config.color;
+    const emoji = config.emoji.split(' ')[0]; // first emoji only
+    const size = 28; // slightly bigger than legend (20px) so it's visible on map
+
+    return L.divIcon({
+        className: 'incident-marker-icon',
+        html: `<div style="
+            width: ${size}px;
+            height: ${size}px;
+            background-color: ${color};
+            border-radius: 50%;
+            border: 2.5px solid white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+            font-size: 14px;
+            line-height: 1;
+        ">${emoji}</div>`,
+        iconSize: [size, size],
+        iconAnchor: [size / 2, size / 2],
+        popupAnchor: [0, -size / 2],
+    });
 };
 
 // Route color configurations
@@ -347,41 +301,56 @@ const formatDistance = (meters) => {
     return `${(meters / 1000).toFixed(1)} km`;
 };
 
+const FOUR_HOURS_MS = 4 * 60 * 60 * 1000; // 4 hours in milliseconds
+
 const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
-    // 4 hours in milliseconds for auto-expiry
-    const INCIDENT_EXPIRY_MS = 4 * 60 * 60 * 1000; // 4 hours
-    
+    // Re-check for expired incidents every 60 seconds
+    const [expiryTick, setExpiryTick] = useState(0);
+    useEffect(() => {
+        const timer = setInterval(() => setExpiryTick(t => t + 1), 60000);
+        return () => clearInterval(timer);
+    }, []);
+
     // Ensure incidents is always an array and filter only ACTIVE incidents (not resolved)
-    // Also auto-expire incidents older than 4 hours
+    // Also auto-expire unresolved incidents after 4 hours
     const incidents = React.useMemo(() => {
         const rawArray = Array.isArray(rawIncidents) ? rawIncidents : [];
         const now = Date.now();
         
-        return rawArray.filter(inc => {
-            // Only show active incidents (pending, active, in_progress, responding)
+        console.log(`📍 Route Planner raw incidents: ${rawArray.length}`);
+        
+        const filtered = rawArray.filter(inc => {
+            // 1. Only show active incidents (not resolved/closed/completed/cancelled)
             const status = (inc.status || 'pending').toLowerCase();
             const isActive = !['resolved', 'closed', 'completed', 'cancelled'].includes(status);
+            if (!isActive) return false;
             
-            // Must have valid coordinates
-            const hasCoords = inc.latitude && inc.longitude;
-            
-            // Auto-expire incidents older than 4 hours
-            const createdAt = inc.created_at || inc.createdAt;
-            let isNotExpired = true;
+            // 2. Auto-expire: hide unresolved incidents older than 4 hours
+            const createdAt = inc.created_at || inc.createdAt || inc.reported_at;
             if (createdAt) {
-                const incidentTime = new Date(createdAt).getTime();
-                const age = now - incidentTime;
-                isNotExpired = age < INCIDENT_EXPIRY_MS;
+                const age = now - new Date(createdAt).getTime();
+                if (age > FOUR_HOURS_MS) return false;
             }
             
-            return isActive && hasCoords && isNotExpired;
+            // 3. Must have valid numeric coordinates
+            const lat = parseFloat(inc.latitude);
+            const lng = parseFloat(inc.longitude);
+            const hasCoords = !isNaN(lat) && !isNaN(lng) && (lat !== 0 || lng !== 0);
+            
+            return hasCoords;
         }).map(inc => ({
             ...inc,
+            // Ensure coordinates are numbers
+            latitude: parseFloat(inc.latitude),
+            longitude: parseFloat(inc.longitude),
             // Normalize the incident type
             incident_type: inc.incident_type || inc.emergency_type || inc.type || 'unknown',
             location: inc.location || inc.location_name || inc.address || 'Unknown location',
         }));
-    }, [rawIncidents]);
+        
+        console.log(`📍 Route Planner filtered incidents (active & <4hrs): ${filtered.length}`);
+        return filtered;
+    }, [rawIncidents, expiryTick]);
 
     const [start, setStart] = useState('');
     const [destination, setDestination] = useState('');
@@ -1256,13 +1225,6 @@ const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
                             const incidentType = incident.incident_type || incident.type || 'unknown';
                             const typeConfig = INCIDENT_TYPES[incidentType.toLowerCase()] || INCIDENT_TYPES.hazard || { emoji: '⚠️', label: 'Incident', color: '#06b6d4', description: 'Reported incident' };
                             const isOnRoute = routes[selectedRouteIndex]?.incidents?.some(ri => ri.id === incident.id);
-                            const severityColors = {
-                                critical: { bg: 'bg-red-100', text: 'text-red-700', border: 'border-red-200' },
-                                high: { bg: 'bg-orange-100', text: 'text-orange-700', border: 'border-orange-200' },
-                                medium: { bg: 'bg-yellow-100', text: 'text-yellow-700', border: 'border-yellow-200' },
-                                low: { bg: 'bg-cyan-100', text: 'text-cyan-700', border: 'border-cyan-200' },
-                            };
-                            const sevStyle = severityColors[incident.severity] || severityColors.medium;
                             const timeAgo = incident.created_at ? (() => {
                                 const diff = Math.floor((Date.now() - new Date(incident.created_at).getTime()) / 1000);
                                 if (diff < 60) return 'Just now';
@@ -1273,126 +1235,43 @@ const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
                             return (
                                 <Marker
                                     key={`incident-${incident.id || idx}`}
-                                    position={[incident.latitude, incident.longitude]}
-                                    icon={createIncidentIcon(incidentType, incident.severity)}
-                                    eventHandlers={{
-                                        click: (e) => {
-                                            e.target.openPopup();
-                                        },
-                                    }}
+                                    position={[parseFloat(incident.latitude), parseFloat(incident.longitude)]}
+                                    icon={createIncidentIcon(incidentType)}
                                 >
-                                    <Popup maxWidth={320} minWidth={260} closeButton={true}>
-                                        <div className="p-0 min-w-[260px]" style={{ fontFamily: 'system-ui, sans-serif' }}>
-                                            {/* Header with severity stripe */}
-                                            <div style={{
-                                                background: incident.severity === 'critical' ? '#dc2626' : incident.severity === 'high' ? '#f97316' : '#06b6d4',
-                                                padding: '10px 14px',
-                                                borderRadius: '4px 4px 0 0',
-                                                marginTop: '-1px',
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                gap: '10px',
-                                            }}>
-                                                <span style={{ fontSize: '24px', filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.3))' }}>
-                                                    {typeConfig.emoji?.split(' ')[0] || '⚠️'}
+                                    <Popup>
+                                        <div className="p-2" style={{ minWidth: '200px' }}>
+                                            <h3 className="font-bold text-sm mb-1">
+                                                {typeConfig.emoji?.split(' ')[0] || '⚠️'} {typeConfig.label || 'Incident'}
+                                            </h3>
+                                            <p className="text-xs text-gray-600 mb-1">
+                                                {incident.description || 'No description'}
+                                            </p>
+                                            <p className="text-xs text-gray-500 mb-1">
+                                                📍 {incident.location || incident.location_name || incident.address || 'Kigali, Rwanda'}
+                                            </p>
+                                            <div className="flex flex-wrap gap-1 mb-1">
+                                                <span className={`text-xs px-2 py-0.5 rounded-full ${
+                                                    incident.severity === 'critical' ? 'bg-red-100 text-red-800' :
+                                                    incident.severity === 'high' ? 'bg-orange-100 text-orange-800' :
+                                                    'bg-yellow-100 text-yellow-800'
+                                                }`}>
+                                                    {incident.severity || 'medium'}
                                                 </span>
-                                                <div>
-                                                    <div style={{ fontWeight: 700, color: 'white', fontSize: '14px' }}>{typeConfig.label || 'Incident'}</div>
-                                                    <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.85)' }}>
-                                                        {(incident.severity || 'medium').toUpperCase()} SEVERITY
-                                                    </div>
-                                                </div>
+                                                <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">
+                                                    {(incident.status || 'reported').replace('_', ' ')}
+                                                </span>
                                             </div>
-
-                                            {/* Body */}
-                                            <div style={{ padding: '12px 14px' }}>
-                                                {/* Location */}
-                                                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', marginBottom: '8px' }}>
-                                                    <span style={{ color: '#06b6d4', fontSize: '14px', marginTop: '1px' }}>📍</span>
-                                                    <span style={{ fontSize: '13px', color: '#374151', lineHeight: '1.4' }}>
-                                                        {incident.location || incident.location_name || incident.address || 'Kigali, Rwanda'}
-                                                    </span>
-                                                </div>
-
-                                                {/* Description */}
-                                                {incident.description && (
-                                                    <div style={{
-                                                        fontSize: '12px',
-                                                        color: '#4b5563',
-                                                        padding: '8px 10px',
-                                                        background: '#f9fafb',
-                                                        borderRadius: '6px',
-                                                        border: '1px solid #e5e7eb',
-                                                        marginBottom: '10px',
-                                                        lineHeight: '1.5',
-                                                    }}>
-                                                        {incident.description.length > 150 ? incident.description.substring(0, 150) + '...' : incident.description}
-                                                    </div>
-                                                )}
-
-                                                {/* Info Grid */}
-                                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', marginBottom: '8px' }}>
-                                                    {/* Status */}
-                                                    <div style={{
-                                                        display: 'flex', alignItems: 'center', gap: '4px',
-                                                        fontSize: '11px', color: '#6b7280',
-                                                        padding: '4px 8px', background: '#f3f4f6', borderRadius: '4px',
-                                                    }}>
-                                                        <span>📊</span>
-                                                        <span style={{ fontWeight: 600 }}>{(incident.status || 'reported').replace('_', ' ')}</span>
-                                                    </div>
-                                                    {/* Time */}
-                                                    {timeAgo && (
-                                                        <div style={{
-                                                            display: 'flex', alignItems: 'center', gap: '4px',
-                                                            fontSize: '11px', color: '#6b7280',
-                                                            padding: '4px 8px', background: '#f3f4f6', borderRadius: '4px',
-                                                        }}>
-                                                            <span>🕐</span>
-                                                            <span>{timeAgo}</span>
-                                                        </div>
-                                                    )}
-                                                    {/* Source */}
-                                                    {incident.source && (
-                                                        <div style={{
-                                                            display: 'flex', alignItems: 'center', gap: '4px',
-                                                            fontSize: '11px', color: '#6b7280',
-                                                            padding: '4px 8px', background: '#f3f4f6', borderRadius: '4px',
-                                                        }}>
-                                                            <span>{incident.source === 'ai' ? '🤖' : incident.source === 'mobile_app' ? '📱' : '👤'}</span>
-                                                            <span>{incident.source === 'ai' ? 'AI Detected' : incident.source === 'mobile_app' ? 'Mobile App' : 'Public Report'}</span>
-                                                        </div>
-                                                    )}
-                                                    {/* Coordinates */}
-                                                    <div style={{
-                                                        display: 'flex', alignItems: 'center', gap: '4px',
-                                                        fontSize: '11px', color: '#6b7280',
-                                                        padding: '4px 8px', background: '#f3f4f6', borderRadius: '4px',
-                                                    }}>
-                                                        <span>🌐</span>
-                                                        <span>{parseFloat(incident.latitude).toFixed(4)}, {parseFloat(incident.longitude).toFixed(4)}</span>
-                                                    </div>
-                                                </div>
-
-                                                {/* Route warning */}
-                                                {isOnRoute ? (
-                                                    <div style={{
-                                                        display: 'flex', alignItems: 'center', gap: '6px',
-                                                        padding: '6px 10px', background: '#fef2f2', border: '1px solid #fecaca',
-                                                        borderRadius: '6px', fontSize: '12px', color: '#dc2626', fontWeight: 600,
-                                                    }}>
-                                                        ⚠️ This incident is on your route!
-                                                    </div>
-                                                ) : routes.length > 0 ? (
-                                                    <div style={{
-                                                        display: 'flex', alignItems: 'center', gap: '6px',
-                                                        padding: '6px 10px', background: '#f0fdf4', border: '1px solid #bbf7d0',
-                                                        borderRadius: '6px', fontSize: '12px', color: '#16a34a', fontWeight: 500,
-                                                    }}>
-                                                        ✅ Not on your route
-                                                    </div>
-                                                ) : null}
-                                            </div>
+                                            {timeAgo && (
+                                                <p className="text-xs text-gray-400">🕐 {timeAgo}</p>
+                                            )}
+                                            {incident.source && (
+                                                <p className="text-xs text-gray-400">
+                                                    {incident.source === 'ai' ? '🤖 AI Detected' : incident.source === 'mobile_app' ? '📱 Mobile App' : '👤 Public Report'}
+                                                </p>
+                                            )}
+                                            {isOnRoute && (
+                                                <p className="text-xs text-red-600 font-semibold mt-1">⚠️ On your route!</p>
+                                            )}
                                         </div>
                                     </Popup>
                                 </Marker>

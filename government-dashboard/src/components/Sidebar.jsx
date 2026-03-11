@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
-const Sidebar = ({ isOpen }) => {
+const Sidebar = ({ isOpen, focusedIndex = -1, isKeyboardMode = false }) => {
   const location = useLocation();
   const { user } = useAuth();
   
@@ -66,22 +66,32 @@ const Sidebar = ({ isOpen }) => {
       {/* Navigation */}
       <nav className="mt-6 px-3">
         <div className="space-y-1">
-          {filteredMenuItems.map((item) => {
+          {filteredMenuItems.map((item, index) => {
             const Icon = item.icon;
             const isActive = location.pathname === item.path;
+            const isKeyFocused = isKeyboardMode && focusedIndex === index;
 
             return (
               <Link
                 key={item.path}
                 to={item.path}
-                className={`flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-xl transition-all duration-200 ${isActive
-                  ? 'bg-cyan-600 text-white shadow-lg shadow-cyan-600/30'
-                  : 'text-gray-400 hover:bg-slate-800/50 hover:text-white'
-                  }`}
+                className={`flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-xl transition-all duration-200 ${
+                  isActive
+                    ? 'bg-cyan-600 text-white shadow-lg shadow-cyan-600/30'
+                    : isKeyFocused
+                      ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-400/50 shadow-md shadow-cyan-500/10'
+                      : 'text-gray-400 hover:bg-slate-800/50 hover:text-white'
+                }`}
               >
                 <Icon className="w-5 h-5" />
                 <span className="flex-1">{item.label}</span>
-                {item.badge && (
+                {/* Keyboard shortcut number */}
+                {isKeyboardMode && index < 9 && (
+                  <span className="text-[10px] font-mono text-slate-600 bg-slate-800 px-1.5 py-0.5 rounded border border-slate-700">
+                    {index + 1}
+                  </span>
+                )}
+                {item.badge && !isKeyboardMode && (
                   <span className="px-2 py-0.5 text-xs font-bold bg-cyan-500 text-white rounded-full animate-pulse">
                     {item.badge}
                   </span>
@@ -91,6 +101,15 @@ const Sidebar = ({ isOpen }) => {
           })}
         </div>
       </nav>
+
+      {/* Keyboard nav hint at bottom of sidebar */}
+      {isKeyboardMode && (
+        <div className="absolute bottom-4 left-3 right-3">
+          <div className="bg-slate-800/80 border border-cyan-500/20 rounded-lg px-3 py-2 text-center">
+            <p className="text-[10px] text-cyan-400/60 font-medium">⌨️ Keyboard Active</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

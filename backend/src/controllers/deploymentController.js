@@ -666,8 +666,10 @@ const assignOfficer = async (req, res) => {
  */
 const getAvailableOfficers = async (req, res) => {
     try {
+        // Use DISTINCT ON to prevent duplicate officers
+        // An officer with multiple active deployments would appear once (as 'Deployed')
         const result = await query(`
-            SELECT 
+            SELECT DISTINCT ON (u.id)
                 u.id, 
                 u.full_name, 
                 op.badge_number, 
@@ -679,31 +681,38 @@ const getAvailableOfficers = async (req, res) => {
                 op.current_longitude,
                 op.current_address,
                 op.location_updated_at,
+                COALESCE(op.is_online, false) as is_online,
                 CASE 
-                    WHEN op.location_updated_at > NOW() - INTERVAL '2 minutes' THEN true 
-                    ELSE false 
-                END as is_online,
-                CASE 
-                    WHEN d.id IS NOT NULL THEN 'Deployed'
+                    WHEN active_dep.deployment_id IS NOT NULL THEN 'Deployed'
                     ELSE 'Available'
                 END as deployment_status,
-                d.unit_name as current_deployment,
-                d.address as deployment_location
+                active_dep.unit_name as current_deployment,
+                active_dep.address as deployment_location
             FROM users u
             LEFT JOIN officer_profiles op ON u.id = op.user_id
-            LEFT JOIN (
-                SELECT d_o.officer_id, d.id, d.unit_name, d.address
+            LEFT JOIN LATERAL (
+                SELECT d_o.deployment_id, d.unit_name, d.address
                 FROM deployment_officers d_o
                 JOIN deployments d ON d_o.deployment_id = d.id
-                WHERE d.status IN ('Active', 'Pending', 'En Route', 'On Scene')
-            ) d ON u.id = d.officer_id
-            WHERE u.role = 'police'
-            ORDER BY d.id NULLS FIRST, u.full_name
+                WHERE d_o.officer_id = u.id
+                  AND d.status IN ('Active', 'Pending', 'En Route', 'On Scene')
+                ORDER BY d.created_at DESC
+                LIMIT 1
+            ) active_dep ON true
+            WHERE u.role = 'police' AND u.is_active = true
+            ORDER BY u.id, active_dep.deployment_id NULLS FIRST
         `);
+
+        // Re-sort: Available officers first, then by name
+        const sorted = result.rows.sort((a, b) => {
+            if (a.deployment_status === 'Available' && b.deployment_status !== 'Available') return -1;
+            if (a.deployment_status !== 'Available' && b.deployment_status === 'Available') return 1;
+            return (a.full_name || '').localeCompare(b.full_name || '');
+        });
 
         res.json({
             success: true,
-            data: result.rows,
+            data: sorted,
         });
     } catch (error) {
         console.error('Get available officers error:', error);

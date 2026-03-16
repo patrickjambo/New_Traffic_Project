@@ -68,17 +68,31 @@ class SocketManager {
                 this.connectedClients.delete(socket.id);
             });
 
-            // Join role-based room (police, admin, district_admin, public)
+            // Join role-based room (police, admin, district_admin, co_admin, public)
             socket.on('join:role', (data) => {
-                const { role, userId } = data;
-                if (role && ['police', 'admin', 'district_admin', 'public'].includes(role)) {
-                    const roomName = `role:${role}`;
-                    socket.join(roomName);
+                if (!data || typeof data !== 'object') return;
+                const { role, userId, districtId } = data;
+                if (!role || !['police', 'admin', 'district_admin', 'co_admin', 'public'].includes(role)) return;
+
+                const roomName = `role:${role}`;
+                socket.join(roomName);
                     
-                    // District admins also join the admin room to receive admin broadcasts
-                    if (role === 'district_admin') {
+                    // District admins and co_admins also join the admin room to receive admin broadcasts
+                    if (role === 'district_admin' || role === 'co_admin') {
                         socket.join('role:admin');
-                        console.log(`🏢 District admin ${userId} also joined role:admin room`);
+                        console.log(`🏢 ${role} ${userId} also joined role:admin room`);
+                    }
+
+                    // 🎯 District-based room — so we can target events by district
+                    if (districtId && (role === 'district_admin' || role === 'co_admin')) {
+                        socket.join(`district:${districtId}`);
+                        console.log(`🏢 ${role} ${userId} joined district:${districtId} room`);
+                    }
+
+                    // Super admins join a special room so they always receive everything
+                    if (role === 'admin' && !districtId) {
+                        socket.join('district:all');
+                        console.log(`👑 Super admin ${userId} joined district:all room`);
                     }
 
                     // Also join user-specific room for targeted notifications
@@ -92,13 +106,14 @@ class SocketManager {
                     if (clientData) {
                         clientData.userId = userId;
                         clientData.role = role;
+                        clientData.districtId = districtId || null;
                     }
 
                     this.updateClientRoom(socket.id, roomName);
                     console.log(`👮 Client ${socket.id} joined room: ${roomName}`);
                     
-                    // If an admin just joined, send them a snapshot of all online officers
-                    if (role === 'admin' || role === 'district_admin') {
+                    // If an admin/co_admin just joined, send them a snapshot of all online officers
+                    if (role === 'admin' || role === 'district_admin' || role === 'co_admin') {
                         this._sendOnlineOfficersSnapshot(socket);
                     }
                     
@@ -118,7 +133,6 @@ class SocketManager {
                         this._setOfficerOnlineStatus(userId, true)
                             .catch(err => console.error('Error setting officer online:', err));
                     }
-                }
             });
 
             // Join user-specific room (for targeted deployment notifications)
@@ -587,7 +601,7 @@ class SocketManager {
     // ============================================
 
     /**
-     * Emit new incident to all connected clients
+     * Emit new incident to relevant clients (district-filtered)
      */
     emitIncidentNew(incident) {
         if (!this.io) {
@@ -604,17 +618,39 @@ class SocketManager {
             address: incident.address,
             description: incident.description,
             status: incident.status || 'reported',
+            district_id: incident.district_id || null,
             createdAt: incident.created_at || new Date().toISOString(),
         };
 
-        // Emit to all clients
-        this.io.emit('incident:new', payload);
+        const districtId = incident.district_id;
 
-        // Also emit to police and admin rooms specifically
-        this.io.to('role:police').to('role:admin').emit('incident:alert', {
+        // 🎯 District-targeted emit: district room + super admins (district:all)
+        if (districtId) {
+            this.io.to(`district:${districtId}`).to('district:all').emit('incident:new', payload);
+            console.log(`📢 Emitted incident:new to district:${districtId} + district:all`);
+        } else {
+            // No district — broadcast to all (fallback)
+            this.io.emit('incident:new', payload);
+        }
+
+        // Police always get alerts (they are on the ground everywhere)
+        this.io.to('role:police').emit('incident:alert', {
             ...payload,
             priority: incident.severity === 'critical' || incident.severity === 'high' ? 'high' : 'normal',
         });
+
+        // Admin alert — district-targeted
+        if (districtId) {
+            this.io.to(`district:${districtId}`).to('district:all').emit('incident:alert', {
+                ...payload,
+                priority: incident.severity === 'critical' || incident.severity === 'high' ? 'high' : 'normal',
+            });
+        } else {
+            this.io.to('role:admin').emit('incident:alert', {
+                ...payload,
+                priority: incident.severity === 'critical' || incident.severity === 'high' ? 'high' : 'normal',
+            });
+        }
 
         // Emit notification for police and admin
         this.emitNotificationToRole('police', {
@@ -657,11 +693,13 @@ class SocketManager {
     // ============================================
 
     /**
-     * Emit new emergency to all connected clients
+     * Emit new emergency to relevant clients (district-filtered)
      * OPTIMIZED: Sends WebSocket immediately + FCM push in parallel
      */
     emitEmergencyNew(emergency) {
         if (!this.io) return;
+
+        const districtId = emergency.district_id;
 
         const payload = {
             id: emergency.id,
@@ -679,14 +717,21 @@ class SocketManager {
             location_name: emergency.location_name,
             description: emergency.description,
             servicesNeeded: emergency.services_needed,
+            district_id: districtId || null,
             createdAt: emergency.created_at || new Date().toISOString(),
             isEmergency: true,
             priority: emergency.severity === 'critical' ? 'critical' : 'high',
         };
 
         // CRITICAL: Emit WebSocket events IMMEDIATELY (no await)
-        // 1. Emit to all clients
-        this.io.emit('emergency:new', payload);
+        // 1. 🎯 District-targeted emit: district room + super admins (district:all) + police
+        if (districtId) {
+            this.io.to(`district:${districtId}`).to('district:all').emit('emergency:new', payload);
+            console.log(`🚨 Emitted emergency:new to district:${districtId} + district:all`);
+        } else {
+            // No district — broadcast to all (fallback)
+            this.io.emit('emergency:new', payload);
+        }
 
         // 2. Emit to location-based room
         if (emergency.latitude && emergency.longitude) {
@@ -694,8 +739,8 @@ class SocketManager {
             this.io.to(room).emit('emergency:nearby', payload);
         }
 
-        // 3. High priority ALARM for police/admin (triggers siren/vibration/red screen)
-        this.io.to('role:police').to('role:admin').emit('emergency:alarm', {
+        // 3. High priority ALARM — police always get it (they respond on the ground)
+        this.io.to('role:police').emit('emergency:alarm', {
             ...payload,
             title: `🚨 ${emergency.emergency_type?.toUpperCase() || 'EMERGENCY'}`,
             message: emergency.description || 'Immediate response required!',
@@ -705,11 +750,45 @@ class SocketManager {
             vibrationPattern: 'emergency',
         });
 
-        // 4. Also emit legacy alert event
-        this.io.to('role:police').to('role:admin').emit('emergency:alert', {
+        // Admin alarm — district-targeted
+        if (districtId) {
+            this.io.to(`district:${districtId}`).to('district:all').emit('emergency:alarm', {
+                ...payload,
+                title: `🚨 ${emergency.emergency_type?.toUpperCase() || 'EMERGENCY'}`,
+                message: emergency.description || 'Immediate response required!',
+                requiresFullScreen: true,
+                overrideDoNotDisturb: true,
+                soundType: 'siren',
+                vibrationPattern: 'emergency',
+            });
+        } else {
+            this.io.to('role:admin').emit('emergency:alarm', {
+                ...payload,
+                title: `🚨 ${emergency.emergency_type?.toUpperCase() || 'EMERGENCY'}`,
+                message: emergency.description || 'Immediate response required!',
+                requiresFullScreen: true,
+                overrideDoNotDisturb: true,
+                soundType: 'siren',
+                vibrationPattern: 'emergency',
+            });
+        }
+
+        // 4. Also emit legacy alert event — district-targeted for admins
+        this.io.to('role:police').emit('emergency:alert', {
             ...payload,
             priority: emergency.severity === 'critical' ? 'critical' : 'high',
         });
+        if (districtId) {
+            this.io.to(`district:${districtId}`).to('district:all').emit('emergency:alert', {
+                ...payload,
+                priority: emergency.severity === 'critical' ? 'critical' : 'high',
+            });
+        } else {
+            this.io.to('role:admin').emit('emergency:alert', {
+                ...payload,
+                priority: emergency.severity === 'critical' ? 'critical' : 'high',
+            });
+        }
 
         // 5. Emit notification for police and admin
         const emergencyNotification = {

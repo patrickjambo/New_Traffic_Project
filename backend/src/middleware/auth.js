@@ -1,6 +1,22 @@
 const { verifyToken } = require('../utils/auth');
 
 /**
+ * Helper: normalize district fields from JWT token
+ * JWT stores districtId (camelCase), but code sometimes checks district_id
+ * This ensures both fields are always available on req.user
+ */
+function normalizeUserFields(decoded) {
+    if (!decoded) return decoded;
+    // Ensure both camelCase and snake_case district fields exist
+    if (decoded.districtId && !decoded.district_id) {
+        decoded.district_id = decoded.districtId;
+    } else if (decoded.district_id && !decoded.districtId) {
+        decoded.districtId = decoded.district_id;
+    }
+    return decoded;
+}
+
+/**
  * Middleware to verify JWT token
  */
 const authenticate = (req, res, next) => {
@@ -15,9 +31,15 @@ const authenticate = (req, res, next) => {
         }
 
         const token = authHeader.substring(7); // Remove 'Bearer ' prefix
-        const decoded = verifyToken(token);
+        if (!token || token === 'null' || token === 'undefined') {
+            return res.status(401).json({
+                success: false,
+                message: 'Invalid token format'
+            });
+        }
 
-        req.user = decoded; // Attach user info to request
+        const decoded = verifyToken(token);
+        req.user = normalizeUserFields(decoded); // Attach user info to request
         next();
     } catch (error) {
         return res.status(401).json({
@@ -29,7 +51,9 @@ const authenticate = (req, res, next) => {
 
 /**
  * Middleware to check user role
- * district_admin is treated as admin for authorization purposes but with district filtering
+ * district_admin and co_admin are treated as admin for authorization purposes
+ * - district_admin: full admin access but filtered by district
+ * - co_admin: admin access but without Officers, Settings, Analytics on frontend
  */
 const authorize = (...roles) => {
     // Flatten array if passed as authorize(['admin', 'police'])
@@ -43,8 +67,8 @@ const authorize = (...roles) => {
             });
         }
 
-        // district_admin has same access as admin but filtered by district
-        const effectiveRole = req.user.role === 'district_admin' ? 'admin' : req.user.role;
+        // district_admin and co_admin have same backend access as admin
+        const effectiveRole = (req.user.role === 'district_admin' || req.user.role === 'co_admin') ? 'admin' : req.user.role;
         
         if (!allowedRoles.includes(req.user.role) && !allowedRoles.includes(effectiveRole)) {
             return res.status(403).json({
@@ -58,7 +82,7 @@ const authorize = (...roles) => {
 };
 
 /**
- * Optional authentication - doesn't fail if no token
+ * Optional authentication - doesn't fail if no token, but normalizes fields if present
  */
 const optionalAuth = (req, res, next) => {
     try {
@@ -66,11 +90,13 @@ const optionalAuth = (req, res, next) => {
 
         if (authHeader && authHeader.startsWith('Bearer ')) {
             const token = authHeader.substring(7);
-            const decoded = verifyToken(token);
-            req.user = decoded;
+            if (token && token !== 'null' && token !== 'undefined') {
+                const decoded = verifyToken(token);
+                req.user = normalizeUserFields(decoded);
+            }
         }
     } catch (error) {
-        // Silently fail for optional auth
+        // Silently fail for optional auth — req.user stays undefined
     }
 
     next();

@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import axiosLib from 'axios';
+import { useWebSocket } from '../context/WebSocketContext';
+import axios from '../config/axios';
 import toast from 'react-hot-toast';
 import {
   Users,
@@ -28,22 +29,9 @@ import {
   Download,
 } from 'lucide-react';
 
-// Create axios instance with authentication
-const axios = axiosLib.create({
-  baseURL: 'http://localhost:3000/api',
-  headers: { 'Content-Type': 'application/json' },
-});
-
-axios.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
-});
-
 const OfficerManagement = () => {
   const { isAuthenticated, user } = useAuth();
+  const { subscribe, onReconnect } = useWebSocket();
   const [officers, setOfficers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -82,7 +70,7 @@ const OfficerManagement = () => {
       if (statusFilter === 'blocked') params.status = 'blocked';
       if (searchTerm) params.search = searchTerm;
       
-      const response = await axios.get('/admin/officers', { params });
+      const response = await axios.get('/api/admin/officers', { params });
       setOfficers(response.data.data || []);
     } catch (error) {
       console.error('Error fetching officers:', error);
@@ -104,6 +92,33 @@ const OfficerManagement = () => {
     return () => clearTimeout(timer);
   }, [searchTerm]);
 
+  // ─── WebSocket: auto-refresh when officers are created/updated/deleted ───
+  useEffect(() => {
+    if (!isAuthenticated || !subscribe) return;
+
+    const unsubs = [
+      subscribe('officer:created', (data) => {
+        console.log('🔔 New officer created via WebSocket:', data);
+        fetchOfficers();
+      }),
+      subscribe('officer:updated', () => fetchOfficers()),
+      subscribe('officer:deleted', () => fetchOfficers()),
+      subscribe('officer:status_changed', () => fetchOfficers()),
+    ];
+
+    return () => unsubs.forEach(fn => fn && fn());
+  }, [isAuthenticated, subscribe, fetchOfficers]);
+
+  // ─── Auto-refresh on WebSocket reconnection ───
+  useEffect(() => {
+    if (!isAuthenticated || !onReconnect) return;
+    const unsubReconnect = onReconnect(() => {
+      console.log('🔄 WebSocket reconnected — refreshing officers');
+      fetchOfficers();
+    });
+    return () => unsubReconnect && unsubReconnect();
+  }, [isAuthenticated, onReconnect, fetchOfficers]);
+
   const handleCreateOfficer = async (e) => {
     e.preventDefault();
     if (!formData.email || !formData.full_name || !formData.password) {
@@ -118,7 +133,7 @@ const OfficerManagement = () => {
 
     try {
       setSubmitting(true);
-      const response = await axios.post('/admin/officers', formData);
+      const response = await axios.post('/api/admin/officers', formData);
       
       if (response.data.success) {
         // Store the password temporarily for viewing
@@ -139,6 +154,10 @@ const OfficerManagement = () => {
         // Show view password modal
         setShowViewPasswordModal(true);
         setShowCreateModal(false);
+        
+        // Immediately refresh officer list
+        fetchOfficers();
+        resetForm();
       }
     } catch (error) {
       console.error('Error creating officer:', error);
@@ -155,7 +174,7 @@ const OfficerManagement = () => {
 
     try {
       setSubmitting(true);
-      await axios.put(`/admin/officers/${selectedOfficer.id}`, {
+      await axios.put(`/api/admin/officers/${selectedOfficer.id}`, {
         full_name: formData.full_name,
         phone: formData.phone,
         badge_number: formData.badge_number,
@@ -184,7 +203,7 @@ const OfficerManagement = () => {
 
     try {
       setSubmitting(true);
-      await axios.put(`/admin/officers/${selectedOfficer.id}/reset-password`, {
+      await axios.put(`/api/admin/officers/${selectedOfficer.id}/reset-password`, {
         newPassword,
       });
       toast.success(`Password reset for ${selectedOfficer.full_name}`);
@@ -205,7 +224,7 @@ const OfficerManagement = () => {
     try {
       setSubmitting(true);
       const newStatus = !selectedOfficer.is_active;
-      await axios.put(`/admin/officers/${selectedOfficer.id}/toggle-status`, {
+      await axios.put(`/api/admin/officers/${selectedOfficer.id}/toggle-status`, {
         is_active: newStatus,
         reason: confirmAction?.reason || 'Admin action',
       });
@@ -227,7 +246,7 @@ const OfficerManagement = () => {
 
     try {
       setSubmitting(true);
-      await axios.delete(`/admin/officers/${selectedOfficer.id}`);
+      await axios.delete(`/api/admin/officers/${selectedOfficer.id}`);
       toast.success(
         <div>
           <strong>Officer Deleted!</strong>

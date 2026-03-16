@@ -32,8 +32,8 @@ export const DataProvider = ({ children }) => {
   const { subscribe, isConnected } = useWebSocket();
   const { user } = useAuth();
   
-  // Check if user is district admin
-  const isDistrictAdmin = user?.role === 'district_admin';
+  // Check if user is district admin or co_admin with a district
+  const isDistrictAdmin = user?.role === 'district_admin' || (user?.role === 'co_admin' && !!user?.districtId);
   const userDistrictId = user?.districtId;
 
   // Helper function to check if an item belongs to user's district

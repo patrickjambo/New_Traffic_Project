@@ -56,10 +56,10 @@ router.post(
 
 /**
  * @route   GET /api/incidents
- * @desc    Get nearby incidents
- * @access  Public
+ * @desc    Get nearby incidents (district-filtered for district_admin/co_admin)
+ * @access  Public (optionalAuth for district filtering)
  */
-router.get('/', getNearbyIncidents);
+router.get('/', optionalAuth, getNearbyIncidents);
 
 /**
  * @route   GET /api/incidents/statistics

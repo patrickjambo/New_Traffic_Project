@@ -4,6 +4,7 @@ const smsService = require('../services/sms_service');
 const socketManager = require('../services/socketManager');
 const fcmService = require('../services/fcmService');
 const geoFencingService = require('../services/geoFencingService');
+const { resolveDistrict } = require('../services/districtResolver');
 
 /**
  * @desc    Create new emergency request
@@ -58,13 +59,25 @@ const createEmergency = async (req, res) => {
         // Use frontend timestamp or current server time
         const createdAt = reportedAt ? new Date(reportedAt) : new Date();
 
+        // 🎯 Auto-resolve district from coordinates
+        let districtId = null;
+        if (latitude && longitude) {
+            try {
+                const resolved = await resolveDistrict(parseFloat(latitude), parseFloat(longitude));
+                districtId = resolved.districtId;
+                console.log(`🎯 Emergency auto-assigned to district: ${resolved.districtName || districtId}`);
+            } catch (err) {
+                console.warn('⚠️ Could not resolve district for emergency:', err.message);
+            }
+        }
+
         // Insert emergency into database
         const result = await db.query(
             `INSERT INTO emergencies (
                 user_id, type, emergency_type, severity, location_name, location_description,
                 latitude, longitude, description, casualties_count, vehicles_involved,
-                services_needed, contact_name, contact_phone, images, status, source, created_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+                services_needed, contact_name, contact_phone, images, status, source, created_at, district_id
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
             RETURNING *`,
             [
                 userId,
@@ -84,7 +97,8 @@ const createEmergency = async (req, res) => {
                 JSON.stringify(images || []),
                 'pending',
                 'manual',
-                createdAt
+                createdAt,
+                districtId
             ]
         );
 
@@ -239,6 +253,17 @@ const getEmergencies = async (req, res) => {
         const params = [latitude, longitude];
         let paramIndex = 3;
 
+        // 🎯 District filtering for district_admin and co_admin
+        let userDistrictId = null;
+        if (req.user && (req.user.role === 'district_admin' || req.user.role === 'co_admin') && (req.user.districtId || req.user.district_id)) {
+            userDistrictId = req.user.districtId || req.user.district_id;
+        }
+        if (userDistrictId) {
+            query += ` AND e.district_id = $${paramIndex}`;
+            params.push(userDistrictId);
+            paramIndex++;
+        }
+
         // Add filters
         if (status) {
             query += ` AND e.status = $${paramIndex}`;
@@ -281,10 +306,14 @@ const getEmergencies = async (req, res) => {
 
         const result = await db.query(query, params);
 
-        // Get total count
-        const countResult = await db.query(
-            'SELECT COUNT(*) FROM emergencies WHERE 1=1'
-        );
+        // Get total count (district-filtered if applicable)
+        let countQuery = 'SELECT COUNT(*) FROM emergencies WHERE 1=1';
+        const countParams = [];
+        if (userDistrictId) {
+            countQuery += ' AND district_id = $1';
+            countParams.push(userDistrictId);
+        }
+        const countResult = await db.query(countQuery, countParams);
 
         res.json({
             success: true,

@@ -5,6 +5,7 @@ const fs = require('fs').promises;
 const axios = require('axios');
 const socketManager = require('../services/socketManager');
 const geoFencingService = require('../services/geoFencingService');
+const { resolveDistrict } = require('../services/districtResolver');
 
 // Configure multer for video uploads
 const storage = multer.diskStorage({
@@ -53,17 +54,21 @@ const reportIncident = async (req, res) => {
         // Determine reporter
         const reportedBy = isAnonymous ? null : (req.user ? req.user.id : null);
 
+        // 🎯 Auto-resolve district from coordinates
+        const { districtId } = await resolveDistrict(latitude, longitude);
+
         // Insert incident into database
         const result = await query(
             `INSERT INTO incidents 
-       (type, severity, latitude, longitude, address, description, video_url, reported_by, is_anonymous) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) 
-       RETURNING id, type, severity, latitude, longitude, created_at`,
+       (type, severity, latitude, longitude, address, description, video_url, reported_by, is_anonymous, district_id) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) 
+       RETURNING id, type, severity, latitude, longitude, created_at, district_id`,
             [type, severity, latitude, longitude, address || null, description || null,
-                videoFile ? `/uploads/${videoFile.filename}` : null, reportedBy, isAnonymous]
+                videoFile ? `/uploads/${videoFile.filename}` : null, reportedBy, isAnonymous, districtId]
         );
 
         const incident = result.rows[0];
+        console.log(`📍 Incident #${incident.id} assigned to district ${districtId || 'UNKNOWN'}`);
 
         // If video exists, submit to AI service for analysis
         if (videoFile) {
@@ -161,6 +166,13 @@ const getNearbyIncidents = async (req, res) => {
     try {
         const { latitude, longitude, radius, status, type, limit, offset } = req.query;
 
+        // 🎯 District filtering for district_admin and co_admin
+        // JWT token stores districtId (camelCase), DB queries may use district_id
+        let userDistrictId = null;
+        if (req.user && (req.user.role === 'district_admin' || req.user.role === 'co_admin') && (req.user.districtId || req.user.district_id)) {
+            userDistrictId = req.user.districtId || req.user.district_id;
+        }
+
         // Check if location params are provided
         const hasLocation = latitude && longitude;
 
@@ -169,7 +181,6 @@ const getNearbyIncidents = async (req, res) => {
         let paramCount;
 
         if (hasLocation) {
-            // Location-based query using Haversine formula (no PostGIS needed)
             queryText = `
               SELECT 
                 i.id, 
@@ -186,6 +197,7 @@ const getNearbyIncidents = async (req, res) => {
                 i.updated_at,
                 i.responding_officer_id,
                 i.response_started_at,
+                i.district_id,
                 COALESCE(i.is_anonymous, false) as is_anonymous,
                 'manual' as source,
                 u.full_name as reported_by_name,
@@ -200,7 +212,6 @@ const getNearbyIncidents = async (req, res) => {
             params = [parseFloat(latitude), parseFloat(longitude), parseFloat(radius || 5)];
             paramCount = 3;
         } else {
-            // No location - return all incidents (for dashboard)
             queryText = `
               SELECT 
                 i.id, 
@@ -217,6 +228,7 @@ const getNearbyIncidents = async (req, res) => {
                 i.updated_at,
                 i.responding_officer_id,
                 i.response_started_at,
+                i.district_id,
                 COALESCE(i.is_anonymous, false) as is_anonymous,
                 'manual' as source,
                 u.full_name as reported_by_name,
@@ -228,6 +240,13 @@ const getNearbyIncidents = async (req, res) => {
             `;
             params = [];
             paramCount = 0;
+        }
+
+        // 🎯 District filter — district_admin/co_admin only sees their district
+        if (userDistrictId) {
+            paramCount++;
+            queryText += ` AND i.district_id = $${paramCount}`;
+            params.push(userDistrictId);
         }
 
         // Add status filter

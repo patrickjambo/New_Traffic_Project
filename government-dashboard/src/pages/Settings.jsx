@@ -220,8 +220,8 @@ const Settings = () => {
     const matchesSearch = u.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       u.email?.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesRole = roleFilter === 'all' || u.role === roleFilter;
-    // District admins only see police officers
-    if (user?.role === 'district_admin' && u.role !== 'police') {
+    // District admins only see police officers and co_admins
+    if (user?.role === 'district_admin' && u.role !== 'police' && u.role !== 'co_admin') {
       return false;
     }
     return matchesSearch && matchesRole;
@@ -231,27 +231,28 @@ const Settings = () => {
   const getAvailableRoleFilters = () => {
     if (user?.role === 'admin') {
       // Super admin can see all except public
-      return ['all', 'district_admin', 'police'];
+      return ['all', 'co_admin', 'district_admin', 'police'];
     } else {
-      // District admin can only see police
-      return ['all', 'police'];
+      // District admin can see police and co_admins
+      return ['all', 'co_admin', 'police'];
     }
   };
 
   // Get role options for changing a user's role
   const getRoleOptions = () => {
     if (user?.role === 'admin') {
-      // Super admin can assign district_admin or police
-      return ['police', 'district_admin'];
+      // Super admin can assign co_admin, district_admin or police
+      return ['police', 'co_admin', 'district_admin'];
     } else {
-      // District admin can only manage police
-      return ['police'];
+      // District admin can assign police or co_admin
+      return ['police', 'co_admin'];
     }
   };
 
   // User stats - exclude public
   const userStats = {
     total: users.filter(u => u.role !== 'public').length,
+    co_admin: users.filter(u => u.role === 'co_admin').length,
     district_admin: users.filter(u => u.role === 'district_admin').length,
     police: users.filter(u => u.role === 'police').length,
   };
@@ -379,7 +380,7 @@ const Settings = () => {
                     roleFilter === role ? 'bg-cyan-600 text-white' : 'bg-slate-700/50 text-gray-400 hover:bg-slate-700 hover:text-white'
                   }`}
                 >
-                  {role === 'district_admin' ? 'District Admin' : role} {role !== 'all' && `(${userStats[role] || 0})`}
+                  {role === 'district_admin' ? 'District Admin' : role === 'co_admin' ? 'Co-Admin' : role} {role !== 'all' && `(${userStats[role] || 0})`}
                 </button>
               ))}
             </div>
@@ -416,6 +417,7 @@ const Settings = () => {
                           <div className="flex items-center gap-3">
                             <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold ${
                               u.role === 'admin' ? 'bg-gradient-to-br from-cyan-600 to-cyan-800' :
+                              u.role === 'co_admin' ? 'bg-gradient-to-br from-emerald-500 to-emerald-700' :
                               u.role === 'district_admin' ? 'bg-gradient-to-br from-cyan-500 to-cyan-700' :
                               u.role === 'police' ? 'bg-gradient-to-br from-cyan-400 to-cyan-600' :
                               'bg-gradient-to-br from-gray-500 to-gray-600'
@@ -430,13 +432,10 @@ const Settings = () => {
                           </div>
                         </td>
                         <td className="px-4 py-4">
-                          {/* Display role as badge - not editable for super admin and district_admin */}
-                          {(u.role === 'admin' || u.role === 'district_admin') ? (
-                            <span className={`px-3 py-1 rounded text-xs font-bold uppercase ${
-                              u.role === 'admin' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/50' :
-                              'bg-cyan-600/20 text-cyan-400 border border-cyan-600/50'
-                            }`}>
-                              {u.role === 'admin' ? 'SUPER ADMIN' : 'DISTRICT ADMIN'}
+                          {/* Display role as badge - not editable for super admin; editable for others */}
+                          {u.role === 'admin' ? (
+                            <span className="px-3 py-1 rounded text-xs font-bold uppercase bg-cyan-500/20 text-cyan-300 border border-cyan-500/50">
+                              SUPER ADMIN
                             </span>
                           ) : (
                             <select
@@ -444,15 +443,18 @@ const Settings = () => {
                               onChange={(e) => handleRoleChange(u.id, e.target.value)}
                               disabled={u.id === user?.id}
                               className={`px-2 py-1 rounded text-xs font-medium border bg-slate-800 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 ${
+                                u.role === 'co_admin' ? 'border-emerald-500/50 text-emerald-400' :
+                                u.role === 'district_admin' ? 'border-cyan-600/50 text-cyan-400' :
                                 u.role === 'police' ? 'border-cyan-500/50 text-cyan-400' :
                                 'border-gray-500/50 text-gray-400'
                               }`}
                               style={{ backgroundColor: '#1e293b' }}
                             >
-                              <option value="police" className="bg-slate-800">POLICE</option>
-                              {user?.role === 'admin' && (
-                                <option value="district_admin" className="bg-slate-800">DISTRICT ADMIN</option>
-                              )}
+                              {getRoleOptions().map(opt => (
+                                <option key={opt} value={opt} className="bg-slate-800">
+                                  {opt === 'co_admin' ? 'CO-ADMIN' : opt === 'district_admin' ? 'DISTRICT ADMIN' : opt.toUpperCase()}
+                                </option>
+                              ))}
                             </select>
                           )}
                         </td>

@@ -6,6 +6,16 @@ const { hashPassword } = require('../utils/auth');
  */
 const getSystemMetrics = async (req, res) => {
     try {
+        // 🎯 District-scoped metrics for district_admin/co_admin
+        const adminDistrictId = req.user ? (req.user.districtId || req.user.district_id || null) : null;
+        const isDistrictScoped = req.user && (req.user.role === 'district_admin' || req.user.role === 'co_admin') && !!adminDistrictId;
+
+        // Use parameterized queries to prevent SQL injection
+        const districtParam = isDistrictScoped ? [parseInt(adminDistrictId)] : [];
+        const incidentWhere = isDistrictScoped ? 'WHERE district_id = $1' : '';
+        const userWhere = isDistrictScoped ? 'WHERE district_id = $1' : '';
+        const emergencyWhere = isDistrictScoped ? 'WHERE district_id = $1' : '';
+
         // Get incident statistics
         const incidentStats = await query(`
             SELECT 
@@ -16,18 +26,31 @@ const getSystemMetrics = async (req, res) => {
                 COUNT(*) FILTER (WHERE severity = 'high') as high_severity,
                 AVG(EXTRACT(EPOCH FROM (updated_at - created_at))/3600) FILTER (WHERE status = 'resolved') as avg_resolution_hours
             FROM incidents
-        `);
+            ${incidentWhere}
+        `, districtParam);
 
-        // Get user statistics
+        // Get emergency statistics
+        const emergencyStats = await query(`
+            SELECT
+                COUNT(*) as total_emergencies,
+                COUNT(*) FILTER (WHERE status = 'pending') as pending_emergencies,
+                COUNT(*) FILTER (WHERE DATE(created_at) = CURRENT_DATE) as today_emergencies
+            FROM emergencies
+            ${emergencyWhere}
+        `, districtParam);
+
+        // Get user statistics (for district: only their police/co_admin)
         const userStats = await query(`
             SELECT 
                 COUNT(*) as total_users,
                 COUNT(*) FILTER (WHERE role = 'public') as public_users,
                 COUNT(*) FILTER (WHERE role = 'police') as police_users,
                 COUNT(*) FILTER (WHERE role = 'admin') as admin_users,
+                COUNT(*) FILTER (WHERE role = 'co_admin') as co_admin_users,
                 COUNT(*) FILTER (WHERE DATE(created_at) >= CURRENT_DATE - INTERVAL '30 days') as new_users_30d
             FROM users
-        `);
+            ${userWhere}
+        `, districtParam);
 
         // Get AI analysis statistics (if table exists)
         let aiStats = { ai_accuracy: 87, total_analyses: 0 };
@@ -54,6 +77,7 @@ const getSystemMetrics = async (req, res) => {
             success: true,
             data: {
                 incidents: incidentStats.rows[0],
+                emergencies: emergencyStats.rows[0],
                 users: userStats.rows[0],
                 ai: aiStats,
                 system: {
@@ -80,6 +104,10 @@ const getUsers = async (req, res) => {
     try {
         const { role, status, limit, offset } = req.query;
 
+        // 🎯 District-scoped: district_admin/co_admin only see users from their district
+        const adminDistrictId = req.user.districtId || req.user.district_id || null;
+        const isDistrictScoped = (req.user.role === 'district_admin' || req.user.role === 'co_admin') && !!adminDistrictId;
+
         let queryText = `
             SELECT 
                 id,
@@ -90,6 +118,7 @@ const getUsers = async (req, res) => {
                 badge_number,
                 unit,
                 is_active,
+                district_id,
                 created_at,
                 updated_at,
                 (SELECT COUNT(*) FROM incidents WHERE reported_by = users.id) as incidents_reported
@@ -99,6 +128,15 @@ const getUsers = async (req, res) => {
 
         const params = [];
         let paramCount = 0;
+
+        // District admin/co_admin only sees police + co_admin from their own district
+        if (isDistrictScoped) {
+            paramCount++;
+            queryText += ` AND district_id = $${paramCount}`;
+            params.push(adminDistrictId);
+            // Also restrict to only police and co_admin roles (they shouldn't see other district_admins)
+            queryText += ` AND role IN ('police', 'co_admin')`;
+        }
 
         if (role) {
             paramCount++;
@@ -117,8 +155,14 @@ const getUsers = async (req, res) => {
 
         const result = await query(queryText, params);
 
-        // Get total count
-        const countResult = await query('SELECT COUNT(*) FROM users');
+        // Get total count (district-filtered)
+        let countQuery = 'SELECT COUNT(*) FROM users WHERE 1=1';
+        const countParams = [];
+        if (isDistrictScoped) {
+            countQuery += ` AND district_id = $1 AND role IN ('police', 'co_admin')`;
+            countParams.push(adminDistrictId);
+        }
+        const countResult = await query(countQuery, countParams);
 
         res.json({
             success: true,
@@ -151,6 +195,17 @@ const updateUser = async (req, res) => {
             paramCount++;
             updates.push(`role = $${paramCount}`);
             params.push(role);
+
+            // 🎯 Co-admin inherits district from the admin who assigns the role
+            if (role === 'co_admin' && req.user) {
+                const assignerDistrictId = req.user.districtId || req.user.district_id || null;
+                if (assignerDistrictId) {
+                    paramCount++;
+                    updates.push(`district_id = $${paramCount}`);
+                    params.push(assignerDistrictId);
+                    console.log(`🏢 Co-admin ${id} inherits district_id=${assignerDistrictId} from assigner ${req.user.id}`);
+                }
+            }
         }
 
         if (typeof is_active === 'boolean') {
@@ -313,7 +368,8 @@ const generateReport = async (req, res) => {
 const createOfficer = async (req, res) => {
     try {
         const { email, full_name, password, badge_number, unit, phone } = req.body;
-        const adminDistrictId = req.user.district_id; // Get admin's district for assigning to new officer
+        // JWT stores districtId (camelCase), fallback to district_id
+        const adminDistrictId = req.user.districtId || req.user.district_id || null;
 
         console.log('📝 Creating officer:', { email, full_name, badge_number, unit, adminDistrictId });
 
@@ -378,20 +434,28 @@ const createOfficer = async (req, res) => {
         );
         console.log('✅ Officer profile created');
 
-        // 🔔 Notify all connected admins about the new officer via WebSocket
+        // 🔔 Notify admins about the new officer via WebSocket (district-targeted)
         try {
             const socketManager = require('../services/socketManager');
             if (socketManager.io) {
-                socketManager.io.to('role:admin').emit('officer:created', {
+                const createdPayload = {
                     officerId: officer.id,
                     fullName: full_name,
                     email: cleanEmail,
                     badgeNumber: officerBadge,
                     unit: officerUnit,
+                    district_id: adminDistrictId || null,
                     districtName: districtName,
                     timestamp: new Date().toISOString(),
-                });
-                console.log('📡 Broadcasted new officer creation to admins');
+                };
+                // District-targeted: district room + super admins
+                if (adminDistrictId) {
+                    socketManager.io.to(`district:${adminDistrictId}`).to('district:all').emit('officer:created', createdPayload);
+                } else {
+                    // Super admin created — broadcast to all admins
+                    socketManager.io.to('role:admin').emit('officer:created', createdPayload);
+                }
+                console.log('📡 Broadcasted officer:created to district:', adminDistrictId || 'all');
             }
         } catch (socketError) {
             console.log('⚠️ Socket broadcast error (non-critical):', socketError.message);
@@ -431,8 +495,9 @@ const createOfficer = async (req, res) => {
 const getOfficers = async (req, res) => {
     try {
         const { status, search } = req.query;
-        const adminDistrictId = req.user.district_id; // For district_admin filtering
-        const isDistrictAdmin = req.user.role === 'district_admin';
+        // JWT stores districtId (camelCase), fallback to district_id
+        const adminDistrictId = req.user.districtId || req.user.district_id || null;
+        const isDistrictScoped = (req.user.role === 'district_admin' || req.user.role === 'co_admin') && !!adminDistrictId;
 
         let queryText = `
             SELECT 
@@ -466,8 +531,8 @@ const getOfficers = async (req, res) => {
         const params = [];
         let paramCount = 0;
 
-        // District admin only sees officers from their district
-        if (isDistrictAdmin && adminDistrictId) {
+        // 🎯 District admin / co_admin only sees officers from their district
+        if (isDistrictScoped) {
             paramCount++;
             queryText += ` AND u.district_id = $${paramCount}`;
             params.push(adminDistrictId);

@@ -126,7 +126,7 @@ export const WebSocketProvider = ({ children }) => {
                 if (userStr) {
                     try {
                         const user = JSON.parse(userStr);
-                        const joinData = { role: user.role || 'public', userId: user.id };
+                        const joinData = { role: user.role || 'public', userId: user.id, districtId: user.districtId || null };
                         // Use joinRoom helper so it records the join key
                         joinRoom('role', joinData);
                     } catch (e) {
@@ -162,7 +162,7 @@ export const WebSocketProvider = ({ children }) => {
                         if (userStr2) {
                             try {
                                 const u = JSON.parse(userStr2);
-                                newSocket.emit(`join:${roomType}`, { role: u.role, userId: u.id });
+                                newSocket.emit(`join:${roomType}`, { role: u.role, userId: u.id, districtId: u.districtId || null });
                             } catch (e2) { /* ignore */ }
                         }
                     }

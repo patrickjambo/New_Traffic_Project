@@ -67,7 +67,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="TrafficGuard AI Service",
     description="Lightweight traffic analysis using OpenCV",
-    version="3.1.0-light",
+    version="4.0.0-light",
     lifespan=lifespan
 )
 
@@ -85,7 +85,7 @@ app.add_middleware(
 async def root():
     return {
         "service": "TrafficGuard AI",
-        "version": "3.1.0-light",
+        "version": "4.0.0-light",
         "status": "running",
         "engine": "OpenCV",
         "max_concurrent_cameras": MAX_CONCURRENT_ANALYSES,
@@ -97,7 +97,7 @@ async def health_check():
     return {
         "status": "healthy",
         "service": "TrafficGuard AI",
-        "version": "3.1.0-light",
+        "version": "4.0.0-light",
         "engine": "OpenCV-based detection"
     }
 
@@ -324,7 +324,7 @@ async def get_status():
         "status": "operational",
         "analyzer": "LightweightTrafficAnalyzer",
         "engine": "OpenCV",
-        "version": "3.1.0-light",
+        "version": "4.0.0-light",
         "memory_footprint": "~50MB",
         "max_concurrent_cameras": MAX_CONCURRENT_ANALYSES,
         "session_manager": stats,
@@ -338,6 +338,11 @@ async def get_status():
             "duplicate_suppression",
             "session_based_analysis",
             "concurrent_multi_camera",
+            "dense_blob_traffic_jam_detection",
+            "optical_flow_speed_estimation",
+            "road_texture_density_analysis",
+            "short_clip_awareness",
+            "portrait_mode_optimization",
         ]
     }
 

@@ -1,20 +1,21 @@
 #!/bin/bash
 # =============================================================================
-# TrafficGuard - Lightweight Local Startup Script (No Docker Required)
+# TrafficGuard - Bulletproof Local Startup Script
 # =============================================================================
-# This script starts all services locally without Docker
-# Much lighter on system resources!
+# Starts all services + runs a WATCHDOG that auto-restarts anything that dies.
+# Services stay alive until you explicitly run ./stop_local.sh
 # =============================================================================
 
-# Colors for output
+# Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
-NC='\033[0m' # No Color
+BOLD='\033[1m'
+NC='\033[0m'
 
-# Project directory
+# Project paths
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$PROJECT_DIR"
 
@@ -25,289 +26,377 @@ DB_PASSWORD="trafficguard_pass_123"
 BACKEND_PORT=3000
 AI_SERVICE_PORT=8000
 FRONTEND_PORT=5176
+WATCHDOG_INTERVAL=10
 
 # Log files
 BACKEND_LOG="$PROJECT_DIR/backend.log"
 AI_SERVICE_LOG="$PROJECT_DIR/ai_service.log"
 FRONTEND_LOG="$PROJECT_DIR/frontend.log"
-DB_LOG="$PROJECT_DIR/database.log"
+WATCHDOG_LOG="$PROJECT_DIR/watchdog.log"
 
-# PID files for easy stopping
+# PID files
 PID_DIR="$PROJECT_DIR/.pids"
 mkdir -p "$PID_DIR"
 
-echo -e "${CYAN}"
-echo "╔═══════════════════════════════════════════════════════════════╗"
-echo "║     TrafficGuard - Lightweight Local System Startup           ║"
-echo "║                    (No Docker Required)                       ║"
-echo "╚═══════════════════════════════════════════════════════════════╝"
-echo -e "${NC}"
+LOCK_FILE="$PID_DIR/start.lock"
 
-# Function to kill process on a port
+# ─── Helper Functions ────────────────────────────────────────────────────────
+
+log()   { echo -e "${GREEN}[$(date '+%H:%M:%S')]${NC} $*"; }
+warn()  { echo -e "${YELLOW}[$(date '+%H:%M:%S')] ⚠  $*${NC}"; }
+err()   { echo -e "${RED}[$(date '+%H:%M:%S')] ✗  $*${NC}"; }
+info()  { echo -e "${BLUE}[$(date '+%H:%M:%S')]${NC} $*"; }
+
 kill_port() {
     local port=$1
-    local pid=$(lsof -t -i:$port 2>/dev/null)
-    if [ ! -z "$pid" ]; then
-        echo -e "${YELLOW}Killing existing process on port $port (PID: $pid)${NC}"
-        kill -9 $pid 2>/dev/null
+    local pids
+    pids=$(lsof -t -i:"$port" 2>/dev/null || true)
+    if [ -n "$pids" ]; then
+        echo "$pids" | xargs kill -9 2>/dev/null || true
         sleep 1
     fi
 }
 
-# Function to check if a command exists
-command_exists() {
-    command -v "$1" >/dev/null 2>&1
-}
-
-# Function to wait for port to be ready
 wait_for_port() {
-    local port=$1
-    local service=$2
-    local max_wait=60
-    local counter=0
-    
-    echo -ne "${YELLOW}Waiting for $service to be ready..."
-    while ! nc -z localhost $port 2>/dev/null; do
-        counter=$((counter + 1))
-        if [ $counter -ge $max_wait ]; then
-            echo -e "${RED} TIMEOUT!${NC}"
+    local port=$1 name=$2 max=${3:-45} i=0
+    while ! nc -z localhost "$port" 2>/dev/null; do
+        i=$((i + 1))
+        if [ $i -ge "$max" ]; then
             return 1
         fi
         sleep 1
-        echo -ne "."
     done
-    echo -e "${GREEN} Ready!${NC}"
     return 0
 }
 
-# =============================================================================
-# STEP 1: Clean up any existing processes
-# =============================================================================
-echo -e "\n${BLUE}[Step 1/5] Cleaning up existing processes...${NC}"
+pid_alive() {
+    [ -n "${1:-}" ] && kill -0 "$1" 2>/dev/null
+}
+
+save_pid() {
+    echo "$2" > "$PID_DIR/$1.pid"
+}
+
+read_pid() {
+    local f="$PID_DIR/$1.pid"
+    [ -f "$f" ] && cat "$f" || echo ""
+}
+
+# ─── Prevent double-start ───────────────────────────────────────────────────
+
+if [ -f "$LOCK_FILE" ]; then
+    OLD_PID=$(cat "$LOCK_FILE" 2>/dev/null || echo "")
+    if pid_alive "$OLD_PID"; then
+        echo ""
+        warn "TrafficGuard is already running (watchdog PID: $OLD_PID)."
+        echo -e "  Run ${CYAN}./stop_local.sh${NC} first, or ${CYAN}./status.sh${NC} to check."
+        echo ""
+        exit 0
+    else
+        rm -f "$LOCK_FILE"
+    fi
+fi
+
+# ─── Banner ──────────────────────────────────────────────────────────────────
+
+echo -e "${CYAN}"
+echo "╔═══════════════════════════════════════════════════════════════╗"
+echo "║      TrafficGuard - Bulletproof Local Startup                 ║"
+echo "║        Auto-restart watchdog keeps everything alive           ║"
+echo "╚═══════════════════════════════════════════════════════════════╝"
+echo -e "${NC}"
+
+# ═════════════════════════════════════════════════════════════════════════════
+# STEP 1: Clean up stale processes
+# ═════════════════════════════════════════════════════════════════════════════
+info "[Step 1/6] Cleaning up stale processes..."
 kill_port $BACKEND_PORT
 kill_port $AI_SERVICE_PORT
 kill_port $FRONTEND_PORT
 
-# =============================================================================
-# STEP 2: Start PostgreSQL Database
-# =============================================================================
-echo -e "\n${BLUE}[Step 2/5] Starting PostgreSQL Database...${NC}"
+OLD_WD=$(read_pid watchdog)
+if pid_alive "$OLD_WD"; then
+    kill "$OLD_WD" 2>/dev/null || true
+fi
 
-# Check if PostgreSQL is installed
-if ! command_exists psql; then
-    echo -e "${RED}PostgreSQL is not installed!${NC}"
-    echo -e "${YELLOW}To install PostgreSQL on your system:${NC}"
-    echo "  Ubuntu/Debian/Kali: sudo apt install postgresql postgresql-contrib"
-    echo "  Fedora: sudo dnf install postgresql-server postgresql-contrib"
-    echo "  macOS: brew install postgresql"
+# ═════════════════════════════════════════════════════════════════════════════
+# STEP 2: PostgreSQL Database
+# ═════════════════════════════════════════════════════════════════════════════
+info "[Step 2/6] Ensuring PostgreSQL is running..."
+
+if ! command -v psql >/dev/null 2>&1; then
+    err "PostgreSQL is not installed!"
+    echo "  Install: sudo apt install postgresql postgresql-contrib"
     exit 1
 fi
 
-# Check PostgreSQL status and start if needed
-if ! systemctl is-active --quiet postgresql 2>/dev/null; then
-    echo -e "${YELLOW}Starting PostgreSQL service...${NC}"
-    sudo systemctl start postgresql 2>/dev/null || sudo service postgresql start 2>/dev/null
-    sleep 2
-fi
-
-# Ensure the actual PostgreSQL cluster is online (systemctl can say "active"
-# even when the cluster is down)
-CLUSTER_STATUS=$(pg_lsclusters -h 2>/dev/null | grep "5432" | awk '{print $4}')
-if [ "$CLUSTER_STATUS" != "online" ]; then
-    echo -e "${YELLOW}PostgreSQL cluster is down, starting it...${NC}"
-    # Find which version is on port 5432
-    PG_VER=$(pg_lsclusters -h 2>/dev/null | grep "5432" | awk '{print $1}')
-    if [ -n "$PG_VER" ]; then
-        sudo pg_ctlcluster $PG_VER main start 2>/dev/null
+ensure_postgres() {
+    if ! systemctl is-active --quiet postgresql 2>/dev/null; then
+        sudo systemctl start postgresql 2>/dev/null || sudo service postgresql start 2>/dev/null
         sleep 2
     fi
-fi
+    local ver cs
+    ver=$(pg_lsclusters -h 2>/dev/null | grep "5432" | awk '{print $1}')
+    cs=$(pg_lsclusters -h 2>/dev/null | grep "5432" | awk '{print $4}')
+    if [ "$cs" != "online" ] && [ -n "$ver" ]; then
+        sudo pg_ctlcluster "$ver" main start 2>/dev/null
+        sleep 2
+    fi
+    pg_isready -h localhost -q 2>/dev/null
+}
 
-# Verify the cluster is actually accepting connections
-CLUSTER_STATUS=$(pg_lsclusters -h 2>/dev/null | grep "5432" | awk '{print $4}')
-if [ "$CLUSTER_STATUS" = "online" ]; then
-    echo -e "${GREEN}✓ PostgreSQL cluster is online (port 5432)${NC}"
+if ensure_postgres; then
+    log "✓ PostgreSQL is online (port 5432)"
 else
-    echo -e "${RED}✗ Failed to start PostgreSQL cluster${NC}"
-    echo "  Try manually: sudo pg_ctlcluster 18 main start"
+    err "Cannot start PostgreSQL!"
     exit 1
 fi
 
-# Setup database and user if they don't exist
-echo -e "${YELLOW}Setting up database...${NC}"
-
-# Create user if not exists
+info "Checking database setup..."
 sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='$DB_USER'" 2>/dev/null | grep -q 1 || {
-    echo -e "${YELLOW}Creating database user: $DB_USER${NC}"
+    warn "Creating database user: $DB_USER"
     sudo -u postgres psql -c "CREATE USER $DB_USER WITH PASSWORD '$DB_PASSWORD';" 2>/dev/null
 }
-
-# Create database if not exists
 sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='$DB_NAME'" 2>/dev/null | grep -q 1 || {
-    echo -e "${YELLOW}Creating database: $DB_NAME${NC}"
+    warn "Creating database: $DB_NAME"
     sudo -u postgres psql -c "CREATE DATABASE $DB_NAME OWNER $DB_USER;" 2>/dev/null
 }
-
-# Grant privileges
 sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE $DB_NAME TO $DB_USER;" 2>/dev/null
+sudo -u postgres psql -d "$DB_NAME" -c "CREATE EXTENSION IF NOT EXISTS postgis;" 2>/dev/null && \
+    log "✓ PostGIS extension enabled" || \
+    info "PostGIS not available — continuing without spatial features"
 
-# Enable PostGIS if available (optional - some systems don't have it)
-sudo -u postgres psql -d $DB_NAME -c "CREATE EXTENSION IF NOT EXISTS postgis;" 2>/dev/null && {
-    echo -e "${GREEN}✓ PostGIS extension enabled${NC}"
-} || {
-    echo -e "${YELLOW}Note: PostGIS not available, continuing without spatial features${NC}"
-}
-
-# Initialize schema if tables don't exist
 if [ -f "$PROJECT_DIR/database/schema.pgsql" ]; then
-    TABLE_COUNT=$(sudo -u postgres psql -d $DB_NAME -tc "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public';" 2>/dev/null | tr -d ' ')
-    if [ "$TABLE_COUNT" -lt "5" ] 2>/dev/null; then
-        echo -e "${YELLOW}Initializing database schema...${NC}"
-        sudo -u postgres psql -d $DB_NAME -f "$PROJECT_DIR/database/schema.pgsql" 2>/dev/null
+    TABLE_COUNT=$(sudo -u postgres psql -d "$DB_NAME" -tc \
+        "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public';" 2>/dev/null | tr -d ' ')
+    if [ "${TABLE_COUNT:-0}" -lt 5 ] 2>/dev/null; then
+        warn "Initializing database schema..."
+        sudo -u postgres psql -d "$DB_NAME" -f "$PROJECT_DIR/database/schema.pgsql" 2>/dev/null
     fi
 fi
+log "✓ Database ready"
 
-echo -e "${GREEN}✓ Database ready${NC}"
-
-# =============================================================================
-# STEP 3: Start Backend Server
-# =============================================================================
-echo -e "\n${BLUE}[Step 3/5] Starting Backend Server...${NC}"
+# ═════════════════════════════════════════════════════════════════════════════
+# STEP 3: Backend Server
+# ═════════════════════════════════════════════════════════════════════════════
+info "[Step 3/6] Starting Backend Server..."
 
 cd "$PROJECT_DIR/backend"
+[ ! -d "node_modules" ] && { warn "Installing backend deps..."; npm install --silent; }
 
-# Check if node_modules exists
-if [ ! -d "node_modules" ]; then
-    echo -e "${YELLOW}Installing backend dependencies...${NC}"
-    npm install
-fi
-
-# Create .env file for backend
 cat > .env << EOF
-# Database Configuration
 DB_HOST=localhost
 DB_PORT=5432
 DB_NAME=$DB_NAME
 DB_USER=$DB_USER
 DB_PASSWORD=$DB_PASSWORD
-
-# Server Configuration
 PORT=$BACKEND_PORT
 NODE_ENV=development
-
-# JWT Secret (generate a secure one for production)
 JWT_SECRET=trafficguard_jwt_secret_2024
-
-# AI Service
 AI_SERVICE_URL=http://localhost:$AI_SERVICE_PORT
-
-# Frontend URL (for CORS)
 FRONTEND_URL=http://localhost:$FRONTEND_PORT
 EOF
 
-echo -e "${YELLOW}Starting backend on port $BACKEND_PORT...${NC}"
-nohup npm run dev > "$BACKEND_LOG" 2>&1 &
+kill_port $BACKEND_PORT
+nohup node src/server.js >> "$BACKEND_LOG" 2>&1 &
 BACKEND_PID=$!
-echo $BACKEND_PID > "$PID_DIR/backend.pid"
+save_pid backend "$BACKEND_PID"
 
-wait_for_port $BACKEND_PORT "Backend"
-echo -e "${GREEN}✓ Backend running (PID: $BACKEND_PID)${NC}"
-
-# =============================================================================
-# STEP 4: Start AI Service
-# =============================================================================
-echo -e "\n${BLUE}[Step 4/5] Starting AI Service...${NC}"
-
-cd "$PROJECT_DIR/ai_service"
-
-# Check if Python is available
-if ! command_exists python3; then
-    echo -e "${RED}Python3 is not installed!${NC}"
-    echo "  Install with: sudo apt install python3 python3-pip python3-venv"
+if wait_for_port $BACKEND_PORT "Backend" 30; then
+    log "✓ Backend running (PID: $BACKEND_PID) on port $BACKEND_PORT"
+else
+    err "Backend failed to start — check $BACKEND_LOG"
     exit 1
 fi
 
-# Create virtual environment if it doesn't exist
-if [ ! -d "venv" ]; then
-    echo -e "${YELLOW}Creating Python virtual environment...${NC}"
-    python3 -m venv venv
+# ═════════════════════════════════════════════════════════════════════════════
+# STEP 4: AI Service
+# ═════════════════════════════════════════════════════════════════════════════
+info "[Step 4/6] Starting AI Service..."
+
+cd "$PROJECT_DIR/ai_service"
+
+if ! command -v python3 >/dev/null 2>&1; then
+    err "Python3 not installed!"
+    exit 1
 fi
 
-# Activate virtual environment and install dependencies
-echo -e "${YELLOW}Activating virtual environment...${NC}"
-source venv/bin/activate
+[ ! -d "venv" ] && { warn "Creating Python venv..."; python3 -m venv venv; }
 
-# Install dependencies
+source venv/bin/activate
 if [ ! -f "venv/.deps_installed" ]; then
-    echo -e "${YELLOW}Installing AI service dependencies (lightweight)...${NC}"
-    pip install --upgrade pip
-    pip install -r requirements-light.txt 2>/dev/null || pip install -r requirements.txt
+    warn "Installing AI deps..."
+    pip install --upgrade pip -q
+    pip install -r requirements-light.txt -q 2>/dev/null || pip install -r requirements.txt -q
     touch "venv/.deps_installed"
 fi
 
-# Create .env for AI service
 cat > .env << EOF
 BACKEND_URL=http://localhost:$BACKEND_PORT
 BACKEND_NOTIFY_SECRET=trafficguard_ai_notify_secret
 EOF
 
-echo -e "${YELLOW}Starting AI service on port $AI_SERVICE_PORT...${NC}"
-nohup python3 -m uvicorn main_light:app --host 0.0.0.0 --port $AI_SERVICE_PORT --reload > "$AI_SERVICE_LOG" 2>&1 &
+kill_port $AI_SERVICE_PORT
+nohup python3 -m uvicorn main_light:app --host 0.0.0.0 --port $AI_SERVICE_PORT >> "$AI_SERVICE_LOG" 2>&1 &
 AI_PID=$!
-echo $AI_PID > "$PID_DIR/ai_service.pid"
+save_pid ai_service "$AI_PID"
+deactivate 2>/dev/null || true
 
-deactivate
-
-wait_for_port $AI_SERVICE_PORT "AI Service"
-echo -e "${GREEN}✓ AI Service running (PID: $AI_PID)${NC}"
-
-# =============================================================================
-# STEP 5: Start Frontend
-# =============================================================================
-echo -e "\n${BLUE}[Step 5/5] Starting Frontend...${NC}"
-
-cd "$PROJECT_DIR/government-dashboard"
-
-# Check if node_modules exists
-if [ ! -d "node_modules" ]; then
-    echo -e "${YELLOW}Installing frontend dependencies...${NC}"
-    npm install
+if wait_for_port $AI_SERVICE_PORT "AI Service" 45; then
+    log "✓ AI Service running (PID: $AI_PID) on port $AI_SERVICE_PORT"
+else
+    warn "AI Service slow to start — watchdog will retry"
 fi
 
-echo -e "${YELLOW}Starting frontend on port $FRONTEND_PORT...${NC}"
-nohup npm run dev -- --port $FRONTEND_PORT --host > "$FRONTEND_LOG" 2>&1 &
+# ═════════════════════════════════════════════════════════════════════════════
+# STEP 5: Frontend
+# ═════════════════════════════════════════════════════════════════════════════
+info "[Step 5/6] Starting Frontend..."
+
+cd "$PROJECT_DIR/government-dashboard"
+[ ! -d "node_modules" ] && { warn "Installing frontend deps..."; npm install --silent; }
+
+kill_port $FRONTEND_PORT
+nohup npx vite --port $FRONTEND_PORT --host >> "$FRONTEND_LOG" 2>&1 &
 FRONTEND_PID=$!
-echo $FRONTEND_PID > "$PID_DIR/frontend.pid"
+save_pid frontend "$FRONTEND_PID"
 
-wait_for_port $FRONTEND_PORT "Frontend"
-echo -e "${GREEN}✓ Frontend running (PID: $FRONTEND_PID)${NC}"
+if wait_for_port $FRONTEND_PORT "Frontend" 30; then
+    log "✓ Frontend running (PID: $FRONTEND_PID) on port $FRONTEND_PORT"
+else
+    warn "Frontend slow — watchdog will retry"
+fi
 
-# =============================================================================
-# SUMMARY
-# =============================================================================
+# ═════════════════════════════════════════════════════════════════════════════
+# STEP 6: WATCHDOG — keeps everything alive forever
+# ═════════════════════════════════════════════════════════════════════════════
+info "[Step 6/6] Starting Watchdog Guardian..."
+
 cd "$PROJECT_DIR"
 
-echo -e "\n${CYAN}"
-echo "╔═══════════════════════════════════════════════════════════════╗"
-echo "║                    ALL SERVICES STARTED                        ║"
-echo "╚═══════════════════════════════════════════════════════════════╝"
-echo -e "${NC}"
+(
+    echo "[$(date)] Watchdog started (PID $$, interval ${WATCHDOG_INTERVAL}s)" >> "$WATCHDOG_LOG"
+    consecutive_ok=0
 
-echo -e "${GREEN}Services Running:${NC}"
-echo "  📊 PostgreSQL Database : localhost:5432"
-echo "  🖥️  Backend Server     : http://localhost:$BACKEND_PORT"
-echo "  🤖 AI Service          : http://localhost:$AI_SERVICE_PORT"
-echo "  🌐 Frontend Dashboard  : http://localhost:$FRONTEND_PORT"
+    while true; do
+        sleep "$WATCHDOG_INTERVAL"
+        restarted=""
 
-echo -e "\n${YELLOW}Log Files:${NC}"
-echo "  Backend   : $BACKEND_LOG"
-echo "  AI Service: $AI_SERVICE_LOG"
-echo "  Frontend  : $FRONTEND_LOG"
+        # ── PostgreSQL ──
+        if ! pg_isready -h localhost -q 2>/dev/null; then
+            echo "[$(date)] PostgreSQL DOWN — restarting..." >> "$WATCHDOG_LOG"
+            sudo systemctl start postgresql 2>/dev/null || sudo service postgresql start 2>/dev/null
+            sleep 3
+            ver=$(pg_lsclusters -h 2>/dev/null | grep "5432" | awk '{print $1}')
+            cs=$(pg_lsclusters -h 2>/dev/null | grep "5432" | awk '{print $4}')
+            if [ "$cs" != "online" ] && [ -n "$ver" ]; then
+                sudo pg_ctlcluster "$ver" main start 2>/dev/null
+                sleep 2
+            fi
+            if pg_isready -h localhost -q 2>/dev/null; then
+                echo "[$(date)] PostgreSQL RECOVERED ✓" >> "$WATCHDOG_LOG"
+                restarted="${restarted} DB"
+            else
+                echo "[$(date)] PostgreSQL STILL DOWN ✗" >> "$WATCHDOG_LOG"
+            fi
+        fi
 
-echo -e "\n${YELLOW}Quick Commands:${NC}"
-echo "  View backend logs:   tail -f $BACKEND_LOG"
-echo "  View AI logs:        tail -f $AI_SERVICE_LOG"
-echo "  Stop all services:   ./stop_local.sh"
+        # ── Backend ──
+        if ! nc -z localhost $BACKEND_PORT 2>/dev/null; then
+            echo "[$(date)] Backend DOWN — restarting..." >> "$WATCHDOG_LOG"
+            if pg_isready -h localhost -q 2>/dev/null; then
+                kill_port $BACKEND_PORT
+                cd "$PROJECT_DIR/backend"
+                nohup node src/server.js >> "$BACKEND_LOG" 2>&1 &
+                save_pid backend "$!"
+                sleep 4
+                if nc -z localhost $BACKEND_PORT 2>/dev/null; then
+                    echo "[$(date)] Backend RECOVERED ✓ (PID $!)" >> "$WATCHDOG_LOG"
+                    restarted="${restarted} Backend"
+                else
+                    echo "[$(date)] Backend STILL DOWN ✗" >> "$WATCHDOG_LOG"
+                fi
+            else
+                echo "[$(date)] Skipping backend — DB is down" >> "$WATCHDOG_LOG"
+            fi
+        fi
 
-echo -e "\n${CYAN}Open your browser at: http://localhost:$FRONTEND_PORT${NC}"
+        # ── AI Service ──
+        if ! nc -z localhost $AI_SERVICE_PORT 2>/dev/null; then
+            echo "[$(date)] AI Service DOWN — restarting..." >> "$WATCHDOG_LOG"
+            kill_port $AI_SERVICE_PORT
+            cd "$PROJECT_DIR/ai_service"
+            source venv/bin/activate 2>/dev/null
+            nohup python3 -m uvicorn main_light:app --host 0.0.0.0 --port $AI_SERVICE_PORT >> "$AI_SERVICE_LOG" 2>&1 &
+            save_pid ai_service "$!"
+            deactivate 2>/dev/null || true
+            sleep 5
+            if nc -z localhost $AI_SERVICE_PORT 2>/dev/null; then
+                echo "[$(date)] AI Service RECOVERED ✓ (PID $!)" >> "$WATCHDOG_LOG"
+                restarted="${restarted} AI"
+            else
+                echo "[$(date)] AI Service STILL DOWN ✗" >> "$WATCHDOG_LOG"
+            fi
+        fi
+
+        # ── Frontend ──
+        if ! nc -z localhost $FRONTEND_PORT 2>/dev/null; then
+            echo "[$(date)] Frontend DOWN — restarting..." >> "$WATCHDOG_LOG"
+            kill_port $FRONTEND_PORT
+            cd "$PROJECT_DIR/government-dashboard"
+            nohup npx vite --port $FRONTEND_PORT --host >> "$FRONTEND_LOG" 2>&1 &
+            save_pid frontend "$!"
+            sleep 5
+            if nc -z localhost $FRONTEND_PORT 2>/dev/null; then
+                echo "[$(date)] Frontend RECOVERED ✓ (PID $!)" >> "$WATCHDOG_LOG"
+                restarted="${restarted} Frontend"
+            else
+                echo "[$(date)] Frontend STILL DOWN ✗" >> "$WATCHDOG_LOG"
+            fi
+        fi
+
+        # Heartbeat every ~5 min
+        if [ -z "$restarted" ]; then
+            consecutive_ok=$((consecutive_ok + 1))
+            if [ $((consecutive_ok % 30)) -eq 0 ]; then
+                echo "[$(date)] ♥ All healthy (${consecutive_ok} checks OK)" >> "$WATCHDOG_LOG"
+            fi
+        else
+            consecutive_ok=0
+        fi
+    done
+) &
+
+WATCHDOG_PID=$!
+save_pid watchdog "$WATCHDOG_PID"
+echo "$WATCHDOG_PID" > "$LOCK_FILE"
+
+log "✓ Watchdog running (PID: $WATCHDOG_PID) — checks every ${WATCHDOG_INTERVAL}s"
+
+# ═════════════════════════════════════════════════════════════════════════════
+# SUMMARY
+# ═════════════════════════════════════════════════════════════════════════════
+echo ""
+echo -e "${CYAN}╔═══════════════════════════════════════════════════════════════╗"
+echo -e "║             ALL SERVICES STARTED + WATCHDOG ACTIVE             ║"
+echo -e "╚═══════════════════════════════════════════════════════════════╝${NC}"
+echo ""
+echo -e "  ${GREEN}📊 PostgreSQL${NC}        : localhost:5432"
+echo -e "  ${GREEN}🖥️  Backend Server${NC}   : http://localhost:$BACKEND_PORT"
+echo -e "  ${GREEN}🤖 AI Service${NC}        : http://localhost:$AI_SERVICE_PORT"
+echo -e "  ${GREEN}🌐 Frontend Dashboard${NC}: http://localhost:$FRONTEND_PORT"
+echo -e "  ${GREEN}🛡️  Watchdog Guardian${NC} : PID $WATCHDOG_PID (every ${WATCHDOG_INTERVAL}s)"
+echo ""
+echo -e "  ${YELLOW}Log Files:${NC}"
+echo -e "    Backend  : $BACKEND_LOG"
+echo -e "    AI       : $AI_SERVICE_LOG"
+echo -e "    Frontend : $FRONTEND_LOG"
+echo -e "    Watchdog : $WATCHDOG_LOG"
+echo ""
+echo -e "  ${YELLOW}Commands:${NC}"
+echo -e "    Status    : ${CYAN}./status.sh${NC}"
+echo -e "    Stop all  : ${CYAN}./stop_local.sh${NC}"
+echo -e "    Watchdog  : ${CYAN}tail -f watchdog.log${NC}"
+echo ""
+echo -e "  ${BOLD}${GREEN}Open your browser → http://localhost:$FRONTEND_PORT${NC}"
 echo ""

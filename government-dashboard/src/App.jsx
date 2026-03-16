@@ -24,13 +24,13 @@ import OfficerManagement from './pages/OfficerManagement';
 
 // Sidebar menu items definition (shared between sidebar and keyboard nav)
 const allMenuItems = [
-  { path: '/', label: 'Home', roles: ['public', 'police', 'admin', 'district_admin'] },
-  { path: '/dashboard', label: 'Dashboard', roles: ['police', 'admin', 'district_admin'] },
-  { path: '/incidents', label: 'Incidents', roles: ['police', 'admin', 'district_admin'] },
-  { path: '/reports', label: 'Reports', roles: ['police', 'admin', 'district_admin'] },
-  { path: '/emergency', label: 'Emergency', roles: ['police', 'admin', 'district_admin'] },
-  { path: '/deployments', label: 'Deployments', roles: ['police', 'admin', 'district_admin'] },
-  { path: '/geofencing', label: 'Geo-Fencing', roles: ['admin', 'district_admin'] },
+  { path: '/', label: 'Home', roles: ['public', 'police', 'admin', 'district_admin', 'co_admin'] },
+  { path: '/dashboard', label: 'Dashboard', roles: ['police', 'admin', 'district_admin', 'co_admin'] },
+  { path: '/incidents', label: 'Incidents', roles: ['police', 'admin', 'district_admin', 'co_admin'] },
+  { path: '/reports', label: 'Reports', roles: ['police', 'admin', 'district_admin', 'co_admin'] },
+  { path: '/emergency', label: 'Emergency', roles: ['police', 'admin', 'district_admin', 'co_admin'] },
+  { path: '/deployments', label: 'Deployments', roles: ['police', 'admin', 'district_admin', 'co_admin'] },
+  { path: '/geofencing', label: 'Geo-Fencing', roles: ['admin', 'district_admin', 'co_admin'] },
   { path: '/officers', label: 'Officers', roles: ['admin', 'district_admin'] },
   { path: '/analytics', label: 'Analytics', roles: ['admin', 'district_admin'] },
   { path: '/settings', label: 'Settings', roles: ['admin', 'district_admin'] },
@@ -122,8 +122,8 @@ function AppContent() {
     location.pathname === path || location.pathname.startsWith(path + '/')
   );
 
-  // If user is admin/district_admin/police AND on a dashboard route, show the admin dashboard layout
-  if (isAuthenticated && (user?.role === 'admin' || user?.role === 'district_admin' || user?.role === 'police') && isAdminRoute) {
+  // If user is admin/district_admin/co_admin/police AND on a dashboard route, show the admin dashboard layout
+  if (isAuthenticated && (user?.role === 'admin' || user?.role === 'district_admin' || user?.role === 'co_admin' || user?.role === 'police') && isAdminRoute) {
     return <AdminDashboardLayout sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} user={user} />;
   }
 

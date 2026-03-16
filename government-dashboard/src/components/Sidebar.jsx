@@ -18,17 +18,18 @@ const Sidebar = ({ isOpen, focusedIndex = -1, isKeyboardMode = false }) => {
   const location = useLocation();
   const { user } = useAuth();
   
-  // Check if district admin
+  // Check if district admin or co-admin
   const isDistrictAdmin = user?.role === 'district_admin';
+  const isCoAdmin = user?.role === 'co_admin';
 
   const menuItems = [
-    { path: '/', icon: Home, label: 'Home', roles: ['public', 'police', 'admin', 'district_admin'] },
-    { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', roles: ['police', 'admin', 'district_admin'] },
-    { path: '/incidents', icon: AlertTriangle, label: 'Incidents', roles: ['police', 'admin', 'district_admin'] },
-    { path: '/reports', icon: FileText, label: 'Reports', roles: ['police', 'admin', 'district_admin'] },
-    { path: '/emergency', icon: Users, label: 'Emergency', roles: ['police', 'admin', 'district_admin'] },
-    { path: '/deployments', icon: Shield, label: 'Deployments', roles: ['police', 'admin', 'district_admin'] },
-    { path: '/geofencing', icon: MapPin, label: 'Geo-Fencing', roles: ['admin', 'district_admin'], badge: 'NEW' },
+    { path: '/', icon: Home, label: 'Home', roles: ['public', 'police', 'admin', 'district_admin', 'co_admin'] },
+    { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', roles: ['police', 'admin', 'district_admin', 'co_admin'] },
+    { path: '/incidents', icon: AlertTriangle, label: 'Incidents', roles: ['police', 'admin', 'district_admin', 'co_admin'] },
+    { path: '/reports', icon: FileText, label: 'Reports', roles: ['police', 'admin', 'district_admin', 'co_admin'] },
+    { path: '/emergency', icon: Users, label: 'Emergency', roles: ['police', 'admin', 'district_admin', 'co_admin'] },
+    { path: '/deployments', icon: Shield, label: 'Deployments', roles: ['police', 'admin', 'district_admin', 'co_admin'] },
+    { path: '/geofencing', icon: MapPin, label: 'Geo-Fencing', roles: ['admin', 'district_admin', 'co_admin'], badge: 'NEW' },
     { path: '/officers', icon: UserCog, label: 'Officers', roles: ['admin', 'district_admin'] },
     { path: '/analytics', icon: BarChart3, label: 'Analytics', roles: ['admin', 'district_admin'] },
     { path: '/settings', icon: Settings, label: 'Settings', roles: ['admin', 'district_admin'] },
@@ -58,7 +59,7 @@ const Sidebar = ({ isOpen, focusedIndex = -1, isKeyboardMode = false }) => {
           <h1 className="text-white text-sm font-bold leading-tight">Rwanda National</h1>
           <h1 className="text-white text-sm font-bold leading-tight">Police</h1>
           <p className="text-cyan-400 text-xs">
-            {isDistrictAdmin ? `${user?.districtName?.toUpperCase() || 'DISTRICT'} ADMIN` : 'TRAFFIC ADMIN'}
+            {isDistrictAdmin ? `${user?.districtName?.toUpperCase() || 'DISTRICT'} ADMIN` : isCoAdmin ? 'CO-ADMIN' : 'TRAFFIC ADMIN'}
           </p>
         </div>
       </div>

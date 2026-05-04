@@ -376,6 +376,36 @@ const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
     const [remainingTime, setRemainingTime] = useState(null);
     const [navigationError, setNavigationError] = useState(null);
 
+    const customTileUrl = import.meta.env.VITE_TILE_SERVER_URL;
+    const proxyTileUrl = '/api/map/tiles/{z}/{x}/{y}.png';
+    const tileSources = [
+        ...(customTileUrl ? [{
+            url: customTileUrl,
+            attribution: 'Custom Tiles'
+        }] : [{
+            url: proxyTileUrl,
+            attribution: 'Map Tiles'
+        }]),
+        {
+            url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+        },
+        {
+            url: 'https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png',
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>, Tiles style by HOT'
+        },
+        {
+            url: 'https://{s}.tile.openstreetmap.de/{z}/{x}/{y}.png',
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+        },
+        {
+            url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+            attribution: '&copy; <a href="https://carto.com/attributions">CARTO</a> & OpenStreetMap'
+        }
+    ];
+    const [tileSourceIndex, setTileSourceIndex] = useState(0);
+    const tileSource = tileSources[tileSourceIndex];
+
     const kigaliCenter = [-1.9536, 30.0606];
 
     // Toggle incident list expansion for a route
@@ -385,6 +415,17 @@ const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
             ...prev,
             [routeIndex]: !prev[routeIndex]
         }));
+    };
+
+    const handleTileError = () => {
+        setTileSourceIndex(prev => {
+            if (prev < tileSources.length - 1) {
+                toast('Switching map tiles…', { icon: '🗺️' });
+                return prev + 1;
+            }
+            toast.error('Map tiles failed to load. Please check your connection.');
+            return prev;
+        });
     };
 
     // Force re-render every minute to check for expired incidents
@@ -496,6 +537,45 @@ const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
         );
     };
 
+    const customOsrmUrl = import.meta.env.VITE_OSRM_SERVER_URL;
+    const OSRM_BASE_URLS = [
+        ...(customOsrmUrl ? [customOsrmUrl] : []),
+        '/api/map/osrm',
+        'https://router.project-osrm.org',
+        'https://routing.openstreetmap.de/routed-car'
+    ];
+
+    const fetchWithTimeout = async (url, timeoutMs = 8000) => {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            const response = await fetch(url, { signal: controller.signal });
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            return await response.json();
+        } finally {
+            clearTimeout(timeout);
+        }
+    };
+
+    const fetchOsrmRoute = async (path) => {
+        for (const baseUrl of OSRM_BASE_URLS) {
+            try {
+                const url = baseUrl.startsWith('/api/map/osrm')
+                    ? `${baseUrl}?path=${encodeURIComponent(path)}`
+                    : `${baseUrl}${path}`;
+                const data = await fetchWithTimeout(url);
+                if (data?.code === 'Ok') {
+                    return data;
+                }
+            } catch (error) {
+                // Try next base URL
+            }
+        }
+        return null;
+    };
+
     // Fetch routes from OSRM API - FAST version with alternatives
     const findRoutes = async () => {
         // Validate inputs
@@ -532,19 +612,17 @@ const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
             ];
 
             // Fetch all routes in parallel (much faster!)
-            const routePromises = waypoints.map((wp, idx) => {
-                let url;
+            const routePromises = waypoints.map((wp) => {
+                let path;
                 if (wp === null) {
                     // Direct route with alternatives
-                    url = `https://router.project-osrm.org/route/v1/driving/${startPoint.lng},${startPoint.lat};${endPoint.lng},${endPoint.lat}?overview=full&alternatives=true&steps=false&geometries=polyline`;
+                    path = `/route/v1/driving/${startPoint.lng},${startPoint.lat};${endPoint.lng},${endPoint.lat}?overview=full&alternatives=true&steps=false&geometries=polyline`;
                 } else {
                     // Route via waypoint
-                    url = `https://router.project-osrm.org/route/v1/driving/${startPoint.lng},${startPoint.lat};${wp.lng},${wp.lat};${endPoint.lng},${endPoint.lat}?overview=full&steps=false&geometries=polyline`;
+                    path = `/route/v1/driving/${startPoint.lng},${startPoint.lat};${wp.lng},${wp.lat};${endPoint.lng},${endPoint.lat}?overview=full&steps=false&geometries=polyline`;
                 }
-                
-                return fetch(url, { signal: AbortSignal.timeout(8000) })
-                    .then(res => res.json())
-                    .catch(() => null);
+
+                return fetchOsrmRoute(path).catch(() => null);
             });
 
             const results = await Promise.all(routePromises);
@@ -1130,10 +1208,15 @@ const RoutePlannerMap = ({ incidents: rawIncidents = [] }) => {
                         zoom={13}
                         style={{ height: '100%', width: '100%' }}
                         scrollWheelZoom={true}
+                        whenCreated={(map) => {
+                            setTimeout(() => map.invalidateSize(), 150);
+                        }}
                     >
                         <TileLayer
-                            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+                            url={tileSource.url}
+                            attribution={tileSource.attribution}
+                            eventHandlers={{ tileerror: handleTileError }}
+                            crossOrigin="anonymous"
                         />
 
                         {/* Fit map to route bounds */}

@@ -77,6 +77,52 @@ const safeFormat = (date, formatStr) => {
 };
 
 /**
+ * Draw a simple bar chart
+ */
+const drawBarChart = (doc, title, data, startY, margin, pageWidth) => {
+  if (!data || data.length === 0) return startY;
+  
+  let yPosition = startY;
+  
+  doc.setFontSize(12);
+  doc.setFont(undefined, 'bold');
+  doc.setTextColor(50, 150, 255);
+  doc.text(title, margin, yPosition);
+  
+  yPosition += 10;
+  
+  const chartWidth = pageWidth - 2 * margin;
+  const maxVal = Math.max(...data.map(d => d.value));
+  
+  doc.setFontSize(9);
+  doc.setFont(undefined, 'normal');
+  
+  data.forEach(item => {
+    // Draw label
+    doc.setTextColor(0, 0, 0);
+    doc.text(item.label, margin, yPosition);
+    
+    // Draw bar background
+    doc.setFillColor(240, 240, 240);
+    doc.rect(margin + 60, yPosition - 4, chartWidth - 80, 5, 'F');
+    
+    // Draw bar
+    if (item.value > 0) {
+      const barWidth = ((chartWidth - 80) * item.value) / (maxVal || 1);
+      doc.setFillColor(0, 150, 255);
+      doc.rect(margin + 60, yPosition - 4, barWidth, 5, 'F');
+    }
+    
+    // Draw value text
+    doc.text(String(item.value), margin + 60 + chartWidth - 75, yPosition);
+    
+    yPosition += 8;
+  });
+  
+  return yPosition + 10;
+};
+
+/**
  * Generate a professional PDF report header with RNP branding
  */
 export const addReportHeader = (doc, title, subtitle = '') => {
@@ -381,9 +427,21 @@ export const generateMonthlyReportPDF = async (incidents = [], emergencies = [],
   const pageWidth = doc.internal.pageSize.getWidth();
   const margin = 15;
   
-  // Ensure arrays
-  const safeIncidents = incidents || [];
-  const safeEmergencies = emergencies || [];
+  // Ensure arrays and filter by month
+  const targetMonth = month.getMonth();
+  const targetYear = month.getFullYear();
+  
+  const safeIncidents = (incidents || []).filter(item => {
+    if (!item.created_at && !item.timestamp) return false;
+    const itemDate = new Date(item.created_at || item.timestamp);
+    return itemDate.getMonth() === targetMonth && itemDate.getFullYear() === targetYear;
+  });
+  
+  const safeEmergencies = (emergencies || []).filter(item => {
+    if (!item.created_at && !item.timestamp) return false;
+    const itemDate = new Date(item.created_at || item.timestamp);
+    return itemDate.getMonth() === targetMonth && itemDate.getFullYear() === targetYear;
+  });
   
   // Summary Statistics
   yPosition += 10;
@@ -440,6 +498,12 @@ export const generateMonthlyReportPDF = async (incidents = [], emergencies = [],
       incidentsByType[type] = (incidentsByType[type] || 0) + 1;
     });
     
+    const chartData = Object.entries(incidentsByType)
+      .sort((a, b) => b[1] - a[1])
+      .map(([label, value]) => ({ label, value }));
+      
+    yPosition = drawBarChart(doc, 'Incidents by Type (Chart)', chartData, yPosition, margin, pageWidth);
+    
     const typeData = Object.entries(incidentsByType).map(([type, count]) => [
       type,
       count,
@@ -482,6 +546,17 @@ export const generateMonthlyReportPDF = async (incidents = [], emergencies = [],
       const severity = incident?.severity || 'Unknown';
       incidentsBySeverity[severity] = (incidentsBySeverity[severity] || 0) + 1;
     });
+
+    const severityChartData = Object.entries(incidentsBySeverity)
+      .sort((a, b) => b[1] - a[1])
+      .map(([label, value]) => ({ label: label.toUpperCase(), value }));
+    
+    if (yPosition > doc.internal.pageSize.getHeight() - 80) {
+      doc.addPage();
+      yPosition = 20;
+    }
+      
+    yPosition = drawBarChart(doc, 'Incidents by Severity (Chart)', severityChartData, yPosition, margin, pageWidth);
     
     const severityData = Object.entries(incidentsBySeverity).map(([severity, count]) => [
       severity.toUpperCase(),
@@ -507,8 +582,60 @@ export const generateMonthlyReportPDF = async (incidents = [], emergencies = [],
         fillColor: [240, 240, 240]
       }
     });
+
+    yPosition = doc.lastAutoTable.finalY + 15;
   }
   
+  // Incidents by Location (Top 10 Locations)
+  if (safeIncidents.length > 0) {
+    const pageHeight = doc.internal.pageSize.getHeight();
+    if (yPosition > pageHeight - 80) {
+      doc.addPage();
+      yPosition = 20;
+    }
+
+    doc.setFontSize(12);
+    doc.setFont(undefined, 'bold');
+    doc.setTextColor(50, 150, 255);
+    doc.text('High Frequency Incident Locations (Top 10)', margin, yPosition);
+
+    yPosition += 10;
+    
+    const incidentsByLocation = {};
+    safeIncidents.forEach(incident => {
+      const location = incident?.location_name || incident?.location || 'Unknown Coordinates';
+      incidentsByLocation[location] = (incidentsByLocation[location] || 0) + 1;
+    });
+    
+    const locationData = Object.entries(incidentsByLocation)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10) // Top 10 locations
+      .map(([location, count]) => [
+        location,
+        count,
+        totalIncidents > 0 ? ((count / totalIncidents) * 100).toFixed(1) + '%' : '0%'
+      ]);
+    
+    doc.autoTable({
+      startY: yPosition,
+      head: [['Location', 'Incident Count', 'Percentage']],
+      body: locationData,
+      margin: { left: margin, right: margin },
+      theme: 'grid',
+      headStyles: {
+        fillColor: [50, 150, 255],
+        textColor: [255, 255, 255],
+        fontStyle: 'bold'
+      },
+      bodyStyles: {
+        textColor: [0, 0, 0]
+      },
+      alternateRowStyles: {
+        fillColor: [240, 240, 240]
+      }
+    });
+  }
+
   // Add footer
   addReportFooter(doc, 1);
   
@@ -525,9 +652,20 @@ export const generateAnnualReportPDF = async (incidents = [], emergencies = [], 
   const doc = new jsPDF();
   let pageNumber = 1;
   
-  // Ensure arrays
-  const safeIncidents = incidents || [];
-  const safeEmergencies = emergencies || [];
+  // Ensure arrays and filter by year
+  const targetYear = parseInt(year);
+  
+  const safeIncidents = (incidents || []).filter(item => {
+    if (!item.created_at && !item.timestamp) return false;
+    const itemDate = new Date(item.created_at || item.timestamp);
+    return itemDate.getFullYear() === targetYear;
+  });
+  
+  const safeEmergencies = (emergencies || []).filter(item => {
+    if (!item.created_at && !item.timestamp) return false;
+    const itemDate = new Date(item.created_at || item.timestamp);
+    return itemDate.getFullYear() === targetYear;
+  });
   
   // Title Page
   let yPosition = addReportHeader(doc, 'Annual Traffic Report', `Year ${year}`);
@@ -720,7 +858,7 @@ Key Highlights:
         fillColor: [240, 240, 240]
       }
     });
-    
+
     yPosition = doc.lastAutoTable.finalY + 15;
   }
   
@@ -771,8 +909,66 @@ Key Highlights:
         fillColor: [240, 240, 240]
       }
     });
+
+    yPosition = doc.lastAutoTable.finalY + 15;
   }
-  
+
+  // Incidents by Location (Top 10 Locations for Alternative Routes)
+  if (safeIncidents.length > 0) {
+    if (yPosition > pageHeight - 80) {
+      doc.addPage();
+      pageNumber++;
+      yPosition = 20;
+    }
+
+    doc.setFontSize(12);
+    doc.setFont(undefined, 'bold');
+    doc.setTextColor(50, 150, 255);
+    doc.text('High Frequency Incident Locations', margin, yPosition);
+
+    yPosition += 8;
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'normal');
+    doc.setTextColor(100, 100, 100);
+    doc.text('These locations show high frequency of traffic jams and accidents. Institutions may consider road expansion or creating alternative routes.', margin, yPosition, { maxWidth: pageWidth - 2 * margin });
+
+    yPosition += 10;
+    
+    const incidentsByLocation = {};
+    safeIncidents.forEach(incident => {
+      const location = incident?.location_name || incident?.location || 'Unknown Coordinates';
+      incidentsByLocation[location] = (incidentsByLocation[location] || 0) + 1;
+    });
+    
+    const locationData = Object.entries(incidentsByLocation)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10) // Top 10 locations
+      .map(([location, count]) => [
+        location,
+        count,
+        totalIncidents > 0 ? ((count / totalIncidents) * 100).toFixed(1) + '%' : '0%'
+      ]);
+    
+    doc.autoTable({
+      startY: yPosition,
+      head: [['Location', 'Incident Count', 'Percentage']],
+      body: locationData,
+      margin: { left: margin, right: margin },
+      theme: 'grid',
+      headStyles: {
+        fillColor: [50, 150, 255],
+        textColor: [255, 255, 255],
+        fontStyle: 'bold'
+      },
+      bodyStyles: {
+        textColor: [0, 0, 0]
+      },
+      alternateRowStyles: {
+        fillColor: [240, 240, 240]
+      }
+    });
+  }
+
   // Add footer to all pages
   const totalPages = doc.internal.pages.length - 1;
   for (let i = 1; i <= totalPages; i++) {

@@ -22,10 +22,11 @@ const recentIncidentsCache = new Map();
 // Configuration
 const CONFIG = {
     // Radius in meters to consider incidents as same location
-    LOCATION_RADIUS_METERS: 100,
+    // Reduced from 100 to 30 meters to allow distinct reports at nearby spots (e.g. Bus Station vs Roundabout)
+    LOCATION_RADIUS_METERS: 30,
     
     // Time window in minutes - incidents within this window are potential duplicates
-    TIME_WINDOW_MINUTES: 30,
+    TIME_WINDOW_MINUTES: 10,
     
     // Minimum confidence to override existing incident
     MIN_CONFIDENCE_TO_UPDATE: 0.7,

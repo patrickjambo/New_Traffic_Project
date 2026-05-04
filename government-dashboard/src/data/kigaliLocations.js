@@ -103,20 +103,20 @@ export const kigaliLocations = {
   landmarks: [
     // Transport hubs
     { name: "Kigali International Airport", lat: -1.9686, lng: 30.1395, type: "transport" },
-    { name: "Nyabugogo Bus Park", lat: -1.9378, lng: 30.0441, type: "transport" },
-    { name: "Nyabugogo Taxi Park", lat: -1.9378, lng: 30.0441, type: "transport" },
-    { name: "Remera Bus Stop", lat: -1.9456, lng: 30.1159, type: "transport" },
-    { name: "Downtown Bus Stop", lat: -1.9536, lng: 30.0606, type: "transport" },
-    { name: "Kimironko Bus Stop", lat: -1.9487, lng: 30.1262, type: "transport" },
+    { name: "Nyabugogo Bus Park", lat: -1.9372, lng: 30.0435, type: "transport" },
+    { name: "Nyabugogo Taxi Park", lat: -1.9380, lng: 30.0448, type: "transport" },
+    { name: "Remera Bus Stop", lat: -1.9460, lng: 30.1162, type: "transport" },
+    { name: "Downtown Bus Stop", lat: -1.9540, lng: 30.0610, type: "transport" },
+    { name: "Kimironko Bus Stop", lat: -1.9495, lng: 30.1270, type: "transport" },
     
     // Major roundabouts & junctions
     { name: "Kacyiru Roundabout", lat: -1.9425, lng: 30.0904, type: "junction" },
     { name: "Kimihurura Roundabout", lat: -1.9458, lng: 30.1039, type: "junction" },
     { name: "Sonatube Roundabout", lat: -1.9739, lng: 30.0964, type: "junction" },
     { name: "Prince House Roundabout", lat: -1.9731, lng: 30.1012, type: "junction" },
-    { name: "Remera Roundabout", lat: -1.9456, lng: 30.1159, type: "junction" },
+    { name: "Remera Roundabout", lat: -1.9448, lng: 30.1140, type: "junction" },
     { name: "Gisimenti Roundabout", lat: -1.9412, lng: 30.0758, type: "junction" },
-    { name: "Nyabugogo Roundabout", lat: -1.9378, lng: 30.0441, type: "junction" },
+    { name: "Nyabugogo Roundabout", lat: -1.9385, lng: 30.0440, type: "junction" },
     { name: "Kicukiro Roundabout", lat: -1.9897, lng: 30.1011, type: "junction" },
     { name: "Kanombe Roundabout", lat: -1.9686, lng: 30.1350, type: "junction" },
     { name: "Airport Roundabout", lat: -1.9680, lng: 30.1380, type: "junction" },

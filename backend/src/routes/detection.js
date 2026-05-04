@@ -112,7 +112,23 @@ async function processVideoAsync(videoPath, videoId, originalName) {
             timeout: 180000 // 3 minute timeout
         });
 
-        const incidents = aiResponse.data.incidents || [];
+        const aiData = aiResponse.data || {};
+        let incidents = Array.isArray(aiData.incidents) ? aiData.incidents : [];
+
+        // Fallback for lightweight AI service: single-result response
+        if (incidents.length === 0 && aiData.incident_detected &&
+            aiData.incident_type && !['none', 'normal', 'error'].includes(aiData.incident_type)) {
+            incidents = [
+                {
+                    type: aiData.incident_type,
+                    confidence: aiData.confidence || 0.0,
+                    timestamp: aiData.timestamp_in_video || 0,
+                    location: aiData.location || { latitude: null, longitude: null },
+                    description: aiData.description || undefined,
+                }
+            ];
+        }
+
         console.log(`✅ [${videoId}] AI analysis complete: ${incidents.length} detection(s)`);
 
         // Store incidents in database and emit via socketManager

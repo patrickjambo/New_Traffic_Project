@@ -63,6 +63,11 @@ const OfficerManagement = () => {
   const [submitting, setSubmitting] = useState(false);
 
   const fetchOfficers = useCallback(async () => {
+    // Guard: only fetch when user is authenticated and authorized
+    if (!isAuthenticated || !user || (user?.role !== 'admin' && user?.role !== 'district_admin')) {
+      return;
+    }
+
     try {
       setLoading(true);
       const params = {};
@@ -73,12 +78,19 @@ const OfficerManagement = () => {
       const response = await axios.get('/api/admin/officers', { params });
       setOfficers(response.data.data || []);
     } catch (error) {
+      const status = error?.response?.status;
+      const msg = error?.response?.data?.message || error.message || 'Failed to load officers';
       console.error('Error fetching officers:', error);
-      toast.error('Failed to load officers');
+      // Show a clearer error for auth failures
+      if (status === 401 || status === 403) {
+        toast.error('Session expired or unauthorized. Please login again.');
+      } else {
+        toast.error(msg);
+      }
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, searchTerm]);
+  }, [statusFilter, searchTerm, isAuthenticated, user]);
 
   useEffect(() => {
     fetchOfficers();

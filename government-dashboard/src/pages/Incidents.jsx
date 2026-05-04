@@ -5,8 +5,10 @@ import { useData } from '../context/DataContext';
 import { AlertTriangle, Search, Filter, CheckCircle, Clock, MapPin } from 'lucide-react';
 import axios from '../config/axios';
 import toast from 'react-hot-toast';
+import { useTranslation } from 'react-i18next';
 
 const Incidents = () => {
+  const { t } = useTranslation();
   const { isAuthenticated } = useAuth();
   const { incidents, loading, updateIncidentStatus } = useData();
   const [filter, setFilter] = useState('all');
@@ -37,9 +39,9 @@ const Incidents = () => {
         <div>
           <h1 className="text-2xl font-bold text-white flex items-center gap-2">
             <AlertTriangle className="w-8 h-8 text-cyan-500" />
-            Incidents Management
+            {t('incidents_title')}
           </h1>
-          <p className="text-gray-400 mt-1">Monitor and manage traffic incidents in real-time</p>
+          <p className="text-gray-400 mt-1">{t('incidents_subtitle')}</p>
         </div>
 
         <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
@@ -47,7 +49,7 @@ const Incidents = () => {
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
             <input
               type="text"
-              placeholder="Search incidents..."
+              placeholder={t('incidents_search_placeholder')}
               className="pl-10 pr-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-cyan-500 w-full"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
@@ -60,21 +62,21 @@ const Incidents = () => {
               className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${filter === 'all' ? 'bg-cyan-600 text-white' : 'text-gray-400 hover:text-white'
                 }`}
             >
-              All
+              {t('incidents_filter_all')}
             </button>
             <button
               onClick={() => setFilter('active')}
               className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${filter === 'active' ? 'bg-cyan-500/20 text-cyan-400' : 'text-gray-400 hover:text-white'
                 }`}
             >
-              Active
+              {t('incidents_filter_active')}
             </button>
             <button
               onClick={() => setFilter('resolved')}
               className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${filter === 'resolved' ? 'bg-cyan-500/20 text-cyan-400' : 'text-gray-400 hover:text-white'
                 }`}
             >
-              Resolved
+              {t('incidents_filter_resolved')}
             </button>
           </div>
         </div>
@@ -90,12 +92,12 @@ const Incidents = () => {
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-slate-900/50 border-b border-white/5 text-gray-400 text-sm uppercase tracking-wider">
-                  <th className="p-4 font-medium">Type</th>
-                  <th className="p-4 font-medium">Location</th>
-                  <th className="p-4 font-medium">Severity</th>
-                  <th className="p-4 font-medium">Status</th>
-                  <th className="p-4 font-medium">Time</th>
-                  <th className="p-4 font-medium text-right">Actions</th>
+                  <th className="p-4 font-medium">{t('incidents_table_type')}</th>
+                  <th className="p-4 font-medium">{t('incidents_table_location')}</th>
+                  <th className="p-4 font-medium">{t('incidents_table_severity')}</th>
+                  <th className="p-4 font-medium">{t('incidents_table_status')}</th>
+                  <th className="p-4 font-medium">{t('incidents_table_time')}</th>
+                  <th className="p-4 font-medium text-right">{t('incidents_table_actions')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5">
@@ -156,7 +158,7 @@ const Incidents = () => {
                             className="text-sm bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1 ml-auto"
                           >
                             <CheckCircle className="w-4 h-4" />
-                            Resolve
+                            {t('incidents_resolve')}
                           </button>
                         )}
                       </td>
@@ -165,7 +167,7 @@ const Incidents = () => {
                 ) : (
                   <tr>
                     <td colSpan="6" className="p-8 text-center text-gray-500">
-                      No incidents found matching your criteria
+                      {t('incidents_empty')}
                     </td>
                   </tr>
                 )}

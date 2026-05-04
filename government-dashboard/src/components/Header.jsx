@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
 import { useWebSocket } from '../context/WebSocketContext';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import axios from '../config/axios';
 import toast from 'react-hot-toast';
 
@@ -12,6 +13,7 @@ const Header = ({ onMenuClick }) => {
   const { notifications, unreadCount, markNotificationRead } = useData();
   const { isConnected, connectionStatus } = useWebSocket();
   const navigate = useNavigate();
+  const { i18n, t } = useTranslation();
   const [currentTime, setCurrentTime] = useState(new Date());
 
   // Notification State
@@ -101,6 +103,12 @@ const Header = ({ onMenuClick }) => {
     return date.toLocaleTimeString('en-US', { hour12: false });
   };
 
+  const toggleLanguage = () => {
+    const newLang = i18n.language === 'en' ? 'rw' : 'en';
+    i18n.changeLanguage(newLang);
+    toast.success(`Language changed to ${newLang === 'en' ? 'English' : 'Kinyarwanda'}`);
+  };
+
   return (
     <header className="bg-gray-800 border-b border-gray-700 h-20 relative z-40 shadow-md">
       <div className="flex items-center justify-between h-full px-6">
@@ -139,7 +147,7 @@ const Header = ({ onMenuClick }) => {
               <WifiOff className="w-3.5 h-3.5" />
             )}
             <span className="text-[10px] font-bold uppercase tracking-wider">
-              {connectionStatus === 'connected' ? 'Live' : connectionStatus === 'connecting' ? 'Connecting' : 'Offline'}
+              {connectionStatus === 'connected' ? t('status_live') : connectionStatus === 'connecting' ? t('status_connecting') : t('status_offline')}
             </span>
           </div>
 
@@ -158,7 +166,7 @@ const Header = ({ onMenuClick }) => {
             </div>
             <input
               type="text"
-              placeholder="Search incidents..."
+              placeholder={t('header_search_incidents')}
               className="block w-full pl-10 pr-3 py-2 bg-gray-800 border border-gray-700 rounded-full text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-transparent transition-all"
               value={searchQuery}
               onChange={(e) => handleSearch(e.target.value)}
@@ -189,7 +197,7 @@ const Header = ({ onMenuClick }) => {
                           result.severity === 'high' ? 'border-cyan-600 text-cyan-400' :
                             'border-cyan-500 text-cyan-400'
                         }`}>
-                        {result.isCategory ? 'CATEGORY' : result.severity}
+                        {result.isCategory ? t('label_category') : result.severity}
                       </span>
                     </div>
                   </button>
@@ -200,6 +208,15 @@ const Header = ({ onMenuClick }) => {
         </div>
 
         <div className="flex items-center gap-4">
+          {/* Language Switcher */}
+          <button
+            onClick={toggleLanguage}
+            className="flex items-center justify-center p-2 rounded-lg text-sm font-bold text-gray-400 hover:text-white hover:bg-white/10 transition-colors uppercase border border-gray-600 w-10 h-10 ml-2"
+            title="Switch Language"
+          >
+            {i18n.language === 'rw' ? 'RW' : 'EN'}
+          </button>
+
           {/* Notifications */}
           <div className="relative">
             <button
@@ -216,7 +233,7 @@ const Header = ({ onMenuClick }) => {
             {showNotifications && (
               <div className="absolute right-0 mt-2 w-80 bg-slate-800 border border-slate-700 rounded-xl shadow-xl overflow-hidden z-50">
                 <div className="p-3 border-b border-slate-700 flex justify-between items-center">
-                  <h3 className="font-semibold text-white">Notifications</h3>
+                  <h3 className="font-semibold text-white">{t('header_notifications')}</h3>
                   <button
                     onClick={() => setShowNotifications(false)}
                     className="text-gray-400 hover:text-white"
@@ -247,7 +264,7 @@ const Header = ({ onMenuClick }) => {
                     ))
                   ) : (
                     <div className="p-8 text-center text-gray-500">
-                      No notifications
+                      {t('header_no_notifications')}
                     </div>
                   )}
                 </div>
@@ -302,7 +319,7 @@ const Header = ({ onMenuClick }) => {
                     ) : (
                       <User className="w-4 h-4" />
                     )}
-                    Profile
+                    {t('header_profile')}
                   </button>
                   <div className="h-px bg-slate-700 my-1"></div>
                   <button
@@ -310,7 +327,7 @@ const Header = ({ onMenuClick }) => {
                     className="w-full text-left px-3 py-2 text-sm text-red-400 hover:bg-red-500/10 rounded-lg flex items-center gap-2 transition-colors"
                   >
                     <LogOut className="w-4 h-4" />
-                    Logout
+                    {t('header_logout')}
                   </button>
                 </div>
               </div>

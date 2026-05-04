@@ -6,7 +6,10 @@ import { useAuth } from '../context/AuthContext';
 import ReportIncidentForm from '../components/ReportIncidentForm';
 import Modal from '../components/Modal';
 import DailyIncidentsModal from '../components/DailyIncidentsModal';
+import IncidentMap from '../components/IncidentMap';
+import RoutePlanner from '../components/RoutePlanner';
 import RoutePlannerMap from '../components/RoutePlannerMap';
+import { useTranslation } from 'react-i18next';
 
 // ============================================
 // Animated Counter Component - smooth number transitions
@@ -66,18 +69,18 @@ const AnimatedCounter = ({ value, duration = 800, suffix = '' }) => {
   );
 };
 
-const heroSlides = [
-  { id: 1, image: '/assets/hero/traffic-police-kigali.png', title: 'Report Traffic Congestion', subtitle: 'Help fellow citizens avoid delays by reporting traffic jams', gradient: 'from-blue-600', accent: 'blue' },
-  { id: 2, image: '/assets/hero/kigali-night-traffic.png', title: 'Real-Time Traffic Updates', subtitle: 'Stay informed about traffic conditions across Kigali 24/7', gradient: 'from-indigo-600', accent: 'indigo' },
-  { id: 3, image: '/assets/hero/road-accident.png', title: 'Report Road Accidents', subtitle: 'Your quick report enables faster emergency response', gradient: 'from-red-600', accent: 'red' },
-  { id: 4, image: '/assets/hero/bus-accident-response.png', title: 'Emergency Response', subtitle: 'Rwanda National Police responds quickly to all incidents', gradient: 'from-orange-600', accent: 'orange' },
-  { id: 5, image: '/assets/hero/rnp-fire-brigade.png', title: 'Fire & Rescue Ready', subtitle: 'Fire Brigade always ready to respond', gradient: 'from-emerald-600', accent: 'green' },
-  { id: 6, image: '/assets/hero/firefighter-action.png', title: 'Report Fire Emergencies', subtitle: 'Alert fire brigade immediately', gradient: 'from-rose-600', accent: 'red' }
-];
-
 const HomePage = () => {
   const { incidents, emergencies, loading, statistics, isConnected } = useData();
   const { user } = useAuth();
+  const { i18n, t } = useTranslation();
+  const heroSlides = React.useMemo(() => ([
+    { id: 1, image: '/assets/hero/traffic-police-kigali.png', title: t('home_hero_title_1'), subtitle: t('home_hero_subtitle_1'), gradient: 'from-blue-600', accent: 'blue' },
+    { id: 2, image: '/assets/hero/kigali-night-traffic.png', title: t('home_hero_title_2'), subtitle: t('home_hero_subtitle_2'), gradient: 'from-indigo-600', accent: 'indigo' },
+    { id: 3, image: '/assets/hero/road-accident.png', title: t('home_hero_title_3'), subtitle: t('home_hero_subtitle_3'), gradient: 'from-red-600', accent: 'red' },
+    { id: 4, image: '/assets/hero/bus-accident-response.png', title: t('home_hero_title_4'), subtitle: t('home_hero_subtitle_4'), gradient: 'from-orange-600', accent: 'orange' },
+    { id: 5, image: '/assets/hero/rnp-fire-brigade.png', title: t('home_hero_title_5'), subtitle: t('home_hero_subtitle_5'), gradient: 'from-emerald-600', accent: 'green' },
+    { id: 6, image: '/assets/hero/firefighter-action.png', title: t('home_hero_title_6'), subtitle: t('home_hero_subtitle_6'), gradient: 'from-rose-600', accent: 'red' }
+  ]), [t]);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showIncidentModal, setShowIncidentModal] = useState(false);
   const [showEmergencyModal, setShowEmergencyModal] = useState(false);
@@ -89,6 +92,7 @@ const HomePage = () => {
   const [lastUpdated, setLastUpdated] = useState(new Date());
   const [statsFlash, setStatsFlash] = useState(false);
   const prevStatsRef = useRef(null);
+  const [reportSuccess, setReportSuccess] = useState(false);
 
   // Combine incidents and emergencies into a unified feed, sorted by newest first
   const allReports = React.useMemo(() => {
@@ -96,15 +100,15 @@ const HomePage = () => {
       ...(incidents || []).map(inc => ({
         ...inc,
         reportType: 'incident',
-        incident_type: inc.incident_type || inc.type || 'Traffic Incident',
-        location: inc.location || inc.address || 'Kigali, Rwanda',
+        incident_type: inc.incident_type || inc.type || t('home_default_incident'),
+        location: inc.location || inc.address || t('home_default_location'),
         created_at: inc.created_at || inc.createdAt,
       })),
       ...(emergencies || []).map(em => ({
         ...em,
         reportType: 'emergency',
-        incident_type: em.emergency_type || em.type || 'Emergency',
-        location: em.location_name || em.location || 'Kigali, Rwanda',
+        incident_type: em.emergency_type || em.type || t('home_default_emergency'),
+        location: em.location_name || em.location || t('home_default_location'),
         created_at: em.created_at || em.createdAt,
         source: em.source || 'manual',
       }))
@@ -117,6 +121,14 @@ const HomePage = () => {
       return dateB - dateA;
     });
   }, [incidents, emergencies]);
+
+  // Only active reports for maps and feeds
+  const activeReports = React.useMemo(() => {
+    return allReports.filter(report => {
+      const status = String(report.status || '').toLowerCase();
+      return status !== 'resolved' && status !== 'cleared' && status !== 'false_alarm';
+    });
+  }, [allReports]);
 
   // Animated wave effect for header
   useEffect(() => {
@@ -132,18 +144,18 @@ const HomePage = () => {
   }, []);
 
   const formatTime = (ts) => {
-    if (!ts) return 'Just now';
+    if (!ts) return t('home_time_just_now');
     try {
       const date = new Date(ts);
-      if (isNaN(date.getTime())) return 'Just now';
+      if (isNaN(date.getTime())) return t('home_time_just_now');
       const diff = Math.floor((Date.now() - date) / 1000);
-      if (diff < 0) return 'Just now';
-      if (diff < 60) return 'Just now';
-      if (diff < 3600) return Math.floor(diff/60) + 'm ago';
-      if (diff < 86400) return Math.floor(diff/3600) + 'h ago';
-      return Math.floor(diff/86400) + 'd ago';
+      if (diff < 0) return t('home_time_just_now');
+      if (diff < 60) return t('home_time_just_now');
+      if (diff < 3600) return t('home_time_min_ago', { count: Math.floor(diff / 60) });
+      if (diff < 86400) return t('home_time_hour_ago', { count: Math.floor(diff / 3600) });
+      return t('home_time_day_ago', { count: Math.floor(diff / 86400) });
     } catch {
-      return 'Just now';
+      return t('home_time_just_now');
     }
   };
 
@@ -232,10 +244,10 @@ const HomePage = () => {
 
   const formatLastUpdated = useCallback(() => {
     const seconds = Math.floor((Date.now() - lastUpdated.getTime()) / 1000);
-    if (seconds < 5) return 'Just now';
-    if (seconds < 60) return `${seconds}s ago`;
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-    return `${Math.floor(seconds / 3600)}h ago`;
+    if (seconds < 5) return t('home_time_just_now');
+    if (seconds < 60) return t('home_time_sec_ago', { count: seconds });
+    if (seconds < 3600) return t('home_time_min_ago', { count: Math.floor(seconds / 60) });
+    return t('home_time_hour_ago', { count: Math.floor(seconds / 3600) });
   }, [lastUpdated]);
 
   // ============================================
@@ -365,10 +377,10 @@ const HomePage = () => {
   }, [showIncidentModal, showEmergencyModal, showDailyIncidentsModal, selectedIncident, showRoutePlanner]);
 
   const stats = [
-    { label: 'Total Reports', value: realTimeStats.totalReports, rawValue: realTimeStats.totalReports, icon: FileWarning },
-    { label: 'Active Now', value: realTimeStats.activeNow, rawValue: realTimeStats.activeNow, icon: Radio },
-    { label: 'Avg Response', value: realTimeStats.avgResponseTime + 'min', rawValue: realTimeStats.avgResponseTime, suffix: 'min', icon: Clock },
-    { label: 'Resolved Today', value: realTimeStats.resolvedToday, rawValue: realTimeStats.resolvedToday, icon: CheckCircle }
+    { label: t('home_stats_total_reports'), value: realTimeStats.totalReports, rawValue: realTimeStats.totalReports, icon: FileWarning },
+    { label: t('home_stats_active_now'), value: realTimeStats.activeNow, rawValue: realTimeStats.activeNow, icon: Radio },
+    { label: t('home_stats_avg_response'), value: realTimeStats.avgResponseTime + t('home_stats_minutes_suffix'), rawValue: realTimeStats.avgResponseTime, suffix: t('home_stats_minutes_suffix'), icon: Clock },
+    { label: t('home_stats_resolved_today'), value: realTimeStats.resolvedToday, rawValue: realTimeStats.resolvedToday, icon: CheckCircle }
   ];
 
   return (
@@ -413,8 +425,8 @@ const HomePage = () => {
                 </div>
               </div>
               <div className="hidden sm:block">
-                <h1 className="text-lg font-bold text-white tracking-tight">RNP Traffic Guard</h1>
-                <p className="text-[10px] font-medium text-cyan-300 tracking-wider uppercase">Rwanda National Police</p>
+                <h1 className="text-lg font-bold text-white tracking-tight">{t('home_brand_title')}</h1>
+                <p className="text-[10px] font-medium text-cyan-300 tracking-wider uppercase">{t('home_brand_subtitle')}</p>
               </div>
             </Link>
 
@@ -423,50 +435,75 @@ const HomePage = () => {
               {/* About - Scrolls to About section */}
               <a href="#about" className="group flex items-center gap-2 px-3 py-2 rounded-lg text-cyan-100 hover:text-white bg-cyan-500/10 hover:bg-cyan-500/25 border border-cyan-400/20 hover:border-cyan-400/50 transition-all duration-300">
                 <Users className="w-4 h-4 text-cyan-400 group-hover:scale-110 transition-transform duration-300" />
-                <span className="font-medium text-sm">About</span>
+                <span className="font-medium text-sm">{t('nav_about')}</span>
               </a>
 
               {/* Check Route - Shows Route Planner and scrolls to it */}
               <button onClick={() => { setShowRoutePlanner(true); setTimeout(() => document.getElementById('route-planner')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100); }} className="group flex items-center gap-2 px-3 py-2 rounded-lg text-cyan-100 hover:text-white bg-cyan-500/10 hover:bg-cyan-500/25 border border-cyan-400/20 hover:border-cyan-400/50 transition-all duration-300">
                 <Navigation className="w-4 h-4 text-cyan-400 group-hover:rotate-45 transition-transform duration-300" />
-                <span className="font-medium text-sm">Check Route</span>
+                <span className="font-medium text-sm">{t('nav_check_route')}</span>
               </button>
 
               {/* Live Incidents - Opens Modal */}
               <button onClick={() => setShowDailyIncidentsModal(true)} className="group flex items-center gap-2 px-3 py-2 rounded-lg text-cyan-100 hover:text-white bg-cyan-500/10 hover:bg-cyan-500/25 border border-cyan-400/20 hover:border-cyan-400/50 transition-all duration-300">
                 <Eye className="w-4 h-4 text-cyan-400 group-hover:scale-110 transition-transform duration-300" />
-                <span className="font-medium text-sm">Live Incidents</span>
+                <span className="font-medium text-sm">{t('nav_live_incidents')}</span>
               </button>
 
               {/* Emergency - Consistent cyan style with red icon */}
               <button onClick={() => setShowEmergencyModal(true)} className="group flex items-center gap-2 px-3 py-2 rounded-lg text-cyan-100 hover:text-white bg-cyan-500/10 hover:bg-cyan-500/25 border border-cyan-400/20 hover:border-cyan-400/50 transition-all duration-300">
                 <Siren className="w-4 h-4 text-red-400 animate-pulse group-hover:scale-110 transition-transform duration-300" />
-                <span className="font-medium text-sm">Emergency</span>
+                <span className="font-medium text-sm">{t('nav_emergency')}</span>
               </button>
 
               {/* Report - Consistent cyan style */}
               <button onClick={() => setShowIncidentModal(true)} className="group flex items-center gap-2 px-3 py-2 rounded-lg text-cyan-100 hover:text-white bg-cyan-500/10 hover:bg-cyan-500/25 border border-cyan-400/20 hover:border-cyan-400/50 transition-all duration-300">
                 <Camera className="w-4 h-4 text-cyan-400 group-hover:scale-110 transition-transform duration-300" />
-                <span className="font-medium text-sm">Report</span>
+                <span className="font-medium text-sm">{t('nav_report')}</span>
               </button>
 
               {/* Login/Dashboard */}
               {user ? (
                 <Link to="/dashboard" className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/95 text-slate-900 font-semibold text-sm hover:bg-white shadow-lg hover:shadow-xl transition-all duration-300">
                   <Shield className="w-4 h-4 text-blue-600" />
-                  <span>Dashboard</span>
+                  <span>{t('nav_dashboard')}</span>
                 </Link>
               ) : (
                 <Link to="/login" className="flex items-center gap-2 px-4 py-2 rounded-lg border-2 border-cyan-400/60 text-cyan-300 font-semibold text-sm hover:bg-cyan-400/10 hover:border-cyan-400 hover:text-cyan-200 transition-all duration-300">
-                  <span>Login</span>
+                  <span>{t('nav_login')}</span>
                 </Link>
               )}
+
+              {/* Language Switcher */}
+              <button
+                onClick={() => {
+                  const newLang = i18n.language === 'en' ? 'rw' : 'en';
+                  i18n.changeLanguage(newLang);
+                }}
+                className="flex items-center justify-center p-2 rounded-lg text-sm font-bold text-cyan-100 hover:text-white bg-cyan-500/10 hover:bg-cyan-500/25 border border-cyan-400/20 hover:border-cyan-400/50 transition-all uppercase w-10 h-10 ml-2"
+                title={t('home_switch_language')}
+              >
+                {i18n.language === 'rw' ? 'RW' : 'EN'}
+              </button>
+
             </nav>
 
             {/* Mobile menu button */}
-            <button className="lg:hidden p-2 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-400/30 transition-all" onClick={() => setMobileMenuOpen(!mobileMenuOpen)}>
-              {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
-            </button>
+            <div className="flex items-center gap-2 lg:hidden">
+              <button
+                onClick={() => {
+                  const newLang = i18n.language === 'en' ? 'rw' : 'en';
+                  i18n.changeLanguage(newLang);
+                }}
+                className="flex items-center justify-center p-2 rounded-lg text-sm font-bold text-cyan-300 bg-cyan-500/20 border border-cyan-400/30 transition-all uppercase w-10 h-10"
+                title={t('home_switch_language')}
+              >
+                {i18n.language === 'rw' ? 'RW' : 'EN'}
+              </button>
+              <button className="p-2 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-400/30 transition-all" onClick={() => setMobileMenuOpen(!mobileMenuOpen)}>
+                {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+              </button>
+            </div>
           </div>
         </div>
 
@@ -474,27 +511,27 @@ const HomePage = () => {
         {mobileMenuOpen && (
           <div className="lg:hidden bg-slate-900/98 backdrop-blur-xl border-t border-cyan-500/20 p-4 space-y-2">
             <a href="#about" onClick={() => setMobileMenuOpen(false)} className="w-full flex items-center gap-3 p-3 rounded-xl bg-cyan-500/10 border border-cyan-400/20 text-cyan-100 hover:bg-cyan-500/20 transition-all">
-              <Users className="w-5 h-5 text-cyan-400" /><span className="font-medium">About</span>
+              <Users className="w-5 h-5 text-cyan-400" /><span className="font-medium">{t('nav_about')}</span>
             </a>
             <button onClick={() => { setShowRoutePlanner(true); setMobileMenuOpen(false); setTimeout(() => document.getElementById('route-planner')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100); }} className="w-full flex items-center gap-3 p-3 rounded-xl bg-cyan-500/10 border border-cyan-400/20 text-cyan-100 hover:bg-cyan-500/20 transition-all">
-              <Navigation className="w-5 h-5 text-cyan-400" /><span className="font-medium">Check Route</span>
+              <Navigation className="w-5 h-5 text-cyan-400" /><span className="font-medium">{t('nav_check_route')}</span>
             </button>
             <button onClick={() => { setShowDailyIncidentsModal(true); setMobileMenuOpen(false); }} className="w-full flex items-center gap-3 p-3 rounded-xl bg-cyan-500/10 border border-cyan-400/20 text-cyan-100 hover:bg-cyan-500/20 transition-all">
-              <Eye className="w-5 h-5 text-cyan-400" /><span className="font-medium">Live Incidents</span>
+              <Eye className="w-5 h-5 text-cyan-400" /><span className="font-medium">{t('nav_live_incidents')}</span>
             </button>
             <button onClick={() => { setShowEmergencyModal(true); setMobileMenuOpen(false); }} className="w-full flex items-center gap-3 p-3 rounded-xl bg-cyan-500/10 border border-cyan-400/20 text-cyan-100 hover:bg-cyan-500/20 transition-all">
-              <Siren className="w-5 h-5 text-red-400 animate-pulse" /><span className="font-medium">Emergency</span>
+              <Siren className="w-5 h-5 text-red-400 animate-pulse" /><span className="font-medium">{t('nav_emergency')}</span>
             </button>
             <button onClick={() => { setShowIncidentModal(true); setMobileMenuOpen(false); }} className="w-full flex items-center gap-3 p-3 rounded-xl bg-cyan-500/10 border border-cyan-400/20 text-cyan-100 hover:bg-cyan-500/20 transition-all">
-              <Camera className="w-5 h-5 text-cyan-400" /><span className="font-medium">Report</span>
+              <Camera className="w-5 h-5 text-cyan-400" /><span className="font-medium">{t('nav_report')}</span>
             </button>
             {user ? (
               <Link to="/dashboard" onClick={() => setMobileMenuOpen(false)} className="w-full flex items-center gap-3 p-3 rounded-xl bg-white text-slate-900 font-semibold">
-                <Shield className="w-5 h-5 text-blue-600" /><span>Dashboard</span>
+                <Shield className="w-5 h-5 text-blue-600" /><span>{t('nav_dashboard')}</span>
               </Link>
             ) : (
               <Link to="/login" onClick={() => setMobileMenuOpen(false)} className="w-full flex items-center gap-3 p-3 rounded-xl border-2 border-cyan-400/50 text-cyan-300 font-medium hover:bg-cyan-500/10 transition-all">
-                <span>Staff Login</span>
+                <span>{t('nav_staff_login')}</span>
               </Link>
             )}
           </div>
@@ -520,7 +557,7 @@ const HomePage = () => {
             <div className="max-w-2xl">
               <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/10 backdrop-blur-md border border-white/20 mb-6">
                 <span className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span></span>
-                <span className="text-white text-sm font-medium">Live Traffic Monitoring</span>
+                <span className="text-white text-sm font-medium">{t('home_live_monitoring')}</span>
               </div>
               <h1 className="text-4xl sm:text-5xl lg:text-6xl font-black text-white leading-tight mb-4 drop-shadow-2xl" style={{ textShadow: '0 2px 12px rgba(0,0,0,0.6), 0 1px 3px rgba(0,0,0,0.4)' }}>{heroSlides[currentSlide].title}</h1>
               <p className="text-lg sm:text-xl text-white/95 max-w-xl mb-8" style={{ textShadow: '0 1px 8px rgba(0,0,0,0.5)' }}>{heroSlides[currentSlide].subtitle}</p>
@@ -528,10 +565,10 @@ const HomePage = () => {
               {/* Action Buttons - Plan Route & Emergency Report */}
               <div className="flex flex-col sm:flex-row gap-4">
                 <button onClick={() => { setShowRoutePlanner(true); setTimeout(() => document.getElementById('route-planner')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100); }} className="px-8 py-4 rounded-2xl bg-white/10 backdrop-blur-md border-2 border-white/40 text-white font-bold text-lg hover:bg-white/20 transition-all flex items-center justify-center gap-3">
-                  <MapPinned className="w-5 h-5 text-cyan-400" />Plan Route
+                  <MapPinned className="w-5 h-5 text-cyan-400" />{t('home_plan_route')}
                 </button>
                 <button onClick={() => setShowEmergencyModal(true)} className="px-8 py-4 rounded-2xl bg-white/10 backdrop-blur-md border-2 border-white/40 text-white font-bold text-lg hover:bg-white/20 transition-all flex items-center justify-center gap-3">
-                  <Siren className="w-5 h-5 text-red-400 animate-pulse" />Emergency Report
+                  <Siren className="w-5 h-5 text-red-400 animate-pulse" />{t('home_emergency_report')}
                 </button>
               </div>
             </div>
@@ -560,7 +597,7 @@ const HomePage = () => {
           <div className="text-center mb-4">
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-cyan-500/10 backdrop-blur border border-cyan-400/30">
               <Activity className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
-              <span className="text-cyan-300 text-xs font-semibold">Real-Time Statistics</span>
+              <span className="text-cyan-300 text-xs font-semibold">{t('home_realtime_stats')}</span>
               <span className="mx-1 w-px h-3 bg-cyan-400/30" />
               {isConnected ? (
                 <span className="flex items-center gap-1 text-emerald-400 text-[10px] font-medium">
@@ -568,16 +605,16 @@ const HomePage = () => {
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                     <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
                   </span>
-                  LIVE
+                  {t('home_live_label')}
                 </span>
               ) : (
                 <span className="flex items-center gap-1 text-amber-400 text-[10px] font-medium">
                   <WifiOff className="w-2.5 h-2.5" />
-                  Polling
+                  {t('home_polling_label')}
                 </span>
               )}
               <span className="mx-1 w-px h-3 bg-cyan-400/30" />
-              <span className="text-slate-500 text-[10px]">Updated {formatLastUpdated()}</span>
+              <span className="text-slate-500 text-[10px]">{t('home_updated_label')} {formatLastUpdated()}</span>
             </div>
           </div>
 
@@ -642,17 +679,17 @@ const HomePage = () => {
           <div className="text-center mb-12">
             <div className="inline-flex items-center gap-3 px-5 py-2.5 rounded-full bg-cyan-500/10 backdrop-blur-xl border border-cyan-400/30 mb-6 group hover:bg-cyan-500/20 transition-all duration-500">
               <span className="relative flex h-3 w-3">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+                <span className="animate-ping absolute inline-flex h-3 w-3 rounded-full bg-cyan-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-3 w-3 bg-cyan-500"></span>
               </span>
-              <span className="text-cyan-300 font-semibold tracking-wide">Live Traffic Updates</span>
+              <span className="text-cyan-300 font-semibold tracking-wide">{t('home_live_updates')}</span>
               <Radio className="w-4 h-4 text-cyan-400 animate-pulse" />
             </div>
             <h2 className="text-4xl sm:text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white via-cyan-200 to-white mb-4">
-              Traffic Incidents Dashboard
+              {t('home_dashboard_title')}
             </h2>
             <p className="text-slate-400 text-lg max-w-2xl mx-auto">
-              View live incidents across Kigali and help keep our roads safe
+              {t('home_dashboard_subtitle')}
             </p>
           </div>
 
@@ -672,12 +709,12 @@ const HomePage = () => {
                   <div className="p-2 rounded-lg bg-cyan-500/20 border border-cyan-400/30">
                     <MapPinned className="w-5 h-5 text-cyan-400" />
                   </div>
-                  <span className="font-bold text-lg text-cyan-50">Smart Route Planner</span>
+                  <span className="font-bold text-lg text-cyan-50">{t('home_route_planner_title')}</span>
                 </div>
                 <div className="flex items-center gap-4 relative z-10">
                   <div className="hidden sm:flex items-center gap-2 text-cyan-300/80 text-sm">
                     <Navigation className="w-4 h-4" />
-                    <span>Plan your journey & avoid incidents</span>
+                    <span>{t('home_route_planner_subtitle')}</span>
                   </div>
                   <button 
                     onClick={() => setShowRoutePlanner(false)} 
@@ -711,17 +748,17 @@ const HomePage = () => {
                     </div>
                     <div>
                       <h3 className="font-bold text-white flex items-center gap-2">
-                        Recent Incidents
+                        {t('home_recent_incidents')}
                         <span className="flex h-2 w-2">
                           <span className="animate-ping absolute inline-flex h-2 w-2 rounded-full bg-cyan-400 opacity-75"></span>
                           <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500"></span>
                         </span>
                       </h3>
-                      <p className="text-xs text-cyan-400">{allReports?.length || 0} active incidents</p>
+                      <p className="text-xs text-cyan-400">{allReports?.length || 0} {t('home_active_incidents')}</p>
                     </div>
                   </div>
                   <button onClick={() => setShowDailyIncidentsModal(true)} className="flex items-center gap-1.5 text-cyan-400 hover:text-white text-sm font-semibold bg-cyan-500/10 hover:bg-cyan-500/20 px-4 py-2 rounded-xl border border-cyan-400/30 hover:border-cyan-400/50 transition-all duration-300 group/btn">
-                    View All
+                    {t('home_view_all')}
                     <ChevronRight className="w-4 h-4 group-hover/btn:translate-x-1 transition-transform" />
                   </button>
                 </div>
@@ -735,10 +772,10 @@ const HomePage = () => {
                       <div className="w-16 h-16 border-4 border-cyan-400/20 rounded-full" />
                       <div className="w-16 h-16 border-4 border-cyan-400 border-t-transparent rounded-full animate-spin absolute inset-0" />
                     </div>
-                    <p className="text-cyan-400 mt-4 text-sm font-medium">Loading incidents...</p>
+                    <p className="text-cyan-400 mt-4 text-sm font-medium">{t('home_loading_incidents')}</p>
                   </div>
-                ) : allReports?.length > 0 ? (
-                  allReports.slice(0, 15).map((inc, i) => (
+                ) : activeReports?.length > 0 ? (
+                  activeReports.slice(0, 15).map((inc, i) => (
                     <div 
                       key={`${inc.reportType}-${inc.id || i}`} 
                       onClick={() => setSelectedIncident(inc)} 
@@ -757,7 +794,7 @@ const HomePage = () => {
                             </span>
                             {inc.source === 'manual' && (
                               <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">
-                                MANUAL
+                                {t('home_manual')}
                               </span>
                             )}
                           </div>
@@ -781,8 +818,8 @@ const HomePage = () => {
                     <div className="w-20 h-20 rounded-full bg-emerald-500/20 flex items-center justify-center mx-auto mb-4 animate-pulse">
                       <CheckCircle className="w-10 h-10 text-emerald-400" />
                     </div>
-                    <h4 className="font-bold text-white text-lg">All Clear!</h4>
-                    <p className="text-slate-400 mt-1">No active incidents reported</p>
+                    <h4 className="font-bold text-white text-lg">{t('home_all_clear')}</h4>
+                    <p className="text-slate-400 mt-1">{t('home_no_active_incidents_reported')}</p>
                   </div>
                 )}
               </div>
@@ -799,8 +836,8 @@ const HomePage = () => {
                     <span className="absolute -top-1 -right-1 w-3 h-3 bg-cyan-400 rounded-full" />
                   </div>
                   <div>
-                    <h3 className="font-bold text-white">Live Activity Feed</h3>
-                    <p className="text-xs text-cyan-400">Real-time updates</p>
+                    <h3 className="font-bold text-white">{t('home_live_activity_feed')}</h3>
+                    <p className="text-xs text-cyan-400">{t('home_real_time_updates')}</p>
                   </div>
                 </div>
               </div>
@@ -813,10 +850,10 @@ const HomePage = () => {
                       <div className="w-16 h-16 border-4 border-cyan-400/20 rounded-full" />
                       <div className="w-16 h-16 border-4 border-cyan-400 border-t-transparent rounded-full animate-spin absolute inset-0" />
                     </div>
-                    <p className="text-cyan-400 mt-4 text-sm font-medium">Loading feed...</p>
+                    <p className="text-cyan-400 mt-4 text-sm font-medium">{t('home_loading_feed')}</p>
                   </div>
-                ) : allReports?.length > 0 ? (
-                  allReports.slice(0, 15).map((inc, i) => (
+                ) : activeReports?.length > 0 ? (
+                  activeReports.slice(0, 15).map((inc, i) => (
                     <div 
                       key={`feed-${inc.reportType}-${inc.id || i}`}
                       className="group/card p-3 rounded-2xl bg-slate-700/30 hover:bg-slate-700/50 border border-slate-600/30 hover:border-cyan-400/40 transition-all duration-300 hover:shadow-lg hover:shadow-cyan-500/10 hover:-translate-y-0.5"
@@ -834,7 +871,7 @@ const HomePage = () => {
                             </span>
                             {inc.source === 'manual' && (
                               <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">
-                                MANUAL
+                                {t('home_manual')}
                               </span>
                             )}
                           </div>
@@ -858,8 +895,8 @@ const HomePage = () => {
                     <div className="w-20 h-20 rounded-full bg-emerald-500/20 flex items-center justify-center mx-auto mb-4 animate-pulse">
                       <CheckCircle className="w-10 h-10 text-emerald-400" />
                     </div>
-                    <h4 className="font-bold text-white text-lg">All Clear!</h4>
-                    <p className="text-slate-400 mt-1">No active incidents</p>
+                    <h4 className="font-bold text-white text-lg">{t('home_all_clear')}</h4>
+                    <p className="text-slate-400 mt-1">{t('home_no_active_incidents')}</p>
                   </div>
                 )}
               </div>
@@ -877,14 +914,14 @@ const HomePage = () => {
                   <div className="w-12 h-12 rounded-xl bg-slate-800/80 border border-slate-700/50 flex items-center justify-center mb-3 group-hover:scale-110 group-hover:rotate-3 transition-transform duration-500">
                     <Camera className="w-6 h-6 text-slate-400" />
                   </div>
-                  <h3 className="text-lg font-bold text-white mb-1">Report an Incident</h3>
-                  <p className="text-slate-400 text-sm mb-4">Help keep Rwanda's roads safe</p>
+                  <h3 className="text-lg font-bold text-white mb-1">{t('home_report_incident')}</h3>
+                  <p className="text-slate-400 text-sm mb-4">{t('home_report_incident_desc')}</p>
                   <button 
                     onClick={() => setShowIncidentModal(true)} 
                     className="w-full py-3 rounded-xl bg-cyan-500/80 text-white/90 font-bold hover:bg-cyan-500 transition-all duration-300 flex items-center justify-center gap-2 shadow-lg shadow-cyan-500/20 hover:shadow-cyan-500/30 hover:scale-[1.02] active:scale-[0.98]"
                   >
                     <Send className="w-5 h-5 text-white/80" />
-                    Submit Report
+                    {t('home_submit_report')}
                   </button>
                 </div>
               </div>
@@ -895,14 +932,14 @@ const HomePage = () => {
                   <div className="w-12 h-12 rounded-xl bg-slate-800/80 border border-slate-700/50 flex items-center justify-center mb-3 group-hover:scale-110 group-hover:rotate-3 transition-transform duration-500">
                     <Siren className="w-6 h-6 text-slate-400" />
                   </div>
-                  <h3 className="text-lg font-bold text-white mb-1">Emergency?</h3>
-                  <p className="text-slate-400 text-sm mb-4">Critical incidents need immediate attention</p>
+                  <h3 className="text-lg font-bold text-white mb-1">{t('home_emergency_question')}</h3>
+                  <p className="text-slate-400 text-sm mb-4">{t('home_emergency_desc')}</p>
                   <button 
                     onClick={() => setShowEmergencyModal(true)} 
                     className="w-full py-3 rounded-xl bg-red-500/80 text-white/90 font-bold hover:bg-red-500 transition-all duration-300 flex items-center justify-center gap-2 shadow-lg shadow-red-500/20 hover:shadow-red-500/30 hover:scale-[1.02] active:scale-[0.98]"
                   >
                     <AlertTriangle className="w-5 h-5 text-white/80" />
-                    Emergency Report
+                    {t('home_emergency_report')}
                   </button>
                 </div>
               </div>
@@ -914,17 +951,17 @@ const HomePage = () => {
                     <TrendingUp className="w-5 h-5 text-white" />
                   </div>
                   <div>
-                    <h4 className="font-bold text-white">Response Stats</h4>
-                    <p className="text-xs text-cyan-400">Last 24 hours</p>
+                    <h4 className="font-bold text-white">{t('home_response_stats')}</h4>
+                    <p className="text-xs text-cyan-400">{t('home_last_24_hours')}</p>
                   </div>
                 </div>
                 <div className="space-y-2">
                   <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-700/30 border border-slate-600/30">
-                    <span className="text-sm text-slate-400">Avg Response</span>
+                    <span className="text-sm text-slate-400">{t('home_stats_avg_response')}</span>
                     <span className="text-lg font-bold text-emerald-400"><AnimatedCounter value={realTimeStats.avgResponseTime} /> min</span>
                   </div>
                   <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-700/30 border border-slate-600/30">
-                    <span className="text-sm text-slate-400">Resolved Today</span>
+                    <span className="text-sm text-slate-400">{t('home_stats_resolved_today')}</span>
                     <span className="text-lg font-bold text-cyan-400"><AnimatedCounter value={realTimeStats.resolvedToday} /></span>
                   </div>
                 </div>
@@ -945,10 +982,10 @@ const HomePage = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative">
           <div className="text-center mb-12">
             <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-cyan-500/20 border border-cyan-400/30 text-cyan-300 font-semibold text-sm mb-4">
-              <Users className="w-4 h-4" />About Us
+              <Users className="w-4 h-4" />{t('home_about_us')}
             </div>
-            <h2 className="text-3xl sm:text-4xl font-black text-white mb-4">Rwanda National Police Traffic Department</h2>
-            <p className="text-slate-400 max-w-2xl mx-auto">Dedicated to ensuring road safety and efficient traffic management across Rwanda</p>
+            <h2 className="text-3xl sm:text-4xl font-black text-white mb-4">{t('home_about_title')}</h2>
+            <p className="text-slate-400 max-w-2xl mx-auto">{t('home_about_subtitle')}</p>
           </div>
           
           <div className="grid md:grid-cols-3 gap-6">
@@ -956,43 +993,43 @@ const HomePage = () => {
               <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
                 <Shield className="w-7 h-7 text-white" />
               </div>
-              <h3 className="text-xl font-bold text-white mb-2">Our Mission</h3>
-              <p className="text-slate-400 text-sm">To provide efficient, responsive, and technology-driven traffic management services that ensure the safety of all road users in Rwanda.</p>
+              <h3 className="text-xl font-bold text-white mb-2">{t('home_mission_title')}</h3>
+              <p className="text-slate-400 text-sm">{t('home_mission_desc')}</p>
             </div>
             
             <div className="bg-white/5 backdrop-blur-md rounded-2xl p-6 border border-cyan-400/20 hover:border-cyan-400/40 transition-all group">
               <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
                 <Eye className="w-7 h-7 text-white" />
               </div>
-              <h3 className="text-xl font-bold text-white mb-2">Our Vision</h3>
-              <p className="text-slate-400 text-sm">To be the leading traffic management authority in East Africa, utilizing cutting-edge technology to create safer roads for everyone.</p>
+              <h3 className="text-xl font-bold text-white mb-2">{t('home_vision_title')}</h3>
+              <p className="text-slate-400 text-sm">{t('home_vision_desc')}</p>
             </div>
             
             <div className="bg-white/5 backdrop-blur-md rounded-2xl p-6 border border-cyan-400/20 hover:border-cyan-400/40 transition-all group">
               <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
                 <Activity className="w-7 h-7 text-white" />
               </div>
-              <h3 className="text-xl font-bold text-white mb-2">24/7 Service</h3>
-              <p className="text-slate-400 text-sm">Our dedicated team monitors traffic conditions around the clock, responding swiftly to incidents and ensuring smooth traffic flow.</p>
+              <h3 className="text-xl font-bold text-white mb-2">{t('home_service_title')}</h3>
+              <p className="text-slate-400 text-sm">{t('home_service_desc')}</p>
             </div>
           </div>
           
           <div className="mt-12 grid md:grid-cols-4 gap-4 text-center">
             <div className="bg-white/5 backdrop-blur-md rounded-xl p-4 border border-cyan-400/20">
               <p className="text-3xl font-black text-cyan-400"><AnimatedCounter value={realTimeStats.totalReports} /></p>
-              <p className="text-slate-400 text-sm">Total Reports</p>
+              <p className="text-slate-400 text-sm">{t('home_stats_total_reports')}</p>
             </div>
             <div className="bg-white/5 backdrop-blur-md rounded-xl p-4 border border-cyan-400/20">
               <p className="text-3xl font-black text-cyan-400"><AnimatedCounter value={realTimeStats.activeNow} /></p>
-              <p className="text-slate-400 text-sm">Active Now</p>
+              <p className="text-slate-400 text-sm">{t('home_stats_active_now')}</p>
             </div>
             <div className="bg-white/5 backdrop-blur-md rounded-xl p-4 border border-cyan-400/20">
               <p className="text-3xl font-black text-cyan-400"><AnimatedCounter value={realTimeStats.avgResponseTime} suffix="min" /></p>
-              <p className="text-slate-400 text-sm">Avg Response Time</p>
+              <p className="text-slate-400 text-sm">{t('home_stats_avg_response_time')}</p>
             </div>
             <div className="bg-white/5 backdrop-blur-md rounded-xl p-4 border border-cyan-400/20">
               <p className="text-3xl font-black text-cyan-400">24/7</p>
-              <p className="text-slate-400 text-sm">Active Monitoring</p>
+              <p className="text-slate-400 text-sm">{t('home_active_monitoring')}</p>
             </div>
           </div>
         </div>
@@ -1022,12 +1059,12 @@ const HomePage = () => {
                   </div>
                 </div>
                 <div>
-                  <h4 className="text-2xl font-bold bg-gradient-to-r from-white to-cyan-200 bg-clip-text text-transparent">Rwanda National Police</h4>
-                  <p className="text-cyan-400/80 text-sm font-medium tracking-wide">Traffic Management System</p>
+                  <h4 className="text-2xl font-bold bg-gradient-to-r from-white to-cyan-200 bg-clip-text text-transparent">{t('home_footer_brand')}</h4>
+                  <p className="text-cyan-400/80 text-sm font-medium tracking-wide">{t('home_footer_brand_subtitle')}</p>
                 </div>
               </div>
               <p className="text-slate-400 text-sm leading-relaxed max-w-md mb-8">
-                Committed to ensuring safer roads and efficient traffic management across Rwanda through innovative technology and dedicated service.
+                {t('home_footer_desc')}
               </p>
               
               {/* Social Links / Contact Icons */}
@@ -1041,49 +1078,49 @@ const HomePage = () => {
                 <a href="tel:112" className="group p-3 rounded-xl bg-slate-800/50 border border-slate-700/50 hover:border-cyan-400/50 hover:bg-cyan-500/10 transition-all duration-300">
                   <Phone className="w-5 h-5 text-slate-400 group-hover:text-cyan-400 transition-colors" />
                 </a>
-              </div>
+                           </div>
             </div>
 
             {/* Quick Links Section */}
             <div className="lg:col-span-3">
               <h5 className="text-sm font-bold text-white uppercase tracking-wider mb-6 flex items-center gap-2">
                 <div className="w-8 h-0.5 bg-gradient-to-r from-cyan-400 to-transparent" />
-                Quick Links
+                {t('home_footer_quick_links')}
               </h5>
               <nav className="space-y-1">
                 <a href="#about" className="group flex items-center gap-3 p-2.5 -ml-2.5 rounded-xl hover:bg-cyan-500/10 transition-all duration-300">
                   <div className="w-8 h-8 rounded-lg bg-slate-800/80 border border-slate-700/50 group-hover:border-cyan-400/50 group-hover:bg-cyan-500/20 flex items-center justify-center transition-all duration-300">
                     <Users className="w-4 h-4 text-slate-400 group-hover:text-cyan-400 transition-colors" />
                   </div>
-                  <span className="text-slate-400 group-hover:text-white font-medium transition-colors">About Us</span>
+                  <span className="text-slate-400 group-hover:text-white font-medium transition-colors">{t('home_about_us')}</span>
                   <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-cyan-400 ml-auto opacity-0 group-hover:opacity-100 transform translate-x-0 group-hover:translate-x-1 transition-all duration-300" />
                 </a>
-                <button onClick={() => { setShowRoutePlanner(true); setTimeout(() => document.getElementById('route-planner')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100); }} className="group flex items-center gap-3 p-2.5 -ml-2.5 rounded-xl hover:bg-cyan-500/10 transition-all duration-300 w-full text-left">
+                <button onClick={() => { setShowRoutePlanner(true); setMobileMenuOpen(false); setTimeout(() => document.getElementById('route-planner')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100); }} className="group flex items-center gap-3 p-2.5 -ml-2.5 rounded-xl hover:bg-cyan-500/10 transition-all duration-300 w-full text-left">
                   <div className="w-8 h-8 rounded-lg bg-slate-800/80 border border-slate-700/50 group-hover:border-cyan-400/50 group-hover:bg-cyan-500/20 flex items-center justify-center transition-all duration-300">
                     <Navigation className="w-4 h-4 text-slate-400 group-hover:text-cyan-400 transition-colors" />
                   </div>
-                  <span className="text-slate-400 group-hover:text-white font-medium transition-colors">Check Route</span>
+                  <span className="text-slate-400 group-hover:text-white font-medium transition-colors">{t('nav_check_route')}</span>
                   <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-cyan-400 ml-auto opacity-0 group-hover:opacity-100 transform translate-x-0 group-hover:translate-x-1 transition-all duration-300" />
                 </button>
                 <button onClick={() => setShowDailyIncidentsModal(true)} className="group flex items-center gap-3 p-2.5 -ml-2.5 rounded-xl hover:bg-cyan-500/10 transition-all duration-300 w-full text-left">
                   <div className="w-8 h-8 rounded-lg bg-slate-800/80 border border-slate-700/50 group-hover:border-cyan-400/50 group-hover:bg-cyan-500/20 flex items-center justify-center transition-all duration-300">
                     <Eye className="w-4 h-4 text-slate-400 group-hover:text-cyan-400 transition-colors" />
                   </div>
-                  <span className="text-slate-400 group-hover:text-white font-medium transition-colors">View Incidents</span>
+                  <span className="text-slate-400 group-hover:text-white font-medium transition-colors">{t('home_view_incidents')}</span>
                   <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-cyan-400 ml-auto opacity-0 group-hover:opacity-100 transform translate-x-0 group-hover:translate-x-1 transition-all duration-300" />
                 </button>
                 <button onClick={() => setShowIncidentModal(true)} className="group flex items-center gap-3 p-2.5 -ml-2.5 rounded-xl hover:bg-cyan-500/10 transition-all duration-300 w-full text-left">
                   <div className="w-8 h-8 rounded-lg bg-slate-800/80 border border-slate-700/50 group-hover:border-cyan-400/50 group-hover:bg-cyan-500/20 flex items-center justify-center transition-all duration-300">
                     <Camera className="w-4 h-4 text-slate-400 group-hover:text-cyan-400 transition-colors" />
                   </div>
-                  <span className="text-slate-400 group-hover:text-white font-medium transition-colors">Report Incident</span>
+                  <span className="text-slate-400 group-hover:text-white font-medium transition-colors">{t('home_report_incident')}</span>
                   <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-cyan-400 ml-auto opacity-0 group-hover:opacity-100 transform translate-x-0 group-hover:translate-x-1 transition-all duration-300" />
                 </button>
                 <Link to="/login" className="group flex items-center gap-3 p-2.5 -ml-2.5 rounded-xl hover:bg-cyan-500/10 transition-all duration-300">
                   <div className="w-8 h-8 rounded-lg bg-slate-800/80 border border-slate-700/50 group-hover:border-cyan-400/50 group-hover:bg-cyan-500/20 flex items-center justify-center transition-all duration-300">
                     <Shield className="w-4 h-4 text-slate-400 group-hover:text-cyan-400 transition-colors" />
                   </div>
-                  <span className="text-slate-400 group-hover:text-white font-medium transition-colors">Staff Portal</span>
+                  <span className="text-slate-400 group-hover:text-white font-medium transition-colors">{t('home_staff_portal')}</span>
                   <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-cyan-400 ml-auto opacity-0 group-hover:opacity-100 transform translate-x-0 group-hover:translate-x-1 transition-all duration-300" />
                 </Link>
               </nav>
@@ -1093,7 +1130,7 @@ const HomePage = () => {
             <div className="lg:col-span-4">
               <h5 className="text-sm font-bold text-white uppercase tracking-wider mb-6 flex items-center gap-2">
                 <div className="w-8 h-0.5 bg-gradient-to-r from-red-400 to-transparent" />
-                Emergency Contacts
+                {t('home_emergency_contacts')}
               </h5>
               <div className="space-y-2">
                 {/* Emergency 112 */}
@@ -1102,7 +1139,7 @@ const HomePage = () => {
                     <Siren className="w-7 h-7 text-slate-400 group-hover:text-cyan-400 transition-colors" />
                   </div>
                   <div className="relative flex-1">
-                    <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-0">Emergency Hotline</p>
+                    <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-0">{t('home_emergency_hotline')}</p>
                     <p className="text-3xl font-black text-white">112</p>
                   </div>
                 </a>
@@ -1113,7 +1150,7 @@ const HomePage = () => {
                     <Car className="w-7 h-7 text-slate-400 group-hover:text-cyan-400 transition-colors" />
                   </div>
                   <div className="relative flex-1">
-                    <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-0">Traffic Police</p>
+                    <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-0">{t('home_traffic_police')}</p>
                     <p className="text-3xl font-black text-white">113</p>
                   </div>
                 </a>
@@ -1124,7 +1161,7 @@ const HomePage = () => {
                     <Flame className="w-7 h-7 text-slate-400 group-hover:text-cyan-400 transition-colors" />
                   </div>
                   <div className="relative flex-1">
-                    <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-0">Fire & Rescue</p>
+                    <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-0">{t('home_fire_rescue')}</p>
                     <p className="text-3xl font-black text-white">112</p>
                   </div>
                 </a>
@@ -1137,37 +1174,37 @@ const HomePage = () => {
             <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-cyan-500/20 to-transparent" />
             <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
               <div className="flex items-center gap-2 text-slate-500 text-sm">
-                <span>© 2026 Rwanda National Police.</span>
-                <span className="hidden sm:inline">All rights reserved.</span>
+                <span>{t('home_footer_copyright')}</span>
+                <span className="hidden sm:inline">{t('home_footer_rights')}</span>
               </div>
               <div className="flex items-center gap-6 text-sm">
                 <div className="flex items-center gap-2 text-slate-500">
                   <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                  <span>System Online</span>
+                  <span>{t('home_system_online')}</span>
                 </div>
                 <div className="flex items-center gap-2 text-slate-500">
                   <MapPin className="w-4 h-4 text-cyan-500" />
-                  <span>Kigali, Rwanda</span>
+                  <span>{t('home_location')}</span>
                 </div>
               </div>
             </div>
             {/* Keyboard Shortcuts Hint */}
             <div className="hidden lg:flex items-center justify-center gap-4 mt-4 pt-4 border-t border-slate-800/30">
-              <span className="text-slate-600 text-[10px] uppercase tracking-widest font-semibold">Keyboard</span>
+              <span className="text-slate-600 text-[10px] uppercase tracking-widest font-semibold">{t('home_keyboard')}</span>
               <div className="flex items-center gap-3 text-[10px] text-slate-600">
-                <span className="flex items-center gap-1"><kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400 font-mono">↑</kbd><kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400 font-mono">↓</kbd> Scroll sections</span>
+                <span className="flex items-center gap-1"><kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400 font-mono">↑</kbd><kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400 font-mono">↓</kbd> {t('home_keyboard_scroll')}</span>
                 <span className="text-slate-700">•</span>
-                <span className="flex items-center gap-1"><kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400 font-mono">←</kbd><kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400 font-mono">→</kbd> Hero slides</span>
+                <span className="flex items-center gap-1"><kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400 font-mono">←</kbd><kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400 font-mono">→</kbd> {t('home_keyboard_hero')}</span>
                 <span className="text-slate-700">•</span>
-                <span className="flex items-center gap-1"><kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400 font-mono">R</kbd> Report</span>
+                <span className="flex items-center gap-1"><kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400 font-mono">R</kbd> {t('home_keyboard_report')}</span>
                 <span className="text-slate-700">•</span>
-                <span className="flex items-center gap-1"><kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400 font-mono">E</kbd> Emergency</span>
+                <span className="flex items-center gap-1"><kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400 font-mono">E</kbd> {t('home_keyboard_emergency')}</span>
                 <span className="text-slate-700">•</span>
-                <span className="flex items-center gap-1"><kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400 font-mono">L</kbd> Live</span>
+                <span className="flex items-center gap-1"><kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400 font-mono">L</kbd> {t('home_keyboard_live')}</span>
                 <span className="text-slate-700">•</span>
-                <span className="flex items-center gap-1"><kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400 font-mono">P</kbd> Route</span>
+                <span className="flex items-center gap-1"><kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400 font-mono">P</kbd> {t('home_keyboard_route')}</span>
                 <span className="text-slate-700">•</span>
-                <span className="flex items-center gap-1"><kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400 font-mono">Esc</kbd> Close</span>
+                <span className="flex items-center gap-1"><kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400 font-mono">Esc</kbd> {t('home_keyboard_close')}</span>
               </div>
             </div>
           </div>
@@ -1175,15 +1212,15 @@ const HomePage = () => {
       </footer>
 
       {/* MODALS */}
-      <Modal isOpen={showIncidentModal} onClose={() => setShowIncidentModal(false)} title="Report Traffic Incident" theme="dark"><ReportIncidentForm onSuccess={() => setShowIncidentModal(false)} /></Modal>
-      <Modal isOpen={showEmergencyModal} onClose={() => setShowEmergencyModal(false)} title="🚨 Emergency Report" size="lg" theme="dark"><ReportIncidentForm isEmergency onSuccess={() => setShowEmergencyModal(false)} /></Modal>
+      <Modal isOpen={showIncidentModal} onClose={() => setShowIncidentModal(false)} title={t('home_modal_report_incident')} theme="dark"><ReportIncidentForm onSuccess={() => setShowIncidentModal(false)} /></Modal>
+      <Modal isOpen={showEmergencyModal} onClose={() => setShowEmergencyModal(false)} title={t('home_modal_emergency_report')} size="lg" theme="dark"><ReportIncidentForm isEmergency onSuccess={() => setShowEmergencyModal(false)} /></Modal>
 
-      <Modal isOpen={!!selectedIncident} onClose={() => setSelectedIncident(null)} title="Incident Details">
+      <Modal isOpen={!!selectedIncident} onClose={() => setSelectedIncident(null)} title={t('home_modal_incident_details')}>
         {selectedIncident && (
           <div className="space-y-4">
-            <div className="flex items-center justify-between"><span className={"px-4 py-1.5 rounded-xl text-sm font-bold " + getSeverityStyles(selectedIncident.severity)}>{(selectedIncident.severity || 'LOW').toUpperCase()}</span><span className="text-sm text-slate-500">{selectedIncident.created_at ? new Date(selectedIncident.created_at).toLocaleString() : 'Just now'}</span></div>
+            <div className="flex items-center justify-between"><span className={"px-4 py-1.5 rounded-xl text-sm font-bold " + getSeverityStyles(selectedIncident.severity)}>{(selectedIncident.severity || t('home_severity_low')).toUpperCase()}</span><span className="text-sm text-slate-500">{selectedIncident.created_at ? new Date(selectedIncident.created_at).toLocaleString() : t('home_time_just_now')}</span></div>
             <div><h4 className="text-xl font-bold text-slate-900">{selectedIncident.incident_type}</h4><p className="text-slate-600 flex items-center gap-2 mt-1"><MapPin className="w-4 h-4" />{selectedIncident.location}</p></div>
-            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-100"><h5 className="font-semibold text-slate-700 mb-2">Description</h5><p className="text-slate-600 text-sm">{selectedIncident.description || 'No description'}</p></div>
+            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-100"><h5 className="font-semibold text-slate-700 mb-2">{t('home_description')}</h5><p className="text-slate-600 text-sm">{selectedIncident.description || t('home_no_description')}</p></div>
           </div>
         )}
       </Modal>

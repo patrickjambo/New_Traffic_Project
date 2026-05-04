@@ -1518,12 +1518,18 @@ class LightweightTrafficAnalyzer:
             # Alternative signals that justify continuing even if the visual
             # scene gate failed: dense blob estimated vehicles, high road
             # coverage, or very slow optical flow indicating stopped traffic.
+            # Hardened: require stronger combined evidence to avoid wall/texture
+            # false positives while still passing extreme gridlock scenes.
+            dense_signal = max_dense >= 6
+            coverage_signal = avg_coverage > 35
+            texture_signal = avg_texture_density_quick > 0.60
+            slow_flow_signal = (optical_flow_speeds and avg_flow_speed_quick < 2.5)
+
             alternative_traffic_signals = (
-                max_dense >= 4 or
-                avg_coverage > 25 or
-                    avg_texture_density_quick > 0.45 or
-                (optical_flow_speeds and avg_flow_speed_quick < 2.5)
-            )
+                dense_signal or
+                ((coverage_signal or texture_signal) and slow_flow_signal) or
+                (max_dense >= 4 and (coverage_signal or texture_signal))
+            ) and scene_score >= 0.18
 
             if (not is_real_traffic_scene and max_confirmed < 2 and
                     not has_fire_evidence and not alternative_traffic_signals):
@@ -2133,15 +2139,17 @@ class LightweightTrafficAnalyzer:
             # vehicle count acts as a sanity check.
             #
             # Gate: Need >= 2 confirmed vehicles in at least one frame,
-            # OR scene_score >= 0.50 (clearly a traffic scene).
+            # OR scene_score >= 0.70 (clearly a traffic scene).
             # Accidents are excluded from this gate (they may have
             # vehicles stopped/obscured after impact).
             has_enough_confirmed_vehicles = (max_confirmed >= 2 or
                                          avg_confirmed >= 1.0)
-            scene_clearly_traffic = scene_score >= 0.50
+            scene_clearly_traffic = scene_score >= 0.70
             
-            # v5 dense bypass
-            alternative_dense = (max_dense >= 6) or (avg_coverage > 25.0)
+            # v5 dense bypass (hardened to avoid wall/texture false positives)
+            dense_override = (max_dense >= 10 and avg_coverage > 45.0)
+            texture_override = (avg_texture > 0.70 and avg_flow_speed < 2.0)
+            alternative_dense = dense_override or texture_override
 
             if not has_enough_confirmed_vehicles and not scene_clearly_traffic and not alternative_dense:
                 # Remove traffic_jam and congestion candidates — they're

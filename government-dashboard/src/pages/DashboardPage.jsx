@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
@@ -21,11 +21,19 @@ const DashboardPage = () => {
   const { user } = useAuth();
   const { incidents, emergencies, deployments: realDeployments, statistics, loading, isConnected: dataConnected, downloadEmergencyReport } = useData();
   const { isConnected: wsConnected, connectionStatus } = useWebSocket();
+  const [now, setNow] = useState(() => Date.now());
   
   // Check if user is district admin
   const isDistrictAdmin = user?.role === 'district_admin';
   const userDistrictId = user?.districtId;
   const userDistrictName = user?.districtName;
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setNow(Date.now());
+    }, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Calculate real-time stats from actual data
   const realTimeStats = useMemo(() => {
@@ -45,7 +53,7 @@ const DashboardPage = () => {
       avgResponseTime: statistics?.avg_response_time || 0,
       totalIncidents: statistics?.total_incidents || incidents.length,
     };
-  }, [incidents, statistics]);
+  }, [incidents, statistics, now]);
 
   // Format recent reports (incidents + emergencies)
   const recentReports = useMemo(() => {
@@ -81,12 +89,12 @@ const DashboardPage = () => {
     return [...formattedIncidents, ...formattedEmergencies]
       .sort((a, b) => b.timestamp - a.timestamp)
       .slice(0, 20);
-  }, [incidents, emergencies]);
+  }, [incidents, emergencies, now]);
 
   // Active Emergencies
   const activeEmergencies = useMemo(() => {
     return emergencies.filter(em => em.status === 'pending' || em.status === 'active');
-  }, [emergencies]);
+  }, [emergencies, now]);
 
   // Stats Data - now using real data with consistent cyan color scheme
   const stats = [
@@ -152,7 +160,7 @@ const DashboardPage = () => {
       }
       return sum + (d.officer_count || officers || 0);
     }, 0);
-  }, [realDeployments]);
+  }, [realDeployments, now]);
 
   // Regions - calculated from real-time data
   const regions = useMemo(() => {
@@ -189,7 +197,7 @@ const DashboardPage = () => {
         color: 'bg-cyan-500' 
       },
     ];
-  }, [isDistrictAdmin, userDistrictId, userDistrictName, incidents, totalOfficersDeployed]);
+  }, [isDistrictAdmin, userDistrictId, userDistrictName, incidents, totalOfficersDeployed, now]);
 
   // Use real deployments from DataContext (already filtered for district admins)
   // No hardcoded fallback - show actual real-time data only
@@ -208,7 +216,7 @@ const DashboardPage = () => {
                    d.status === 'Completed' || d.status === 'completed' ? 'bg-slate-500/20 text-slate-400' : 
                    'bg-cyan-600/20 text-cyan-300'
     }));
-  }, [realDeployments]);
+  }, [realDeployments, now]);
 
   return (
     <div className="p-6 relative z-10">

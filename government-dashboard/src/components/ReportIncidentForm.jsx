@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { FaCarCrash, FaFireExtinguisher, FaAmbulance, FaPhone, FaShieldAlt, FaExclamationTriangle, FaSyncAlt, FaTruck, FaTree, FaRoad, FaTrafficLight, FaHeartbeat, FaSkull } from 'react-icons/fa';
 import { AlertTriangle, MapPin, FileText, Send, Zap, Crosshair, Flame } from 'lucide-react';
 import { searchKigaliLocation, getLocationCoordinates } from '../data/kigaliLocations';
@@ -31,6 +32,7 @@ const SEVERITY_OPTIONS = [
 ];
 
 function ReportIncidentForm(props) {
+  const { t } = useTranslation();
   const [incidentType, setIncidentType] = useState('');
   const [isEmergency, setIsEmergency] = useState(props.isEmergency || false);
   const [emergencyHelp, setEmergencyHelp] = useState([]);
@@ -38,6 +40,7 @@ function ReportIncidentForm(props) {
   const [location, setLocation] = useState('');
   const [latitude, setLatitude] = useState(-1.9536);
   const [longitude, setLongitude] = useState(30.0606);
+  const [locationResolved, setLocationResolved] = useState(false);
   const [description, setDescription] = useState('');
   const [severity, setSeverity] = useState('medium');
   const [injuredCount, setInjuredCount] = useState(0);
@@ -46,7 +49,72 @@ function ReportIncidentForm(props) {
   const [success, setSuccess] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  const { reportIncident, reportEmergency } = useData();
+  const { reportIncident, reportEmergency, incidents, emergencies } = useData();
+
+  const normalizeLocation = (value) => (value || '')
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+
+  const normalizeType = (value) => (value || '')
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '_')
+    .replace(/-+/g, '_');
+
+  const isActiveStatus = (status) => {
+    if (!status) return true;
+    const normalized = status.toString().toLowerCase();
+    return !['resolved', 'closed'].includes(normalized);
+  };
+
+  const isDuplicateReport = ({ type, lat, lng, locationText, allowCoordinateMatch, checkIncidents, checkEmergencies }) => {
+    const normalizedLocation = normalizeLocation(locationText);
+    const normalizedType = normalizeType(type);
+    const sameLocationText = (itemLocation) => {
+      if (!normalizedLocation) return false;
+      return normalizeLocation(itemLocation) === normalizedLocation;
+    };
+
+    const isRecent = (createdAt) => {
+      if (!createdAt) return true;
+      const createdTime = new Date(createdAt).getTime();
+      if (Number.isNaN(createdTime)) return true;
+      const twoHoursMs = 2 * 60 * 60 * 1000;
+      return Date.now() - createdTime <= twoHoursMs;
+    };
+
+    const withinDistance = (itemLat, itemLng) => {
+      if (!allowCoordinateMatch) return false;
+      if (lat == null || lng == null || itemLat == null || itemLng == null) return false;
+      const latDiff = Math.abs(parseFloat(itemLat) - parseFloat(lat));
+      const lngDiff = Math.abs(parseFloat(itemLng) - parseFloat(lng));
+      return latDiff <= 0.0002 && lngDiff <= 0.0002; // ~20m
+    };
+
+    const matchesIncident = (item) => {
+      const itemType = normalizeType(item.incident_type || item.type || '');
+      const itemLocation = item.location || item.location_name || item.address || item.locationDescription;
+      return itemType === normalizedType && isActiveStatus(item.status) && (
+        sameLocationText(itemLocation) || (isRecent(item.created_at) && withinDistance(item.latitude, item.longitude))
+      );
+    };
+
+    const matchesEmergency = (item) => {
+      const itemType = normalizeType(item.emergency_type || item.type || '');
+      const itemLocation = item.location_name || item.location || item.address || item.locationDescription;
+      return itemType === normalizedType && isActiveStatus(item.status) && (
+        sameLocationText(itemLocation) || (isRecent(item.created_at) && withinDistance(item.latitude, item.longitude))
+      );
+    };
+
+    const incidentCheck = checkIncidents ? (incidents || []).some(matchesIncident) : false;
+    const emergencyCheck = checkEmergencies ? (emergencies || []).some(matchesEmergency) : false;
+
+    return incidentCheck || emergencyCheck;
+  };
 
   // Autocomplete State
   const [suggestions, setSuggestions] = useState([]);
@@ -149,6 +217,7 @@ function ReportIncidentForm(props) {
   const handleLocationChange = (e) => {
     const value = e.target.value;
     setLocation(value);
+    setLocationResolved(false);
     if (value.length > 1) {
       const results = searchKigaliLocation(value);
       setSuggestions(results);
@@ -160,6 +229,7 @@ function ReportIncidentForm(props) {
 
   const selectLocation = (loc) => {
     setLocation(loc.name);
+    setLocationResolved(true);
     if (loc.lat && loc.lng) {
       setLatitude(loc.lat);
       setLongitude(loc.lng);
@@ -192,6 +262,7 @@ function ReportIncidentForm(props) {
       setLatitude(-1.9536);
       setLongitude(30.0606);
       setLocation('Kigali City Center (please specify exact location)');
+      setLocationResolved(false);
       return;
     }
 
@@ -204,6 +275,7 @@ function ReportIncidentForm(props) {
         setLatitude(latitude);
         setLongitude(longitude);
         setLocation(`Current Location (${latitude.toFixed(4)}, ${longitude.toFixed(4)})`);
+    setLocationResolved(true);
         setLocationLoading(false);
         toast.success('Location acquired!');
       },
@@ -218,6 +290,7 @@ function ReportIncidentForm(props) {
         setLatitude(-1.9536);
         setLongitude(30.0606);
         setLocationLoading(false);
+    setLocationResolved(false);
       },
       {
         enableHighAccuracy: true,
@@ -239,22 +312,45 @@ function ReportIncidentForm(props) {
     return severityMap[type] || 'medium';
   };
 
+  const isValidPhone = (p) => {
+    if (!p) return false;
+    const clean = p.trim();
+    if (clean.startsWith('+')) return clean.length >= 11 && clean.length <= 15;
+    return clean.length === 10;
+  };
+
   async function handleSubmit(e) {
     e.preventDefault();
 
     if (!incidentType && isEmergency) {
-      toast.error('Please select an incident type');
+      toast.error(t('please_select_incident_type'));
       return;
     }
 
     if (!location) {
-      toast.error('Please enter a location');
+      toast.error(t('please_enter_location'));
       return;
     }
 
     // Phone number is required
-    if (!contactPhone || contactPhone.trim().length < 10) {
-      toast.error('Please enter a valid phone number (at least 10 digits)');
+    if (!contactPhone || !isValidPhone(contactPhone)) {
+      toast.error(t('please_enter_valid_phone'));
+      return;
+    }
+
+    const normalizedType = (incidentType || '').toString().toLowerCase();
+    if (normalizedType && isDuplicateReport({
+      type: normalizedType,
+      lat: latitude,
+      lng: longitude,
+      locationText: location,
+      allowCoordinateMatch: locationResolved,
+      checkIncidents: !isEmergency,
+      checkEmergencies: isEmergency,
+    })) {
+      const duplicateMessage = t('this_incident_reported');
+      setError(duplicateMessage);
+      toast.error(duplicateMessage);
       return;
     }
 
@@ -298,7 +394,7 @@ function ReportIncidentForm(props) {
         setSuccess(true);
         // Only show toast for incidents - emergencies are handled by DataContext
         if (!isEmergency) {
-          toast.success('Incident reported successfully!');
+          toast.success(t('incident_reported_success'));
         }
         if (props.onSuccess) props.onSuccess();
         // Reset form
@@ -326,7 +422,7 @@ function ReportIncidentForm(props) {
       {/* Step 1: Select Incident Type */}
       <div>
         <label className="block text-sm font-semibold text-cyan-300 mb-2">
-          {isEmergency ? 'What happened?' : 'Incident Type'} *
+          {isEmergency ? t('what_happened') : t('incident_type')} *
         </label>
         <div className="grid grid-cols-5 gap-2">
           {EMERGENCY_TYPE_OPTIONS.map(opt => (
@@ -351,7 +447,7 @@ function ReportIncidentForm(props) {
 
       {/* Step 2: Location - Compact */}
       <div ref={locationRef}>
-        <label className="block text-sm font-semibold text-cyan-300 mb-2">Where? *</label>
+        <label className="block text-sm font-semibold text-cyan-300 mb-2">{t('where')} *</label>
         <div className="flex gap-2">
           <div className="relative flex-1">
             <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-cyan-400" />
@@ -393,7 +489,7 @@ function ReportIncidentForm(props) {
       {/* Step 3: Emergency Services Needed - Compact horizontal layout */}
       {isEmergency && (
         <div>
-          <label className="block text-sm font-semibold text-cyan-300 mb-2">Services Needed</label>
+          <label className="block text-sm font-semibold text-cyan-300 mb-2">{t('services_needed')}</label>
           <div className="grid grid-cols-4 gap-2">
             {EMERGENCY_SERVICES.map(service => (
               <button
@@ -427,7 +523,7 @@ function ReportIncidentForm(props) {
         <div className="grid grid-cols-3 gap-3">
           {/* Severity Selection */}
           <div>
-            <label className="block text-sm font-semibold text-cyan-300 mb-2">Severity Level</label>
+            <label className="block text-sm font-semibold text-cyan-300 mb-2">{t('severity_level')}</label>
             <div className="grid grid-cols-2 gap-2">
               {SEVERITY_OPTIONS.map(option => (
                 <button
@@ -451,7 +547,7 @@ function ReportIncidentForm(props) {
             <label className="block text-sm font-semibold text-cyan-300 mb-2">
               <span className="flex items-center gap-1.5">
                 <FaHeartbeat className="text-orange-400" />
-                Injured People
+                {t('injured_people')}
               </span>
             </label>
             <div className="flex items-center gap-2">
@@ -482,7 +578,7 @@ function ReportIncidentForm(props) {
             <label className="block text-sm font-semibold text-cyan-300 mb-2">
               <span className="flex items-center gap-1.5">
                 <FaSkull className="text-red-400" />
-                Deceased
+                {t('deceased')}
               </span>
             </label>
             <div className="flex items-center gap-2">
@@ -514,8 +610,8 @@ function ReportIncidentForm(props) {
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className="block text-sm font-semibold text-cyan-300 mb-2">
-            Auto-Generated Message
-            <span className="ml-2 text-xs font-normal text-teal-400">✓ Created automatically</span>
+            {t('auto_generated_message')}
+            <span className="ml-2 text-xs font-normal text-teal-400">{t('created_automatically')}</span>
           </label>
           <div className="relative">
             <FileText className="absolute left-3 top-3 w-4 h-4 text-teal-400" />
@@ -529,19 +625,23 @@ function ReportIncidentForm(props) {
           </div>
         </div>
         <div>
-          <label className="block text-sm font-semibold text-cyan-300 mb-2">Your Phone *</label>
+          <label className="block text-sm font-semibold text-cyan-300 mb-2">{t('your_phone')} *</label>
           <div className="relative">
             <FaPhone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-cyan-400" />
             <input
               type="tel"
+              maxLength={15}
               className="w-full pl-9 pr-3 py-2.5 bg-slate-700/50 border border-slate-600 rounded-xl focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 text-sm text-white placeholder-slate-400"
               placeholder="07X XXX XXXX"
               value={contactPhone}
-              onChange={e => setContactPhone(e.target.value)}
+              onChange={e => {
+                const val = e.target.value.replace(/[^0-9+]/g, '');
+                setContactPhone(val.slice(0, 15));
+              }}
               required
             />
           </div>
-          <p className="text-xs text-slate-400 mt-1">Required for follow-up</p>
+          <p className="text-xs text-slate-400 mt-1">{t('required_for_follow_up')}</p>
         </div>
       </div>
 
@@ -556,7 +656,7 @@ function ReportIncidentForm(props) {
       {/* Submit Button */}
       <button
         type="submit"
-        disabled={submitting || !incidentType || !location || !contactPhone || contactPhone.trim().length < 10}
+        disabled={submitting || !incidentType || !location || !contactPhone || !isValidPhone(contactPhone)}
         className={`w-full flex items-center justify-center gap-2 py-3.5 rounded-xl font-bold text-base shadow-lg transition-all duration-200 ${
           isEmergency
             ? 'bg-gradient-to-r from-cyan-500 to-teal-500 hover:from-cyan-400 hover:to-teal-400 text-slate-900 shadow-cyan-500/30 disabled:from-slate-600 disabled:to-slate-700 disabled:text-slate-400'
@@ -566,12 +666,12 @@ function ReportIncidentForm(props) {
         {submitting ? (
           <>
             <FaSyncAlt className="w-5 h-5 animate-spin" />
-            Sending...
+            {t('sending')}
           </>
         ) : (
           <>
             {isEmergency ? <Zap className="w-5 h-5" /> : <Send className="w-5 h-5" />}
-            {isEmergency ? 'REPORT EMERGENCY' : 'SUBMIT REPORT'}
+            {isEmergency ? t('report_emergency') : t('submit_report')}
           </>
         )}
       </button>

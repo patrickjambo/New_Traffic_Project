@@ -13,26 +13,28 @@ import {
   UserCog
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useTranslation } from 'react-i18next';
 
 const Sidebar = ({ isOpen, focusedIndex = -1, isKeyboardMode = false }) => {
   const location = useLocation();
   const { user } = useAuth();
+  const { t } = useTranslation();
   
   // Check if district admin or co-admin
   const isDistrictAdmin = user?.role === 'district_admin';
   const isCoAdmin = user?.role === 'co_admin';
 
   const menuItems = [
-    { path: '/', icon: Home, label: 'Home', roles: ['public', 'police', 'admin', 'district_admin', 'co_admin'] },
-    { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', roles: ['police', 'admin', 'district_admin', 'co_admin'] },
-    { path: '/incidents', icon: AlertTriangle, label: 'Incidents', roles: ['police', 'admin', 'district_admin', 'co_admin'] },
-    { path: '/reports', icon: FileText, label: 'Reports', roles: ['police', 'admin', 'district_admin', 'co_admin'] },
-    { path: '/emergency', icon: Users, label: 'Emergency', roles: ['police', 'admin', 'district_admin', 'co_admin'] },
-    { path: '/deployments', icon: Shield, label: 'Deployments', roles: ['police', 'admin', 'district_admin', 'co_admin'] },
-    { path: '/geofencing', icon: MapPin, label: 'Geo-Fencing', roles: ['admin', 'district_admin', 'co_admin'], badge: 'NEW' },
-    { path: '/officers', icon: UserCog, label: 'Officers', roles: ['admin', 'district_admin'] },
-    { path: '/analytics', icon: BarChart3, label: 'Analytics', roles: ['admin', 'district_admin'] },
-    { path: '/settings', icon: Settings, label: 'Settings', roles: ['admin', 'district_admin'] },
+    { path: '/', icon: Home, label: t('menu_home'), roles: ['public', 'police', 'admin', 'district_admin', 'co_admin'] },
+    { path: '/dashboard', icon: LayoutDashboard, label: t('menu_dashboard'), roles: ['police', 'admin', 'district_admin', 'co_admin'] },
+    { path: '/incidents', icon: AlertTriangle, label: t('menu_incidents'), roles: ['police', 'admin', 'district_admin', 'co_admin'] },
+    { path: '/reports', icon: FileText, label: t('menu_reports'), roles: ['police', 'admin', 'district_admin', 'co_admin'] },
+    { path: '/emergency', icon: Users, label: t('menu_emergency'), roles: ['police', 'admin', 'district_admin', 'co_admin'] },
+    { path: '/deployments', icon: Shield, label: t('menu_deployments'), roles: ['police', 'admin', 'district_admin', 'co_admin'] },
+    { path: '/geofencing', icon: MapPin, label: t('menu_geofencing'), roles: ['admin', 'district_admin', 'co_admin'], badge: 'NEW' },
+    { path: '/officers', icon: UserCog, label: t('menu_officers'), roles: ['admin', 'district_admin'] },
+    { path: '/analytics', icon: BarChart3, label: t('menu_analytics'), roles: ['admin', 'district_admin'] },
+    { path: '/settings', icon: Settings, label: t('menu_settings'), roles: ['admin', 'district_admin'] },
   ];
 
   const filteredMenuItems = menuItems.filter(item =>
@@ -107,7 +109,7 @@ const Sidebar = ({ isOpen, focusedIndex = -1, isKeyboardMode = false }) => {
       {isKeyboardMode && (
         <div className="absolute bottom-4 left-3 right-3">
           <div className="bg-slate-800/80 border border-cyan-500/20 rounded-lg px-3 py-2 text-center">
-            <p className="text-[10px] text-cyan-400/60 font-medium">⌨️ Keyboard Active</p>
+            <p className="text-[10px] text-cyan-400/60 font-medium">{t('keyboard_active')}</p>
           </div>
         </div>
       )}

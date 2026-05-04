@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { BarChart3, MapPin, AlertTriangle, Activity, Users, TrendingUp, Clock, Shield, X, ChevronDown, Bell, User, Settings, LogOut, Home, Map, FileText } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 const TrafficDashboard = () => {
+  const { t } = useTranslation();
   const [currentTime, setCurrentTime] = useState(new Date());
   const [selectedCard, setSelectedCard] = useState(null);
   const [showUserMenu, setShowUserMenu] = useState(false);
@@ -29,9 +31,9 @@ const TrafficDashboard = () => {
   const stats = [
     {
       id: 1,
-      title: 'ACTIVE INCIDENTS',
+      title: t('dash_active_incidents'),
       value: '3',
-      subtitle: '2 Critical',
+      subtitle: t('dash_active_incidents_subtitle'),
       icon: AlertTriangle,
       color: 'from-red-500 to-orange-500',
       bgColor: 'bg-red-500/10',
@@ -40,9 +42,9 @@ const TrafficDashboard = () => {
     },
     {
       id: 2,
-      title: 'AVG RESPONSE TIME',
+      title: t('dash_avg_response_time'),
       value: '3.8m',
-      subtitle: '↓ 18% vs last week',
+      subtitle: t('dash_avg_response_time_subtitle'),
       icon: Clock,
       color: 'from-blue-500 to-cyan-500',
       bgColor: 'bg-blue-500/10',
@@ -51,9 +53,9 @@ const TrafficDashboard = () => {
     },
     {
       id: 3,
-      title: 'RESOLVED TODAY',
+      title: t('dash_resolved_today'),
       value: '47',
-      subtitle: '94% Clearance Rate',
+      subtitle: t('dash_resolved_today_subtitle'),
       icon: Shield,
       color: 'from-green-500 to-emerald-500',
       bgColor: 'bg-green-500/10',
@@ -62,9 +64,9 @@ const TrafficDashboard = () => {
     },
     {
       id: 4,
-      title: 'SYSTEM HEALTH',
+      title: t('dash_system_health'),
       value: '99%',
-      subtitle: 'All Systems Operational',
+      subtitle: t('dash_system_health_subtitle'),
       icon: Activity,
       color: 'from-cyan-500 to-teal-500',
       bgColor: 'bg-cyan-500/10',
@@ -117,7 +119,7 @@ const TrafficDashboard = () => {
               <h1 className="text-xl font-bold bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent">
                 RNP TRAFFIC
               </h1>
-              <p className="text-xs text-blue-300">Traffic Management System</p>
+              <p className="text-xs text-blue-300">{t('brand_subtitle')}</p>
             </div>
           </div>
 
@@ -125,23 +127,23 @@ const TrafficDashboard = () => {
           <div className="flex gap-2">
             <button className="px-4 py-2 bg-blue-500 rounded-lg hover:bg-blue-600 transition-colors font-medium flex items-center gap-2">
               <Home className="w-4 h-4" />
-              Dashboard
+              {t('dash_nav_dashboard')}
             </button>
             <button className="px-4 py-2 bg-white/10 rounded-lg hover:bg-white/20 transition-colors flex items-center gap-2">
               <Map className="w-4 h-4" />
-              Live Map
+              {t('dash_nav_live_map')}
             </button>
             <button className="px-4 py-2 bg-white/10 rounded-lg hover:bg-white/20 transition-colors flex items-center gap-2">
               <AlertTriangle className="w-4 h-4" />
-              Incidents
+              {t('dash_nav_incidents')}
             </button>
             <button className="px-4 py-2 bg-white/10 rounded-lg hover:bg-white/20 transition-colors flex items-center gap-2">
               <BarChart3 className="w-4 h-4" />
-              Analytics
+              {t('dash_nav_analytics')}
             </button>
             <button className="px-4 py-2 bg-white/10 rounded-lg hover:bg-white/20 transition-colors flex items-center gap-2">
               <FileText className="w-4 h-4" />
-              Reports
+              {t('dash_nav_reports')}
             </button>
           </div>
 
@@ -169,7 +171,7 @@ const TrafficDashboard = () => {
               {showNotifications && (
                 <div className="absolute right-0 mt-2 w-80 bg-slate-900/95 backdrop-blur-xl rounded-xl border border-blue-500/20 shadow-2xl">
                   <div className="p-4 border-b border-white/10">
-                    <h3 className="font-bold text-white">Notifications</h3>
+                    <h3 className="font-bold text-white">{t('dash_notifications')}</h3>
                   </div>
                   <div className="max-h-96 overflow-y-auto">
                     <div className="p-4 border-b border-white/5 hover:bg-white/5 cursor-pointer">
@@ -178,9 +180,9 @@ const TrafficDashboard = () => {
                           <AlertTriangle className="w-4 h-4 text-red-400" />
                         </div>
                         <div className="flex-1">
-                          <p className="text-sm font-medium text-white">Critical Incident</p>
-                          <p className="text-xs text-gray-400">New accident reported at KN 5 Ave</p>
-                          <p className="text-xs text-gray-500 mt-1">5 minutes ago</p>
+                          <p className="text-sm font-medium text-white">{t('dash_notification_critical')}</p>
+                          <p className="text-xs text-gray-400">{t('dash_notification_critical_desc')}</p>
+                          <p className="text-xs text-gray-500 mt-1">{t('dash_notification_5_min')}</p>
                         </div>
                       </div>
                     </div>
@@ -190,9 +192,9 @@ const TrafficDashboard = () => {
                           <Users className="w-4 h-4 text-blue-400" />
                         </div>
                         <div className="flex-1">
-                          <p className="text-sm font-medium text-white">Unit Deployed</p>
-                          <p className="text-xs text-gray-400">Unit Delta dispatched to Nyabugogo</p>
-                          <p className="text-xs text-gray-500 mt-1">15 minutes ago</p>
+                          <p className="text-sm font-medium text-white">{t('dash_notification_unit')}</p>
+                          <p className="text-xs text-gray-400">{t('dash_notification_unit_desc')}</p>
+                          <p className="text-xs text-gray-500 mt-1">{t('dash_notification_15_min')}</p>
                         </div>
                       </div>
                     </div>
@@ -202,9 +204,9 @@ const TrafficDashboard = () => {
                           <Shield className="w-4 h-4 text-green-400" />
                         </div>
                         <div className="flex-1">
-                          <p className="text-sm font-medium text-white">Incident Resolved</p>
-                          <p className="text-xs text-gray-400">Traffic jam cleared at Remera</p>
-                          <p className="text-xs text-gray-500 mt-1">1 hour ago</p>
+                          <p className="text-sm font-medium text-white">{t('dash_notification_resolved')}</p>
+                          <p className="text-xs text-gray-400">{t('dash_notification_resolved_desc')}</p>
+                          <p className="text-xs text-gray-500 mt-1">{t('dash_notification_1_hour')}</p>
                         </div>
                       </div>
                     </div>
@@ -223,8 +225,8 @@ const TrafficDashboard = () => {
                   <User className="w-4 h-4" />
                 </div>
                 <div className="text-left">
-                  <p className="text-sm font-medium">Admin User</p>
-                  <p className="text-xs text-gray-400">System Administrator</p>
+                  <p className="text-sm font-medium">{t('dash_user_admin')}</p>
+                  <p className="text-xs text-gray-400">{t('dash_user_role')}</p>
                 </div>
                 <ChevronDown className="w-4 h-4" />
               </button>
@@ -235,16 +237,16 @@ const TrafficDashboard = () => {
                   <div className="p-2">
                     <button className="w-full flex items-center gap-3 px-4 py-2 rounded-lg hover:bg-white/10 transition-colors text-left">
                       <User className="w-4 h-4 text-blue-400" />
-                      <span className="text-sm">Profile</span>
+                      <span className="text-sm">{t('dash_profile')}</span>
                     </button>
                     <button className="w-full flex items-center gap-3 px-4 py-2 rounded-lg hover:bg-white/10 transition-colors text-left">
                       <Settings className="w-4 h-4 text-blue-400" />
-                      <span className="text-sm">Settings</span>
+                      <span className="text-sm">{t('dash_settings')}</span>
                     </button>
                     <div className="my-2 border-t border-white/10"></div>
                     <button className="w-full flex items-center gap-3 px-4 py-2 rounded-lg hover:bg-red-500/20 transition-colors text-left text-red-400">
                       <LogOut className="w-4 h-4" />
-                      <span className="text-sm font-medium">Log Out</span>
+                      <span className="text-sm font-medium">{t('dash_log_out')}</span>
                     </button>
                   </div>
                 </div>
@@ -288,16 +290,16 @@ const TrafficDashboard = () => {
             <div>
               <h3 className="text-xl font-bold text-white flex items-center gap-2">
                 <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                LIVE TRAFFIC HEATMAP
+                {t('dash_live_heatmap')}
               </h3>
-              <p className="text-sm text-gray-400">Real-time traffic monitoring across Rwanda</p>
+              <p className="text-sm text-gray-400">{t('dash_live_heatmap_subtitle')}</p>
             </div>
             <div className="flex gap-2">
               <span className="px-3 py-1 bg-red-500/20 text-red-400 rounded-lg text-xs font-medium">
-                High Congestion (3)
+                {t('dash_high_congestion')} (3)
               </span>
               <span className="px-3 py-1 bg-orange-500/20 text-orange-400 rounded-lg text-xs font-medium">
-                Medium (7)
+                {t('dash_medium')} (7)
               </span>
             </div>
           </div>
@@ -308,11 +310,11 @@ const TrafficDashboard = () => {
             <div className="absolute top-4 right-4 bg-slate-900/80 backdrop-blur-sm px-3 py-2 rounded-lg text-xs">
               <div className="flex items-center gap-2 mb-2">
                 <div className="w-3 h-3 bg-red-500 rounded-full"></div>
-                <span>Critical: Kigali CBD</span>
+                <span>{t('dash_critical_kigali')}</span>
               </div>
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 bg-orange-500 rounded-full"></div>
-                <span>Moderate: Nyabugogo</span>
+                <span>{t('dash_moderate_nyabugogo')}</span>
               </div>
             </div>
           </div>
@@ -320,7 +322,7 @@ const TrafficDashboard = () => {
 
         {/* Regional Overview */}
         <div className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-lg rounded-2xl p-6 border border-white/10">
-          <h3 className="text-xl font-bold mb-6 text-white">Regional Overview</h3>
+          <h3 className="text-xl font-bold mb-6 text-white">{t('dash_regional_overview')}</h3>
           <div className="space-y-4">
             {regions.map((region, index) => (
               <div key={index} className="bg-slate-800/50 rounded-xl p-4 hover:bg-slate-800/70 transition-colors">
@@ -339,8 +341,8 @@ const TrafficDashboard = () => {
                   ></div>
                 </div>
                 <div className="flex justify-between text-xs text-gray-400">
-                  <span>{region.incidents} incidents</span>
-                  <span>{region.officers} officers</span>
+                  <span>{region.incidents} {t('dash_incidents_label')}</span>
+                  <span>{region.officers} {t('dash_officers_label')}</span>
                 </div>
               </div>
             ))}
@@ -353,14 +355,14 @@ const TrafficDashboard = () => {
         {/* Recent Incidents */}
         <div className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-lg rounded-2xl p-6 border border-white/10">
           <div className="flex justify-between items-center mb-6">
-            <h3 className="text-xl font-bold text-white">Incident Feed</h3>
-            <button className="text-blue-400 text-sm hover:text-blue-300">View All →</button>
+            <h3 className="text-xl font-bold text-white">{t('dash_incident_feed')}</h3>
+            <button className="text-blue-400 text-sm hover:text-blue-300">{t('dash_view_all')}</button>
           </div>
 
           {recentIncidents.length === 0 ? (
             <div className="text-center py-12 text-gray-400">
               <AlertTriangle className="w-12 h-12 mx-auto mb-3 opacity-50" />
-              <p>NO ACTIVE INCIDENTS</p>
+              <p>{t('dash_no_active_incidents')}</p>
             </div>
           ) : (
             <div className="space-y-3">
@@ -395,8 +397,8 @@ const TrafficDashboard = () => {
         {/* Police Deployments */}
         <div className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-lg rounded-2xl p-6 border border-white/10">
           <div className="flex justify-between items-center mb-6">
-            <h3 className="text-xl font-bold text-white">Active Deployments</h3>
-            <button className="text-blue-400 text-sm hover:text-blue-300">Manage →</button>
+            <h3 className="text-xl font-bold text-white">{t('dash_active_deployments')}</h3>
+            <button className="text-blue-400 text-sm hover:text-blue-300">{t('dash_manage')}</button>
           </div>
 
           <div className="space-y-3">
@@ -420,8 +422,8 @@ const TrafficDashboard = () => {
                   </span>
                 </div>
                 <div className="flex justify-between text-xs text-gray-400">
-                  <span>{deployment.officers} officers deployed</span>
-                  <span>Active for {deployment.time}</span>
+                  <span>{deployment.officers} {t('dash_officers_deployed')}</span>
+                  <span>{t('dash_active_for')} {deployment.time}</span>
                 </div>
               </div>
             ))}

@@ -3,6 +3,7 @@ import { FileText, Download, BarChart2, Calendar, FileBarChart, Activity, Zap, R
 import { useData } from '../context/DataContext';
 import axios from '../config/axios';
 import toast from 'react-hot-toast';
+import { useTranslation } from 'react-i18next';
 import {
   generateEmergencyReportPDF,
   generateIncidentReportPDF,
@@ -12,6 +13,7 @@ import {
 } from '../services/pdfReportGenerator';
 
 const Reports = () => {
+  const { t } = useTranslation();
   const { incidents, emergencies, loading, fetchIncidents, fetchEmergencies } = useData();
   const [generating, setGenerating] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState(new Date());
@@ -47,10 +49,10 @@ const Reports = () => {
     const diffHours = Math.floor(diffMs / 3600000);
     const diffDays = Math.floor(diffMs / 86400000);
 
-    if (diffMins < 1) return 'Just now';
-    if (diffMins < 60) return `${diffMins} min ago`;
-    if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
-    if (diffDays < 7) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+    if (diffMins < 1) return t('reports_just_now');
+    if (diffMins < 60) return t('reports_min_ago', { count: diffMins });
+    if (diffHours < 24) return t('reports_hour_ago', { count: diffHours });
+    if (diffDays < 7) return t('reports_day_ago', { count: diffDays });
     return date.toLocaleDateString();
   };
 
@@ -73,7 +75,7 @@ const Reports = () => {
     ].filter(d => !isNaN(d.getTime()));
     
     const lastDate = allDates.length > 0 ? new Date(Math.max(...allDates)) : null;
-    const lastGenerated = lastDate ? formatTimeAgo(lastDate) : 'No reports yet';
+    const lastGenerated = lastDate ? formatTimeAgo(lastDate) : t('reports_no_reports_yet');
 
     return {
       total: totalReports,
@@ -93,10 +95,10 @@ const Reports = () => {
       id: `em-${em.id}`,
       realId: em.id,
       type: 'emergency',
-      title: `${em.emergency_type?.charAt(0).toUpperCase() + em.emergency_type?.slice(1) || 'Emergency'} Report`,
+      title: `${em.emergency_type?.charAt(0).toUpperCase() + em.emergency_type?.slice(1) || t('reports_emergency')} ${t('reports_report')}`,
       date: new Date(em.created_at || em.timestamp).toLocaleDateString(),
       timestamp: new Date(em.created_at || em.timestamp).getTime(),
-      source: em.automatic || em.source === 'ai' ? 'AI' : 'Manual',
+      source: em.automatic || em.source === 'ai' ? t('reports_source_ai') : t('reports_source_manual'),
       severity: em.severity || 'medium',
       data: em
     }));
@@ -106,10 +108,10 @@ const Reports = () => {
       id: `inc-${inc.id}`,
       realId: inc.id,
       type: 'incident',
-      title: `${inc.incident_type?.charAt(0).toUpperCase() + inc.incident_type?.slice(1) || 'Traffic'} Incident Report`,
+      title: `${inc.incident_type?.charAt(0).toUpperCase() + inc.incident_type?.slice(1) || t('reports_traffic')} ${t('reports_incident_report')}`,
       date: new Date(inc.created_at || inc.timestamp).toLocaleDateString(),
       timestamp: new Date(inc.created_at || inc.timestamp).getTime(),
-      source: inc.source === 'ai' || inc.detected_by === 'ai' ? 'AI' : 'Manual',
+      source: inc.source === 'ai' || inc.detected_by === 'ai' ? t('reports_source_ai') : t('reports_source_manual'),
       severity: inc.severity || 'low',
       data: inc
     }));
@@ -125,11 +127,11 @@ const Reports = () => {
       const doc = await generateMonthlyReportPDF(incidents, emergencies, selectedMonth);
       const monthName = selectedMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
       downloadPDF(doc, `RNP_Traffic_Report_${monthName.replace(' ', '_')}.pdf`);
-      toast.success('Monthly report generated successfully');
+      toast.success(t('reports_monthly_success'));
       setShowMonthlyModal(false);
     } catch (error) {
       console.error('Error generating monthly report:', error);
-      toast.error('Failed to generate monthly report');
+      toast.error(t('reports_monthly_failed'));
     } finally {
       setGenerating(false);
     }
@@ -141,11 +143,11 @@ const Reports = () => {
       setGenerating(true);
       const doc = await generateAnnualReportPDF(incidents, emergencies, selectedYear);
       downloadPDF(doc, `RNP_Traffic_Annual_Report_${selectedYear}.pdf`);
-      toast.success('Annual report generated successfully');
+      toast.success(t('reports_annual_success'));
       setShowAnnualModal(false);
     } catch (error) {
       console.error('Error generating annual report:', error);
-      toast.error('Failed to generate annual report');
+      toast.error(t('reports_annual_failed'));
     } finally {
       setGenerating(false);
     }
@@ -155,22 +157,22 @@ const Reports = () => {
   const handleDownloadEmergencyReport = async (emergency) => {
     console.log('Download emergency report called with:', emergency);
     if (!emergency) {
-      toast.error('No emergency data available');
+      toast.error(t('reports_no_emergency'));
       return;
     }
     try {
       setGenerating(true);
-      toast.loading('Generating emergency report...', { id: 'generating' });
+      toast.loading(t('reports_generating_emergency'), { id: 'generating' });
       console.log('Calling generateEmergencyReportPDF...');
       const doc = await generateEmergencyReportPDF(emergency, incidents || []);
       console.log('PDF generated, downloading...');
       downloadPDF(doc, `RNP_Emergency_Report_${emergency.id || Date.now()}.pdf`);
       toast.dismiss('generating');
-      toast.success('Emergency report downloaded successfully');
+      toast.success(t('reports_emergency_download_success'));
     } catch (error) {
       console.error('Error downloading emergency report:', error);
       toast.dismiss('generating');
-      toast.error('Failed to download emergency report: ' + (error.message || 'Unknown error'));
+      toast.error(`${t('reports_emergency_download_failed')}${error.message || t('reports_unknown_error')}`);
     } finally {
       setGenerating(false);
     }
@@ -180,22 +182,22 @@ const Reports = () => {
   const handleDownloadIncidentReport = async (incident) => {
     console.log('Download incident report called with:', incident);
     if (!incident) {
-      toast.error('No incident data available');
+      toast.error(t('reports_no_incident'));
       return;
     }
     try {
       setGenerating(true);
-      toast.loading('Generating incident report...', { id: 'generating' });
+      toast.loading(t('reports_generating_incident'), { id: 'generating' });
       console.log('Calling generateIncidentReportPDF...');
       const doc = await generateIncidentReportPDF(incident);
       console.log('PDF generated, downloading...');
       downloadPDF(doc, `RNP_Incident_Report_${incident.id || Date.now()}.pdf`);
       toast.dismiss('generating');
-      toast.success('Incident report downloaded successfully');
+      toast.success(t('reports_incident_download_success'));
     } catch (error) {
       console.error('Error downloading incident report:', error);
       toast.dismiss('generating');
-      toast.error('Failed to download incident report: ' + (error.message || 'Unknown error'));
+      toast.error(`${t('reports_incident_download_failed')}${error.message || t('reports_unknown_error')}`);
     } finally {
       setGenerating(false);
     }
@@ -209,7 +211,7 @@ const Reports = () => {
     
     if (!report || !report.data) {
       console.error('Missing report or report.data');
-      toast.error('No report data available');
+      toast.error(t('reports_no_report_data'));
       return;
     }
     if (report.type === 'emergency') {
@@ -218,7 +220,7 @@ const Reports = () => {
       await handleDownloadIncidentReport(report.data);
     } else {
       console.error('Unknown report type:', report.type);
-      toast.error('Unknown report type');
+      toast.error(t('reports_unknown_report_type'));
     }
   };
 
@@ -236,12 +238,12 @@ const Reports = () => {
         <div>
           <h1 className="text-2xl font-bold text-white flex items-center gap-2">
             <FileText className="w-8 h-8 text-cyan-500" />
-            Reports & Analytics
+            {t('reports_analytics')}
           </h1>
           <p className="text-gray-400 mt-1">
-            Generate comprehensive reports and analyze traffic patterns
+            {t('reports_generate_desc')}
             <span className="ml-2 text-xs text-cyan-400">
-              • Live updates every 10s • Last: {lastUpdated.toLocaleTimeString()}
+              • {t('reports_live_updates')} • {t('reports_last_label')}: {lastUpdated.toLocaleTimeString()}
             </span>
           </p>
         </div>
@@ -251,14 +253,14 @@ const Reports = () => {
             className="bg-cyan-600 hover:bg-cyan-700 text-white px-6 py-3 rounded-xl font-medium transition-all flex items-center gap-2 shadow-lg shadow-cyan-600/20 hover:scale-105"
           >
             <Calendar className="w-5 h-5" />
-            Monthly Report
+            {t('reports_monthly_report')}
           </button>
           <button
             onClick={() => setShowAnnualModal(true)}
             className="bg-cyan-700 hover:bg-cyan-800 text-white px-6 py-3 rounded-xl font-medium transition-all flex items-center gap-2 shadow-lg shadow-cyan-700/20 hover:scale-105"
           >
             <Zap className="w-5 h-5" />
-            Annual Report
+            {t('reports_annual_report')}
           </button>
         </div>
       </div>
@@ -270,8 +272,8 @@ const Reports = () => {
               <FileBarChart className="w-6 h-6 text-cyan-400" />
             </div>
             <div>
-              <h3 className="text-lg font-bold text-white">Total Reports</h3>
-              <p className="text-sm text-gray-400">AI: {metrics.aiCount} • Manual: {metrics.manualCount}</p>
+              <h3 className="text-lg font-bold text-white">{t('reports_total_reports')}</h3>
+              <p className="text-sm text-gray-400">{t('reports_ai')}: {metrics.aiCount} • {t('reports_manual')}: {metrics.manualCount}</p>
             </div>
           </div>
           <p className="text-3xl font-bold text-cyan-400">{metrics.total}</p>
@@ -283,8 +285,8 @@ const Reports = () => {
               <Calendar className="w-6 h-6 text-cyan-400" />
             </div>
             <div>
-              <h3 className="text-lg font-bold text-white">Last Generated</h3>
-              <p className="text-sm text-gray-400">Most recent report</p>
+              <h3 className="text-lg font-bold text-white">{t('reports_last_generated')}</h3>
+              <p className="text-sm text-gray-400">{t('reports_most_recent')}</p>
             </div>
           </div>
           <p className="text-xl font-bold text-cyan-400">{metrics.lastGenerated}</p>
@@ -296,8 +298,8 @@ const Reports = () => {
               <BarChart2 className="w-6 h-6 text-cyan-400" />
             </div>
             <div>
-              <h3 className="text-lg font-bold text-white">Data Points</h3>
-              <p className="text-sm text-gray-400">Processed in reports</p>
+              <h3 className="text-lg font-bold text-white">{t('reports_data_points')}</h3>
+              <p className="text-sm text-gray-400">{t('reports_processed_in_reports')}</p>
             </div>
           </div>
           <p className="text-3xl font-bold text-cyan-400">{metrics.dataPoints}</p>
@@ -306,10 +308,10 @@ const Reports = () => {
 
       <div className="bg-slate-800/50 backdrop-blur-md border border-white/5 rounded-xl p-6">
         <div className="flex items-center justify-between mb-6">
-          <h3 className="text-xl font-bold text-white">Recent Reports</h3>
+          <h3 className="text-xl font-bold text-white">{t('reports_recent_reports')}</h3>
           <div className="flex items-center gap-2 text-xs text-gray-400">
             <RefreshCw className="w-3 h-3 animate-spin" />
-            <span>Auto-updating</span>
+            <span>{t('reports_auto_updating')}</span>
           </div>
         </div>
         <div className="space-y-4">
@@ -332,7 +334,7 @@ const Reports = () => {
                         </span>
                       )}
                     </div>
-                    <p className="text-xs text-gray-500">Generated on {report.date} • {report.type}</p>
+                    <p className="text-xs text-gray-500">{t('reports_generated_on')} {report.date} • {report.type}</p>
                   </div>
                 </div>
                 <button
@@ -340,15 +342,15 @@ const Reports = () => {
                   disabled={generating}
                   className="text-sm text-cyan-400 hover:text-cyan-300 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-50"
                 >
-                  <Download className="w-4 h-4" /> Download
+                  <Download className="w-4 h-4" /> {t('reports_download')}
                 </button>
               </div>
             ))
           ) : (
             <div className="text-center py-12 text-gray-500">
               <Activity className="w-12 h-12 mx-auto mb-2 opacity-20" />
-              <p>No reports available yet</p>
-              <p className="text-xs mt-1">Reports will appear here in real-time</p>
+              <p>{t('reports_no_reports')}</p>
+              <p className="text-xs mt-1">{t('reports_reports_will_appear')}</p>
             </div>
           )}
         </div>
@@ -358,10 +360,10 @@ const Reports = () => {
       {showMonthlyModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
           <div className="bg-slate-800 rounded-xl p-6 max-w-md w-full mx-4 border border-white/10">
-            <h2 className="text-xl font-bold text-white mb-4">Generate Monthly Report</h2>
+            <h2 className="text-xl font-bold text-white mb-4">{t('reports_generate_monthly_title')}</h2>
             
             <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-300 mb-2">Select Month</label>
+              <label className="block text-sm font-medium text-gray-300 mb-2">{t('reports_select_month')}</label>
               <input
                 type="month"
                 value={selectedMonth.toISOString().slice(0, 7)}
@@ -375,7 +377,7 @@ const Reports = () => {
                 onClick={() => setShowMonthlyModal(false)}
                 className="flex-1 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors"
               >
-                Cancel
+                {t('reports_cancel')}
               </button>
               <button
                 onClick={handleGenerateMonthlyReport}
@@ -385,12 +387,12 @@ const Reports = () => {
                 {generating ? (
                   <>
                     <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    Generating...
+                    {t('reports_generating')}
                   </>
                 ) : (
                   <>
                     <Download className="w-4 h-4" />
-                    Generate & Download
+                    {t('reports_generate_download')}
                   </>
                 )}
               </button>
@@ -403,10 +405,10 @@ const Reports = () => {
       {showAnnualModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
           <div className="bg-slate-800 rounded-xl p-6 max-w-md w-full mx-4 border border-white/10">
-            <h2 className="text-xl font-bold text-white mb-4">Generate Annual Report</h2>
+            <h2 className="text-xl font-bold text-white mb-4">{t('reports_generate_annual_title')}</h2>
             
             <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-300 mb-2">Select Year</label>
+              <label className="block text-sm font-medium text-gray-300 mb-2">{t('reports_select_year')}</label>
               <select
                 value={selectedYear}
                 onChange={(e) => setSelectedYear(parseInt(e.target.value))}
@@ -423,7 +425,7 @@ const Reports = () => {
                 onClick={() => setShowAnnualModal(false)}
                 className="flex-1 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors"
               >
-                Cancel
+                {t('reports_cancel')}
               </button>
               <button
                 onClick={handleGenerateAnnualReport}
@@ -433,12 +435,12 @@ const Reports = () => {
                 {generating ? (
                   <>
                     <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    Generating...
+                    {t('reports_generating')}
                   </>
                 ) : (
                   <>
                     <Download className="w-4 h-4" />
-                    Generate & Download
+                    {t('reports_generate_download')}
                   </>
                 )}
               </button>

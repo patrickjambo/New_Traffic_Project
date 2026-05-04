@@ -17,6 +17,10 @@ const fcmService = require('./services/fcmService');
 // Initialize FCM Service
 fcmService.initialize();
 
+// Initialize data cleanup scheduler
+const dataCleanupService = require('./services/dataCleanupService');
+dataCleanupService.scheduleCleanup();
+
 // Centralized database access
 const db = require('./config/database');
 
@@ -27,6 +31,7 @@ const emergencyRoutes = require('./routes/emergency');
 const autoAnalysisRoutes = require('./routes/autoAnalysis');
 const detectionRoutes = require('./routes/detection');
 const deploymentRoutes = require('./routes/deployments');
+const mapProxyRoutes = require('./routes/mapProxy');
 
 // Initialize app
 const app = express();
@@ -106,6 +111,7 @@ app.use('/api/dashboard', require('./routes/dashboard'));
 app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/deployments', deploymentRoutes);
 app.use('/api/geofencing', require('./routes/geofencing'));  // Geo-fencing & alerts
+app.use('/api/map', mapProxyRoutes);
 
 // Add convenience routes for mobile app compatibility
 // /api/alerts route

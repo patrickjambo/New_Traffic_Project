@@ -37,23 +37,33 @@ const DashboardPage = () => {
 
   // Calculate real-time stats from actual data
   const realTimeStats = useMemo(() => {
-    const activeIncidents = incidents.filter(i => i.status !== 'resolved');
+    const isResolved = (status) => ['resolved', 'closed', 'completed'].includes((status || '').toLowerCase());
+    const isActive = (status) => !isResolved(status);
+
+    const activeIncidents = incidents.filter(i => isActive(i.status));
     const criticalCount = activeIncidents.filter(i => i.severity === 'critical' || i.severity === 'high').length;
-    const resolvedToday = incidents.filter(i => {
-      if (i.status !== 'resolved') return false;
-      const today = new Date();
-      const updated = new Date(i.updated_at || i.created_at);
-      return updated.toDateString() === today.toDateString();
-    }).length;
+    
+    let resolvedTodayCount = 0;
+    const todayStr = new Date().toDateString();
+
+    const countIfResolvedToday = (item) => {
+      if (isResolved(item.status)) {
+        const updated = new Date(item.updated_at || item.created_at || new Date());
+        if (updated.toDateString() === todayStr) resolvedTodayCount++;
+      }
+    };
+
+    incidents.forEach(countIfResolvedToday);
+    emergencies.forEach(countIfResolvedToday);
 
     return {
       activeIncidents: activeIncidents.length,
       criticalCount,
-      resolvedToday,
+      resolvedToday: resolvedTodayCount,
       avgResponseTime: statistics?.avg_response_time || 0,
-      totalIncidents: statistics?.total_incidents || incidents.length,
+      totalIncidents: (statistics?.total_incidents || 0) + emergencies.length,
     };
-  }, [incidents, statistics, now]);
+  }, [incidents, emergencies, statistics, now]);
 
   // Format recent reports (incidents + emergencies)
   const recentReports = useMemo(() => {
@@ -93,7 +103,7 @@ const DashboardPage = () => {
 
   // Active Emergencies
   const activeEmergencies = useMemo(() => {
-    return emergencies.filter(em => em.status === 'pending' || em.status === 'active');
+    return emergencies.filter(em => !['resolved', 'closed', 'completed'].includes((em.status || '').toLowerCase()));
   }, [emergencies, now]);
 
   // Stats Data - now using real data with consistent cyan color scheme

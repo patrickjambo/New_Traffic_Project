@@ -487,7 +487,10 @@ const OfficerManagement = () => {
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-gradient-to-br from-blue-600/20 to-blue-800/20 border border-blue-500/30 rounded-xl p-4">
+        <div 
+          onClick={() => setStatusFilter('all')}
+          className={`bg-gradient-to-br from-blue-600/20 to-blue-800/20 border ${statusFilter === 'all' ? 'border-blue-400 shadow-[0_0_15px_rgba(59,130,246,0.3)]' : 'border-blue-500/30'} rounded-xl p-4 cursor-pointer hover:border-blue-400 hover:shadow-[0_0_10px_rgba(59,130,246,0.2)] transition-all duration-300`}
+        >
           <div className="flex items-center gap-3">
             <div className="p-2 bg-blue-500/20 rounded-lg">
               <Users className="w-6 h-6 text-blue-400" />
@@ -498,7 +501,10 @@ const OfficerManagement = () => {
             </div>
           </div>
         </div>
-        <div className="bg-gradient-to-br from-green-600/20 to-green-800/20 border border-green-500/30 rounded-xl p-4">
+        <div 
+          onClick={() => setStatusFilter('active')}
+          className={`bg-gradient-to-br from-green-600/20 to-green-800/20 border ${statusFilter === 'active' ? 'border-green-400 shadow-[0_0_15px_rgba(34,197,94,0.3)]' : 'border-green-500/30'} rounded-xl p-4 cursor-pointer hover:border-green-400 hover:shadow-[0_0_10px_rgba(34,197,94,0.2)] transition-all duration-300`}
+        >
           <div className="flex items-center gap-3">
             <div className="p-2 bg-green-500/20 rounded-lg">
               <UserCheck className="w-6 h-6 text-green-400" />
@@ -511,7 +517,10 @@ const OfficerManagement = () => {
             </div>
           </div>
         </div>
-        <div className="bg-gradient-to-br from-red-600/20 to-red-800/20 border border-red-500/30 rounded-xl p-4">
+        <div 
+          onClick={() => setStatusFilter('blocked')}
+          className={`bg-gradient-to-br from-red-600/20 to-red-800/20 border ${statusFilter === 'blocked' ? 'border-red-400 shadow-[0_0_15px_rgba(239,68,68,0.3)]' : 'border-red-500/30'} rounded-xl p-4 cursor-pointer hover:border-red-400 hover:shadow-[0_0_10px_rgba(239,68,68,0.2)] transition-all duration-300`}
+        >
           <div className="flex items-center gap-3">
             <div className="p-2 bg-red-500/20 rounded-lg">
               <UserX className="w-6 h-6 text-red-400" />

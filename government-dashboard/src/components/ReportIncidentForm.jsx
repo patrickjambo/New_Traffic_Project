@@ -520,7 +520,7 @@ function ReportIncidentForm(props) {
 
       {/* Step 3.5: Severity & Casualties - Only for emergencies */}
       {isEmergency && (
-        <div className="grid grid-cols-3 gap-3">
+        <div className="flex flex-col gap-3">
           {/* Severity Selection */}
           <div>
             <label className="block text-sm font-semibold text-cyan-300 mb-2">{t('severity_level')}</label>
@@ -606,8 +606,8 @@ function ReportIncidentForm(props) {
         </div>
       )}
 
-      {/* Step 4: Auto-Generated Description & Phone - Combined row */}
-      <div className="grid grid-cols-2 gap-3">
+      {/* Step 4: Auto-Generated Description & Phone */}
+      <div className="flex flex-col gap-3">
         <div>
           <label className="block text-sm font-semibold text-cyan-300 mb-2">
             {t('auto_generated_message')}

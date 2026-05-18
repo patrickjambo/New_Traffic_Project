@@ -25,10 +25,10 @@ import OfficerManagement from './pages/OfficerManagement';
 // Sidebar menu items definition (shared between sidebar and keyboard nav)
 const allMenuItems = [
   { path: '/', label: 'Home', roles: ['public', 'police', 'admin', 'district_admin', 'co_admin'] },
+  { path: '/emergency', label: 'Emergency', roles: ['police', 'admin', 'district_admin', 'co_admin'] },
   { path: '/dashboard', label: 'Dashboard', roles: ['police', 'admin', 'district_admin', 'co_admin'] },
   { path: '/incidents', label: 'Incidents', roles: ['police', 'admin', 'district_admin', 'co_admin'] },
   { path: '/reports', label: 'Reports', roles: ['police', 'admin', 'district_admin', 'co_admin'] },
-  { path: '/emergency', label: 'Emergency', roles: ['police', 'admin', 'district_admin', 'co_admin'] },
   { path: '/deployments', label: 'Deployments', roles: ['police', 'admin', 'district_admin', 'co_admin'] },
   { path: '/geofencing', label: 'Geo-Fencing', roles: ['admin', 'district_admin', 'co_admin'] },
   { path: '/officers', label: 'Officers', roles: ['admin', 'district_admin'] },

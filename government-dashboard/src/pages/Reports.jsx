@@ -11,6 +11,10 @@ import {
   generateAnnualReportPDF,
   downloadPDF
 } from '../services/pdfReportGenerator';
+import {
+  generateExcelReport,
+  formatIncidentDataForExcel
+} from '../services/excelReportGenerator';
 
 const Reports = () => {
   const { t } = useTranslation();
@@ -153,6 +157,22 @@ const Reports = () => {
     }
   };
 
+  // Generate Excel Report
+  const handleGenerateExcelReport = () => {
+    try {
+      setGenerating(true);
+      const formattedData = formatIncidentDataForExcel(incidents, emergencies);
+      const timestamp = new Date().toISOString().slice(0, 10);
+      generateExcelReport(formattedData, `RNP_Traffic_Complete_Report_${timestamp}.xlsx`);
+      toast.success('Excel report generated successfully');
+    } catch (error) {
+      console.error('Error generating Excel report:', error);
+      toast.error('Failed to generate Excel report');
+    } finally {
+      setGenerating(false);
+    }
+  };
+
   // Download Emergency Report
   const handleDownloadEmergencyReport = async (emergency) => {
     console.log('Download emergency report called with:', emergency);
@@ -248,6 +268,14 @@ const Reports = () => {
           </p>
         </div>
         <div className="flex gap-3">
+          <button
+            onClick={handleGenerateExcelReport}
+            disabled={generating}
+            className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-xl font-medium transition-all flex items-center gap-2 shadow-lg shadow-green-600/20 hover:scale-105 disabled:opacity-50"
+          >
+            <Download className="w-5 h-5" />
+            Excel Report
+          </button>
           <button
             onClick={() => setShowMonthlyModal(true)}
             className="bg-cyan-600 hover:bg-cyan-700 text-white px-6 py-3 rounded-xl font-medium transition-all flex items-center gap-2 shadow-lg shadow-cyan-600/20 hover:scale-105"

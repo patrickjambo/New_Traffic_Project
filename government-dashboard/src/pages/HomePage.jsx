@@ -432,6 +432,12 @@ const HomePage = () => {
 
             {/* Desktop Navigation - Consistent Secondary Color (Cyan/Teal) */}
             <nav className="hidden lg:flex items-center gap-1.5">
+              {/* Emergency - Consistent cyan style with red icon */}
+              <button onClick={() => setShowEmergencyModal(true)} className="group flex items-center gap-2 px-3 py-2 rounded-lg text-cyan-100 hover:text-white bg-cyan-500/10 hover:bg-cyan-500/25 border border-cyan-400/20 hover:border-cyan-400/50 transition-all duration-300">
+                <Siren className="w-4 h-4 text-red-400 animate-pulse group-hover:scale-110 transition-transform duration-300" />
+                <span className="font-medium text-sm">{t('nav_emergency')}</span>
+              </button>
+
               {/* About - Scrolls to About section */}
               <a href="#about" className="group flex items-center gap-2 px-3 py-2 rounded-lg text-cyan-100 hover:text-white bg-cyan-500/10 hover:bg-cyan-500/25 border border-cyan-400/20 hover:border-cyan-400/50 transition-all duration-300">
                 <Users className="w-4 h-4 text-cyan-400 group-hover:scale-110 transition-transform duration-300" />
@@ -448,12 +454,6 @@ const HomePage = () => {
               <button onClick={() => setShowDailyIncidentsModal(true)} className="group flex items-center gap-2 px-3 py-2 rounded-lg text-cyan-100 hover:text-white bg-cyan-500/10 hover:bg-cyan-500/25 border border-cyan-400/20 hover:border-cyan-400/50 transition-all duration-300">
                 <Eye className="w-4 h-4 text-cyan-400 group-hover:scale-110 transition-transform duration-300" />
                 <span className="font-medium text-sm">{t('nav_live_incidents')}</span>
-              </button>
-
-              {/* Emergency - Consistent cyan style with red icon */}
-              <button onClick={() => setShowEmergencyModal(true)} className="group flex items-center gap-2 px-3 py-2 rounded-lg text-cyan-100 hover:text-white bg-cyan-500/10 hover:bg-cyan-500/25 border border-cyan-400/20 hover:border-cyan-400/50 transition-all duration-300">
-                <Siren className="w-4 h-4 text-red-400 animate-pulse group-hover:scale-110 transition-transform duration-300" />
-                <span className="font-medium text-sm">{t('nav_emergency')}</span>
               </button>
 
               {/* Report - Consistent cyan style */}

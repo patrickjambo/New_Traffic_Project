@@ -172,6 +172,26 @@ const DashboardPage = () => {
     }, 0);
   }, [realDeployments, now]);
 
+  // Add Officers card (uses available officers from deployments or fallback to 0)
+  const totalOfficersCount = (() => {
+    // prefer deployments officer count, otherwise try statistics or 0
+    if (typeof totalOfficersDeployed === 'number' && totalOfficersDeployed > 0) return totalOfficersDeployed;
+    if (statistics && statistics.officer_count) return statistics.officer_count;
+    return 0;
+  })();
+
+  const officersCard = {
+    id: 5,
+    title: 'OFFICERS',
+    value: loading ? '...' : String(totalOfficersCount),
+    subtitle: 'Active officers',
+    icon: Building2,
+    color: 'bg-emerald-500',
+    iconColor: 'text-white',
+    trend: 'View',
+    trendColor: 'bg-emerald-500/20 text-emerald-300'
+  };
+
   // Regions - calculated from real-time data
   const regions = useMemo(() => {
     if (isDistrictAdmin && userDistrictId) {
@@ -347,8 +367,20 @@ const DashboardPage = () => {
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        {stats.map((stat) => (
-          <div key={stat.id} className="bg-slate-800/50 backdrop-blur-md border border-white/5 p-6 rounded-2xl hover:bg-slate-800/70 transition-all group">
+        {[...stats, officersCard].map((stat) => (
+          <div
+            key={stat.id}
+            onClick={() => {
+              // Map card clicks to routes
+              if (stat.id === 1) return navigate('/incidents'); // Active incidents
+              if (stat.id === 2) return navigate('/emergency'); // Emergencies
+              if (stat.id === 3) return navigate('/incidents'); // Resolved today -> incidents list (use filter there)
+              if (stat.id === 5) return navigate('/officers'); // Officers
+              // Default: no navigation
+              return null;
+            }}
+            className="cursor-pointer bg-slate-800/50 backdrop-blur-md border border-white/5 p-6 rounded-2xl hover:bg-slate-800/70 transition-all group"
+          >
             <div className="flex justify-between items-start mb-4">
               <div className={`p-3 rounded-xl ${stat.color} bg-opacity-20`}>
                 <stat.icon className={`w-6 h-6 ${stat.iconColor}`} />

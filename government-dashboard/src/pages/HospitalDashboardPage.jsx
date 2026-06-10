@@ -127,15 +127,17 @@ const HospitalDashboardPage = () => {
         return () => document.removeEventListener('mousedown', handler);
     }, []);
 
+    const isActive = (e) => e.status !== 'resolved' && e.status !== 'cancelled';
+
     const computeStats = useCallback((emList, aiList) => {
+        const active = emList.filter(isActive);
         setStats({
-            total: emList.length,
-            ambulance: emList.filter(needsSiren).length,
-            medical: emList.filter(e => (e.emergency_type || e.type || '').toLowerCase() === 'medical').length,
-            // Count AI emergencies from the emergencies list that include ambulance — relevant to hospital
-            ai: emList.filter(e => e.source === 'ai' && needsSiren(e)).length,
-            critical: emList.filter(e => e.severity === 'critical').length,
-            pending: emList.filter(e => e.status === 'pending').length,
+            total: active.length,
+            ambulance: active.filter(needsSiren).length,
+            medical: active.filter(e => (e.emergency_type || e.type || '').toLowerCase() === 'medical').length,
+            ai: active.filter(e => e.source === 'ai' && needsSiren(e)).length,
+            critical: active.filter(e => e.severity === 'critical').length,
+            pending: active.filter(e => e.status === 'pending').length,
         });
     }, []);
 
@@ -148,8 +150,8 @@ const HospitalDashboardPage = () => {
             ]);
 
             const allEm = emRes.data?.data || [];
-            // Hospital admin only sees emergencies where ambulance is needed
-            const emList = allEm.filter(needsSiren);
+            // Hospital admin: only ambulance/medical emergencies that are still active
+            const emList = allEm.filter(needsSiren).filter(e => e.status !== 'resolved' && e.status !== 'cancelled');
 
             const incList = (incRes.data?.data || incRes.data || []);
             const aiList = Array.isArray(incList)
@@ -206,19 +208,39 @@ const HospitalDashboardPage = () => {
         });
 
         const unsubEmUpdate = subscribe('emergency:update', (data) => {
-            setEmergencies(prev => {
-                const updated = prev.map(e => (e.id === (data.id || data.emergencyId)) ? { ...e, ...data, status: data.status || e.status } : e);
-                computeStats(updated, aiIncidents);
-                return updated;
-            });
+            const emId = data.id || data.emergencyId;
+            const newStatus = data.status;
+            if (newStatus === 'resolved' || newStatus === 'cancelled') {
+                setEmergencies(prev => {
+                    const updated = prev.filter(e => e.id !== emId && e.id !== parseInt(emId));
+                    computeStats(updated, aiIncidents);
+                    return updated;
+                });
+            } else {
+                setEmergencies(prev => {
+                    const updated = prev.map(e => (e.id === emId) ? { ...e, ...data, status: newStatus || e.status } : e);
+                    computeStats(updated, aiIncidents);
+                    return updated;
+                });
+            }
         });
 
         const unsubEmStatusChange = subscribe('emergency:status_changed', (data) => {
-            setEmergencies(prev => {
-                const updated = prev.map(e => (e.id === (data.emergencyId || data.id)) ? { ...e, status: data.newStatus || data.status || e.status } : e);
-                computeStats(updated, aiIncidents);
-                return updated;
-            });
+            const emId = data.emergencyId || data.id;
+            const newStatus = data.newStatus || data.status;
+            if (newStatus === 'resolved' || newStatus === 'cancelled') {
+                setEmergencies(prev => {
+                    const updated = prev.filter(e => e.id !== emId && e.id !== parseInt(emId));
+                    computeStats(updated, aiIncidents);
+                    return updated;
+                });
+            } else {
+                setEmergencies(prev => {
+                    const updated = prev.map(e => (e.id === emId) ? { ...e, status: newStatus || e.status } : e);
+                    computeStats(updated, aiIncidents);
+                    return updated;
+                });
+            }
         });
 
         const unsubAI = subscribe('ai:incident_detected', (data) => {
@@ -254,8 +276,9 @@ const HospitalDashboardPage = () => {
     if (!isAuthenticated) return <Navigate to="/login" replace />;
     if (user?.role !== 'hospital_admin') return <Navigate to="/login" replace />;
 
-    // Filter logic
+    // Filter logic — resolved/cancelled are never shown on any tab
     const filteredEmergencies = emergencies.filter(e => {
+        if (e.status === 'resolved' || e.status === 'cancelled') return false;
         if (activeTab === 'ambulance') return needsSiren(e);
         if (activeTab === 'medical') return (e.emergency_type || e.type || '').toLowerCase() === 'medical';
         if (activeTab === 'ai') return e.source === 'ai' && needsSiren(e);
@@ -264,9 +287,9 @@ const HospitalDashboardPage = () => {
         return true;
     });
 
-    // All map points: emergencies + AI incidents
+    // All map points: active emergencies + AI incidents (no resolved/cancelled pins)
     const mapPoints = [
-        ...emergencies.filter(e => e.latitude && e.longitude).map(e => ({ ...e, _kind: 'emergency' })),
+        ...emergencies.filter(e => e.latitude && e.longitude && e.status !== 'resolved' && e.status !== 'cancelled').map(e => ({ ...e, _kind: 'emergency' })),
         ...aiIncidents.filter(i => i.latitude && i.longitude).map(i => ({ ...i, _kind: 'ai' })),
     ];
 

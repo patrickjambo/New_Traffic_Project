@@ -140,9 +140,15 @@ export const DataProvider = ({ children }) => {
   // Handle incident update
   const handleIncidentUpdate = useCallback((update) => {
     console.log('🔄 Incident update received:', update);
-    setIncidents(prev =>
-      prev.map(inc => inc.id === update.id ? { ...inc, ...update } : inc)
-    );
+    const finalStatus = update.status;
+    if (finalStatus === 'resolved' || finalStatus === 'dismissed') {
+      // Remove from active view — resolved incidents no longer appear on dashboard
+      setIncidents(prev => prev.filter(inc => inc.id !== update.id));
+    } else {
+      setIncidents(prev =>
+        prev.map(inc => inc.id === update.id ? { ...inc, ...update } : inc)
+      );
+    }
     // Don't show toast for every update - too noisy
   }, []);
 
@@ -220,26 +226,31 @@ export const DataProvider = ({ children }) => {
   // Handle emergency update
   const handleEmergencyUpdate = useCallback((update) => {
     console.log('🔄 Emergency update received:', update);
-    // Handle both 'id' and 'emergencyId' field names
     const emergencyId = update.id || update.emergencyId;
     if (!emergencyId) return;
-    
-    setEmergencies(prev =>
-      prev.map(em => {
-        if (em.id === emergencyId || em.id === parseInt(emergencyId)) {
-          return { 
-            ...em, 
-            ...update,
-            id: em.id, // Keep original id
-            status: update.status || em.status,
-            assigned_to: update.assigned_to || update.officerId || em.assigned_to,
-            assigned_to_name: update.assigned_to_name || update.responder_name || update.officerName || em.assigned_to_name,
-            responder_name: update.responder_name || update.officerName || update.assigned_to_name || em.responder_name,
-          };
-        }
-        return em;
-      })
-    );
+
+    const finalStatus = update.status;
+    if (finalStatus === 'resolved' || finalStatus === 'cancelled') {
+      // Remove from active view — resolved/cancelled emergencies no longer appear on dashboard
+      setEmergencies(prev => prev.filter(em => em.id !== emergencyId && em.id !== parseInt(emergencyId)));
+    } else {
+      setEmergencies(prev =>
+        prev.map(em => {
+          if (em.id === emergencyId || em.id === parseInt(emergencyId)) {
+            return {
+              ...em,
+              ...update,
+              id: em.id,
+              status: update.status || em.status,
+              assigned_to: update.assigned_to || update.officerId || em.assigned_to,
+              assigned_to_name: update.assigned_to_name || update.responder_name || update.officerName || em.assigned_to_name,
+              responder_name: update.responder_name || update.officerName || update.assigned_to_name || em.responder_name,
+            };
+          }
+          return em;
+        })
+      );
+    }
     // Don't show toast for every status update - too noisy
   }, []);
 
@@ -342,14 +353,18 @@ export const DataProvider = ({ children }) => {
     console.log('📊 Emergency status changed:', data);
     const emergencyId = data.emergencyId || data.id;
     const newStatus = data.newStatus || data.status;
-    
-    // Update local state with new status
-    if (emergencyId && newStatus) {
+
+    if (!emergencyId || !newStatus) return;
+
+    if (newStatus === 'resolved' || newStatus === 'cancelled') {
+      // Remove from active view
+      setEmergencies(prev => prev.filter(em => em.id !== emergencyId && em.id !== parseInt(emergencyId)));
+    } else {
       setEmergencies(prev =>
         prev.map(em => {
           if (em.id === emergencyId || em.id === parseInt(emergencyId)) {
-            return { 
-              ...em, 
+            return {
+              ...em,
               status: newStatus,
               assigned_to_name: data.responder_name || data.officerName || em.assigned_to_name,
               responder_name: data.responder_name || data.officerName || em.responder_name,
@@ -445,10 +460,10 @@ export const DataProvider = ({ children }) => {
   // API Functions
   // ============================================
 
-  // Fetch incidents
-  const fetchIncidents = async () => {
+  // Fetch incidents — pass params (e.g. startDate/endDate) for historical/report queries
+  const fetchIncidents = async (params = {}) => {
     try {
-      const response = await axios.get('/api/incidents');
+      const response = await axios.get('/api/incidents', { params });
       if (response.data.success) {
         setIncidents(response.data.data || []);
       }
@@ -457,16 +472,15 @@ export const DataProvider = ({ children }) => {
     }
   };
 
-  // Fetch emergencies - preserves optimistic entries
-  const fetchEmergencies = async () => {
+  // Fetch emergencies — pass params (e.g. startDate/endDate) for historical/report queries
+  const fetchEmergencies = async (params = {}) => {
     try {
-      const response = await axios.get('/api/emergency');
+      const response = await axios.get('/api/emergency', { params });
       if (response.data.success) {
         const serverEmergencies = response.data.data || [];
         // Preserve any optimistic entries that haven't been confirmed yet
         setEmergencies(prev => {
           const optimisticEntries = prev.filter(em => em._isOptimistic);
-          // Merge: server data + optimistic entries not yet in server data
           const serverIds = new Set(serverEmergencies.map(em => em.id));
           const pendingOptimistic = optimisticEntries.filter(em => !serverIds.has(em.id));
           return [...pendingOptimistic, ...serverEmergencies];

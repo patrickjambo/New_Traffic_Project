@@ -230,6 +230,9 @@ const getEmergencies = async (req, res) => {
             userId,
             limit = 50,
             offset = 0,
+            startDate,
+            endDate,
+            includeResolved,
         } = req.query;
 
         let query = `
@@ -264,11 +267,29 @@ const getEmergencies = async (req, res) => {
             paramIndex++;
         }
 
-        // Add filters
+        // Date filter: today by default.
+        // Pass startDate+endDate for a date range (e.g. monthly PDF).
+        // Pass includeResolved=true with no dates to fetch ALL days (Excel full export).
+        if (startDate && endDate) {
+            query += ` AND e.created_at >= $${paramIndex}`;
+            params.push(startDate);
+            paramIndex++;
+            query += ` AND e.created_at <= $${paramIndex}`;
+            params.push(endDate);
+            paramIndex++;
+        } else if (includeResolved !== 'true') {
+            query += ` AND DATE(e.created_at) = CURRENT_DATE`;
+        }
+
+        // Status filter: hide resolved/cancelled from live dashboards by default.
+        // Pass an explicit status param to target a specific status.
+        // Pass includeResolved=true (e.g. for report downloads) to skip the exclusion.
         if (status) {
             query += ` AND e.status = $${paramIndex}`;
             params.push(status);
             paramIndex++;
+        } else if (includeResolved !== 'true') {
+            query += ` AND e.status NOT IN ('resolved', 'cancelled')`;
         }
 
         if (severity) {
@@ -306,12 +327,27 @@ const getEmergencies = async (req, res) => {
 
         const result = await db.query(query, params);
 
-        // Get total count (district-filtered if applicable)
+        // Get total count — apply the same date and status filters as the main query
         let countQuery = 'SELECT COUNT(*) FROM emergencies WHERE 1=1';
         const countParams = [];
+        let countParamIndex = 1;
         if (userDistrictId) {
-            countQuery += ' AND district_id = $1';
+            countQuery += ` AND district_id = $${countParamIndex}`;
             countParams.push(userDistrictId);
+            countParamIndex++;
+        }
+        if (startDate && endDate) {
+            countQuery += ` AND created_at >= $${countParamIndex}`;
+            countParams.push(startDate);
+            countParamIndex++;
+            countQuery += ` AND created_at <= $${countParamIndex}`;
+            countParams.push(endDate);
+            countParamIndex++;
+        } else if (includeResolved !== 'true') {
+            countQuery += ` AND DATE(created_at) = CURRENT_DATE`;
+        }
+        if (!status && includeResolved !== 'true') {
+            countQuery += ` AND status NOT IN ('resolved', 'cancelled')`;
         }
         const countResult = await db.query(countQuery, countParams);
 

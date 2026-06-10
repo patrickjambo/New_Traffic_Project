@@ -76,7 +76,7 @@ const DashboardPage = () => {
       status: inc.status || 'pending',
       severity: inc.severity || 'medium',
       source: inc.source || 'manual',
-      reportType: 'incident',
+      reportType: 'incident', 
       // Consistent cyan color scheme throughout
       color: inc.severity === 'critical' ? 'bg-cyan-700' :
         inc.severity === 'high' ? 'bg-cyan-600' :

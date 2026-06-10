@@ -124,11 +124,35 @@ const Reports = () => {
       .sort((a, b) => b.timestamp - a.timestamp); // Show all reports, sorted by date
   }, [emergencies, incidents]);
 
+  // Fetch historical data for report generation — bypasses the daily display filter.
+  // Pass startDate+endDate for a scoped range (monthly/annual PDFs).
+  // Omit both to fetch ALL records across all days (Excel full export).
+  const fetchReportData = async (startDate, endDate) => {
+    const params = { includeResolved: 'true', limit: 10000 };
+    if (startDate) params.startDate = startDate;
+    if (endDate) params.endDate = endDate;
+    const [incRes, emRes] = await Promise.all([
+      axios.get('/api/incidents', { params }),
+      axios.get('/api/emergency', { params }),
+    ]);
+    return {
+      reportIncidents: incRes.data?.data || [],
+      reportEmergencies: emRes.data?.data || [],
+    };
+  };
+
   // Generate Monthly Report
   const handleGenerateMonthlyReport = async () => {
     try {
       setGenerating(true);
-      const doc = await generateMonthlyReportPDF(incidents, emergencies, selectedMonth);
+      // Fetch all data for the selected month (including resolved) for the report
+      const year = selectedMonth.getFullYear();
+      const month = selectedMonth.getMonth();
+      const startDate = new Date(year, month, 1).toISOString();
+      const endDate = new Date(year, month + 1, 0, 23, 59, 59).toISOString();
+      const { reportIncidents, reportEmergencies } = await fetchReportData(startDate, endDate);
+
+      const doc = await generateMonthlyReportPDF(reportIncidents, reportEmergencies, selectedMonth);
       const monthName = selectedMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
       downloadPDF(doc, `RNP_Traffic_Report_${monthName.replace(' ', '_')}.pdf`);
       toast.success(t('reports_monthly_success'));
@@ -145,7 +169,12 @@ const Reports = () => {
   const handleGenerateAnnualReport = async () => {
     try {
       setGenerating(true);
-      const doc = await generateAnnualReportPDF(incidents, emergencies, selectedYear);
+      // Fetch all data for the selected year (including resolved) for the report
+      const startDate = new Date(selectedYear, 0, 1).toISOString();
+      const endDate = new Date(selectedYear, 11, 31, 23, 59, 59).toISOString();
+      const { reportIncidents, reportEmergencies } = await fetchReportData(startDate, endDate);
+
+      const doc = await generateAnnualReportPDF(reportIncidents, reportEmergencies, selectedYear);
       downloadPDF(doc, `RNP_Traffic_Annual_Report_${selectedYear}.pdf`);
       toast.success(t('reports_annual_success'));
       setShowAnnualModal(false);
@@ -157,11 +186,13 @@ const Reports = () => {
     }
   };
 
-  // Generate Excel Report
-  const handleGenerateExcelReport = () => {
+  // Generate Excel Report — fetches ALL records from ALL days (no date restriction)
+  const handleGenerateExcelReport = async () => {
     try {
       setGenerating(true);
-      const formattedData = formatIncidentDataForExcel(incidents, emergencies);
+      const { reportIncidents, reportEmergencies } = await fetchReportData();
+
+      const formattedData = formatIncidentDataForExcel(reportIncidents, reportEmergencies);
       const timestamp = new Date().toISOString().slice(0, 10);
       generateExcelReport(formattedData, `RNP_Traffic_Complete_Report_${timestamp}.xlsx`);
       toast.success('Excel report generated successfully');

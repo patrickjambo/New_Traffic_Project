@@ -164,7 +164,7 @@ const reportIncident = async (req, res) => {
  */
 const getNearbyIncidents = async (req, res) => {
     try {
-        const { latitude, longitude, radius, status, type, limit, offset } = req.query;
+        const { latitude, longitude, radius, status, type, limit, offset, startDate, endDate, includeResolved } = req.query;
 
         // 🎯 District filtering for district_admin and co_admin
         // JWT token stores districtId (camelCase), DB queries may use district_id
@@ -249,11 +249,29 @@ const getNearbyIncidents = async (req, res) => {
             params.push(userDistrictId);
         }
 
-        // Add status filter
+        // Date filter: today by default.
+        // Pass startDate+endDate for a date range (e.g. monthly PDF).
+        // Pass includeResolved=true with no dates to fetch ALL days (Excel full export).
+        if (startDate && endDate) {
+            paramCount++;
+            queryText += ` AND i.created_at >= $${paramCount}`;
+            params.push(startDate);
+            paramCount++;
+            queryText += ` AND i.created_at <= $${paramCount}`;
+            params.push(endDate);
+        } else if (includeResolved !== 'true') {
+            queryText += ` AND DATE(i.created_at) = CURRENT_DATE`;
+        }
+
+        // Status filter: hide resolved/dismissed from live dashboards by default.
+        // Pass an explicit status param to target a specific status.
+        // Pass includeResolved=true (e.g. for report downloads) to skip the exclusion.
         if (status) {
             paramCount++;
             queryText += ` AND i.status = $${paramCount}`;
             params.push(status);
+        } else if (includeResolved !== 'true') {
+            queryText += ` AND i.status NOT IN ('resolved', 'dismissed')`;
         }
 
         // Add type filter

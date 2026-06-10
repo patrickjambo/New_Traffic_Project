@@ -37,29 +37,19 @@ const DashboardPage = () => {
 
   // Calculate real-time stats from actual data
   const realTimeStats = useMemo(() => {
-    const isResolved = (status) => ['resolved', 'closed', 'completed'].includes((status || '').toLowerCase());
-    const isActive = (status) => !isResolved(status);
+    const isActive = (status) => !['resolved', 'dismissed', 'closed', 'completed', 'cancelled'].includes((status || '').toLowerCase());
 
     const activeIncidents = incidents.filter(i => isActive(i.status));
     const criticalCount = activeIncidents.filter(i => i.severity === 'critical' || i.severity === 'high').length;
-    
-    let resolvedTodayCount = 0;
-    const todayStr = new Date().toDateString();
 
-    const countIfResolvedToday = (item) => {
-      if (isResolved(item.status)) {
-        const updated = new Date(item.updated_at || item.created_at || new Date());
-        if (updated.toDateString() === todayStr) resolvedTodayCount++;
-      }
-    };
-
-    incidents.forEach(countIfResolvedToday);
-    emergencies.forEach(countIfResolvedToday);
+    // resolved_today comes from the statistics API (incidents + emergencies combined)
+    // — the local arrays no longer contain resolved items so we rely on the server count
+    const resolvedToday = statistics?.resolved_today ?? 0;
 
     return {
       activeIncidents: activeIncidents.length,
       criticalCount,
-      resolvedToday: resolvedTodayCount,
+      resolvedToday,
       avgResponseTime: statistics?.avg_response_time || 0,
       totalIncidents: (statistics?.total_incidents || 0) + emergencies.length,
     };

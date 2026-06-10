@@ -103,6 +103,7 @@ const HospitalDashboardPage = () => {
 
     const [emergencies, setEmergencies] = useState([]);
     const [aiIncidents, setAiIncidents] = useState([]);
+    const [resolvedToday, setResolvedToday] = useState(0);
     const [stats, setStats] = useState({ total: 0, ambulance: 0, medical: 0, ai: 0, critical: 0, pending: 0 });
     const [notifications, setNotifications] = useState([]);
     const unreadCount = notifications.filter(n => !n.read).length;
@@ -144,14 +145,36 @@ const HospitalDashboardPage = () => {
     const fetchAll = useCallback(async (silent = false) => {
         try {
             if (!silent) setLoading(true);
+
+            // Fetch today's full data including resolved — needed for the resolved-today count
+            const todayStart = new Date();
+            todayStart.setHours(0, 0, 0, 0);
+            const todayEnd = new Date();
+            todayEnd.setHours(23, 59, 59, 999);
+
             const [emRes, incRes] = await Promise.all([
-                axios.get('/api/emergency', { params: { limit: 100 } }),
+                axios.get('/api/emergency', {
+                    params: {
+                        startDate: todayStart.toISOString(),
+                        endDate: todayEnd.toISOString(),
+                        includeResolved: 'true',
+                        limit: 500,
+                    }
+                }),
                 axios.get('/api/incidents', { params: { limit: 50 } }),
             ]);
 
-            const allEm = emRes.data?.data || [];
-            // Hospital admin: only ambulance/medical emergencies that are still active
-            const emList = allEm.filter(needsSiren).filter(e => e.status !== 'resolved' && e.status !== 'cancelled');
+            const allTodayEm = emRes.data?.data || [];
+
+            // Active list — for display (no resolved/cancelled)
+            const emList = allTodayEm
+                .filter(needsSiren)
+                .filter(e => e.status !== 'resolved' && e.status !== 'cancelled');
+
+            // Resolved today count — all resolved/cancelled that needed a siren
+            const resolvedCount = allTodayEm
+                .filter(e => e.status === 'resolved' || e.status === 'cancelled')
+                .filter(needsSiren).length;
 
             const incList = (incRes.data?.data || incRes.data || []);
             const aiList = Array.isArray(incList)
@@ -160,6 +183,7 @@ const HospitalDashboardPage = () => {
 
             setEmergencies(emList);
             setAiIncidents(aiList);
+            setResolvedToday(resolvedCount);
             computeStats(emList, aiList);
             setLastUpdated(new Date());
         } catch (err) {
@@ -212,6 +236,9 @@ const HospitalDashboardPage = () => {
             const newStatus = data.status;
             if (newStatus === 'resolved' || newStatus === 'cancelled') {
                 setEmergencies(prev => {
+                    // Only increment resolved count if the item was visible (needed siren)
+                    const wasVisible = prev.some(e => (e.id === emId || e.id === parseInt(emId)) && needsSiren(e));
+                    if (wasVisible) setResolvedToday(c => c + 1);
                     const updated = prev.filter(e => e.id !== emId && e.id !== parseInt(emId));
                     computeStats(updated, aiIncidents);
                     return updated;
@@ -230,6 +257,8 @@ const HospitalDashboardPage = () => {
             const newStatus = data.newStatus || data.status;
             if (newStatus === 'resolved' || newStatus === 'cancelled') {
                 setEmergencies(prev => {
+                    const wasVisible = prev.some(e => (e.id === emId || e.id === parseInt(emId)) && needsSiren(e));
+                    if (wasVisible) setResolvedToday(c => c + 1);
                     const updated = prev.filter(e => e.id !== emId && e.id !== parseInt(emId));
                     computeStats(updated, aiIncidents);
                     return updated;
@@ -372,6 +401,7 @@ const HospitalDashboardPage = () => {
         { label: 'AI Detected', value: stats.ai, icon: Zap, color: 'text-violet-400', bg: 'bg-violet-500/10', border: 'border-violet-500/20', tab: 'ai' },
         { label: 'Critical Alerts', value: stats.critical, icon: AlertTriangle, color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/20', tab: 'critical' },
         { label: 'Awaiting Response', value: stats.pending, icon: Radio, color: 'text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/20', tab: 'pending' },
+        { label: 'Resolved Today', value: resolvedToday, icon: CheckCircle2, color: 'text-green-400', bg: 'bg-green-500/10', border: 'border-green-500/20', tab: 'all' },
     ];
 
     return (
@@ -490,7 +520,7 @@ const HospitalDashboardPage = () => {
             <main className="flex-1 overflow-y-auto p-6 space-y-6">
 
                 {/* Stats Grid — clickable, navigate to filtered feed */}
-                <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-4">
+                <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-7 gap-4">
                     {statCards.map((card, i) => (
                         <button
                             key={i}

@@ -589,22 +589,36 @@ const getUserIncidents = async (req, res) => {
  */
 const getIncidentStatistics = async (req, res) => {
     try {
-        const stats = await query(`
-            SELECT
-                COUNT(*) as total_incidents,
-                COUNT(*) FILTER (WHERE status != 'resolved') as active_reports,
-                COUNT(*) FILTER (WHERE status = 'resolved' AND DATE(updated_at) = CURRENT_DATE) as resolved_today,
-                AVG(EXTRACT(EPOCH FROM (updated_at - created_at))/3600) FILTER (WHERE status = 'resolved') as avg_response_time
-            FROM incidents
-        `);
+        const [incStats, emStats] = await Promise.all([
+            query(`
+                SELECT
+                    COUNT(*) as total_incidents,
+                    COUNT(*) FILTER (WHERE status NOT IN ('resolved','dismissed') AND DATE(created_at) = CURRENT_DATE) as active_reports,
+                    COUNT(*) FILTER (WHERE status IN ('resolved','dismissed') AND DATE(updated_at) = CURRENT_DATE) as incidents_resolved_today,
+                    AVG(EXTRACT(EPOCH FROM (updated_at - created_at))/3600)
+                        FILTER (WHERE status = 'resolved' AND DATE(updated_at) = CURRENT_DATE) as avg_response_time
+                FROM incidents
+            `),
+            query(`
+                SELECT COUNT(*) as emergencies_resolved_today
+                FROM emergencies
+                WHERE status IN ('resolved','cancelled')
+                  AND DATE(COALESCE(updated_at, created_at)) = CURRENT_DATE
+            `)
+        ]);
+
+        const incRow = incStats.rows[0];
+        const emRow  = emStats.rows[0];
 
         res.json({
             success: true,
             data: {
-                total_incidents: parseInt(stats.rows[0].total_incidents) || 0,
-                active_reports: parseInt(stats.rows[0].active_reports) || 0,
-                mobile_captures: 0, // Placeholder until source column is added
-                avg_response_time: Math.round(parseFloat(stats.rows[0].avg_response_time) || 0)
+                total_incidents: parseInt(incRow.total_incidents) || 0,
+                active_reports: parseInt(incRow.active_reports) || 0,
+                mobile_captures: 0,
+                avg_response_time: Math.round(parseFloat(incRow.avg_response_time) || 0),
+                resolved_today: (parseInt(incRow.incidents_resolved_today) || 0) +
+                                (parseInt(emRow.emergencies_resolved_today) || 0)
             }
         });
     } catch (error) {

@@ -50,21 +50,17 @@ class SocketManager {
             socket.on('disconnect', (reason) => {
                 const clientData = this.connectedClients.get(socket.id);
                 console.log(`❌ Client disconnected: ${socket.id} (${reason})`);
-                
-                // If this was a police officer, notify admins they went offline
-                if (clientData && clientData.role === 'police' && clientData.userId) {
-                    this.io.to('role:admin').emit('officer:offline', {
-                        officerId: clientData.userId,
-                        disconnectedAt: new Date().toISOString(),
-                        reason: reason,
-                    });
-                    console.log(`📴 Officer ${clientData.userId} went OFFLINE`);
-                    
-                    // Update DB: mark officer as offline
-                    this._setOfficerOnlineStatus(clientData.userId, false)
-                        .catch(err => console.error('Error setting officer offline:', err));
+
+                // If this was a police officer (role set via join:role OR auto-detected from location_update)
+                const isOfficer = clientData && clientData.userId &&
+                    (clientData.role === 'police' || clientData._notifiedOnline);
+
+                if (isOfficer) {
+                    // Use forceOfficerOffline so we: emit offline event + update DB + clean up
+                    this.forceOfficerOffline(clientData.userId)
+                        .catch(err => console.error('Error forcing officer offline on disconnect:', err));
                 }
-                
+
                 this.connectedClients.delete(socket.id);
             });
 
@@ -259,6 +255,15 @@ class SocketManager {
             // Heartbeat for connection health
             socket.on('ping', () => {
                 socket.emit('pong', { timestamp: Date.now() });
+            });
+
+            // Officer explicitly logging out from mobile app
+            socket.on('officer:logout', async (data) => {
+                const clientData = this.connectedClients.get(socket.id);
+                const officerId = data?.userId || clientData?.userId;
+                if (!officerId) return;
+                console.log(`📴 officer:logout event received for officer ${officerId}`);
+                await this.forceOfficerOffline(officerId);
             });
 
             // 🚨 Handle emergency accepted from mobile app (instant broadcast)
@@ -516,49 +521,62 @@ class SocketManager {
                     }
                 }
 
-                // 1. Collect all currently connected police officer userIds
-                const connectedOfficerIds = new Set();
-                this.connectedClients.forEach((clientData) => {
+                // 1. Collect connected police officers AND check which ones are actively sending location
+                const now = Date.now();
+                const STALE_MS = 45 * 1000; // 45 seconds without a location update = logged out
+
+                const activeOfficerIds = new Set();   // connected AND sending fresh locations
+                const staleSocketIds = [];             // connected sockets whose location is stale
+
+                this.connectedClients.forEach((clientData, socketId) => {
                     if (clientData.role === 'police' && clientData.userId) {
-                        connectedOfficerIds.add(clientData.userId);
+                        const lastLocTime = clientData.lastLocation?.timestamp
+                            ? new Date(clientData.lastLocation.timestamp).getTime()
+                            : 0;
+                        const isStale = (now - lastLocTime) > STALE_MS;
+
+                        if (isStale) {
+                            // Socket is lingering but officer stopped sending location = logged out
+                            staleSocketIds.push({ socketId, userId: clientData.userId });
+                        } else {
+                            activeOfficerIds.add(clientData.userId);
+                        }
                     }
                 });
 
-                const connectedArray = Array.from(connectedOfficerIds);
-                
-                // 2. Mark connected officers as online + refresh their timestamps
+                // Force-offline officers whose WebSocket is lingering but location is stale
+                for (const { userId } of staleSocketIds) {
+                    console.log(`📴 Healing loop: stale connected officer ${userId} → forcing offline`);
+                    await this.forceOfficerOffline(userId);
+                }
+
+                const connectedArray = Array.from(activeOfficerIds);
+
+                // 2. Mark ACTIVE (fresh-location) connected officers as online in DB
+                //    Never refresh location_updated_at here — only actual location events do that
                 if (connectedArray.length > 0) {
                     await dbQuery(`
-                        UPDATE officer_profiles 
-                        SET is_online = true, is_on_duty = true,
-                            location_updated_at = CASE 
-                                WHEN location_updated_at > NOW() - INTERVAL '2 minutes' THEN location_updated_at 
-                                ELSE NOW() 
-                            END,
-                            last_location_update = CASE 
-                                WHEN last_location_update > NOW() - INTERVAL '2 minutes' THEN last_location_update 
-                                ELSE NOW() 
-                            END
+                        UPDATE officer_profiles
+                        SET is_online = true, is_on_duty = true
                         WHERE user_id = ANY($1)
                     `, [connectedArray]);
                 }
 
-                // 3. Mark officers NOT connected as offline (if they were marked online)
-                //    Only if they have stale location (> 3 minutes) — more aggressive cleanup
+                // 3. Mark all officers with stale location as offline (both connected and disconnected)
                 if (connectedArray.length > 0) {
                     await dbQuery(`
-                        UPDATE officer_profiles 
+                        UPDATE officer_profiles
                         SET is_online = false
-                        WHERE is_online = true 
-                          AND location_updated_at < NOW() - INTERVAL '3 minutes'
+                        WHERE is_online = true
+                          AND location_updated_at < NOW() - INTERVAL '45 seconds'
                           AND user_id != ALL($1)
                     `, [connectedArray]);
                 } else {
                     await dbQuery(`
-                        UPDATE officer_profiles 
+                        UPDATE officer_profiles
                         SET is_online = false
-                        WHERE is_online = true 
-                          AND location_updated_at < NOW() - INTERVAL '3 minutes'
+                        WHERE is_online = true
+                          AND location_updated_at < NOW() - INTERVAL '45 seconds'
                     `);
                 }
 
@@ -1367,6 +1385,40 @@ class SocketManager {
             mismatches,
             healthy: mismatches.length === 0 && connectedOfficers.length >= 0,
         };
+    }
+
+    /**
+     * Immediately mark an officer as offline: emit officer:offline to all admins,
+     * update the DB, and forcibly disconnect the officer's socket.
+     * Called from the logout HTTP endpoint so the dashboard updates instantly.
+     */
+    async forceOfficerOffline(officerId) {
+        const numericId = Number(officerId);
+        if (!numericId) return;
+
+        // Emit to all admins immediately
+        this.io.to('role:admin').emit('officer:offline', {
+            officerId: numericId,
+            disconnectedAt: new Date().toISOString(),
+            reason: 'logout',
+        });
+
+        // Update DB
+        await this._setOfficerOnlineStatus(numericId, false);
+
+        // Find and disconnect the officer's socket
+        for (const [socketId, clientData] of this.connectedClients.entries()) {
+            if (clientData.userId === numericId || clientData.userId === officerId) {
+                const sock = this.io.sockets.sockets.get(socketId);
+                if (sock) {
+                    sock.disconnect(true);
+                    console.log(`🔌 Force-disconnected socket ${socketId} for officer ${numericId}`);
+                }
+                this.connectedClients.delete(socketId);
+            }
+        }
+
+        console.log(`📴 forceOfficerOffline: officer ${numericId} marked offline`);
     }
 
     /**

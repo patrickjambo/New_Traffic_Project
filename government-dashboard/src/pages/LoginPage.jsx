@@ -24,7 +24,8 @@ const LoginPage = () => {
     
     if (result.success) {
       toast.success('Login successful!');
-      navigate('/dashboard');
+      const role = JSON.parse(localStorage.getItem('user') || '{}').role;
+      navigate(role === 'hospital_admin' ? '/hospital' : '/dashboard');
     } else {
       setError(result.message || 'Login failed');
       toast.error(result.message || 'Login failed');

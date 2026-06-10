@@ -5,6 +5,7 @@ const fs = require('fs');
 const { validate, schemas } = require('../middleware/validator');
 const { authenticate } = require('../middleware/auth');
 const { register, login, getProfile, updateProfile, changePassword } = require('../controllers/authController');
+const socketManager = require('../services/socketManager');
 
 const router = express.Router();
 
@@ -73,5 +74,23 @@ router.put('/profile', authenticate, upload.single('profile_picture'), updatePro
  * @access  Private
  */
 router.put('/change-password', authenticate, changePassword);
+
+/**
+ * @route   POST /api/auth/logout
+ * @desc    Officer logout — immediately marks officer offline in real-time
+ * @access  Private
+ */
+router.post('/logout', authenticate, async (req, res) => {
+    try {
+        const officerId = req.user?.id || req.user?.userId;
+        if (officerId && req.user?.role === 'police') {
+            await socketManager.forceOfficerOffline(officerId);
+        }
+        res.json({ success: true, message: 'Logged out successfully' });
+    } catch (err) {
+        console.error('Logout error:', err);
+        res.json({ success: true, message: 'Logged out' }); // Always succeed
+    }
+});
 
 module.exports = router;

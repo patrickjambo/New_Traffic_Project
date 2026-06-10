@@ -21,6 +21,7 @@ import Profile from './pages/Profile';
 import DeploymentsPage from './pages/DeploymentsPage';
 import GeoFencingPage from './pages/GeoFencingPage';
 import OfficerManagement from './pages/OfficerManagement';
+import HospitalDashboardPage from './pages/HospitalDashboardPage';
 
 // Sidebar menu items definition (shared between sidebar and keyboard nav)
 const allMenuItems = [
@@ -103,6 +104,16 @@ function AppContent() {
   const { isAuthenticated, user } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
+
+  // Hospital admin gets their own isolated layout — never touches the police dashboard
+  if (isAuthenticated && user?.role === 'hospital_admin') {
+    return (
+      <Routes>
+        <Route path="/hospital" element={<ErrorBoundary><HospitalDashboardPage /></ErrorBoundary>} />
+        <Route path="*" element={<Navigate to="/hospital" replace />} />
+      </Routes>
+    );
+  }
 
   // Define routes that should use the admin dashboard layout
   const dashboardRoutes = [

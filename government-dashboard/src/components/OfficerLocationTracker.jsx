@@ -17,10 +17,13 @@ L.Icon.Default.mergeOptions({
 });
 
 // Create custom officer marker icon
-const createOfficerIcon = (isOnline, hasDeployment) => {
+// pixelOffset {pixelX, pixelY} shifts the icon visually without changing the GPS position
+const createOfficerIcon = (isOnline, hasDeployment, pixelOffset = null) => {
   const color = isOnline ? '#22c55e' : '#9ca3af';  // Green for online, gray for offline
   const border = hasDeployment ? '#06b6d4' : '#ffffff';  // Cyan for deployed, white otherwise
-  
+  const tx = pixelOffset?.pixelX || 0;
+  const ty = pixelOffset?.pixelY || 0;
+
   return L.divIcon({
     className: 'custom-officer-marker',
     html: `<div style="width:36px;height:36px;background-color:${color};border:3px solid ${border};border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 3px 10px rgba(0,0,0,0.3);${isOnline ? 'animation:pulse 2s infinite;' : ''}">
@@ -36,8 +39,9 @@ const createOfficerIcon = (isOnline, hasDeployment) => {
       }
     </style>`,
     iconSize: [36, 36],
-    iconAnchor: [18, 18],
-    popupAnchor: [0, -18],
+    // Shifting iconAnchor by (-tx, -ty) moves the visual icon (tx, ty) pixels from the GPS point
+    iconAnchor: [18 - tx, 18 - ty],
+    popupAnchor: [tx, -18 + ty],
   });
 };
 
@@ -169,15 +173,14 @@ const AutoFitBounds = ({ officers, officerLocations, adminLocation, adminLocatio
 };
 
 /**
- * Spread overlapping markers in a circle so all are visible.
- * Officers at the exact same (or very close) lat/lng get offset
- * in a ring pattern around the original point.
+ * For officers at the exact same (or very close) location, compute a small
+ * pixel-level visual offset so each marker is visible on screen.
+ * The GPS position itself is never changed — only the icon anchor shifts.
  */
 const spreadOverlappingMarkers = (officers, officerLocations) => {
-    const PROXIMITY_THRESHOLD = 0.0003; // ~30 meters — considered "same location"
-    const SPREAD_RADIUS = 0.0006;       // ~60 meters offset radius for the ring
+    const PROXIMITY_THRESHOLD = 0.0003; // ~30 metres — treated as "same location"
+    const PIXEL_STEP = 16;              // pixels between stacked markers
 
-    // Build position list: { officerId, lat, lng }
     const positions = [];
     officers.forEach(officer => {
         const location = officerLocations.get(officer.id) || officerLocations.get(String(officer.id));
@@ -191,12 +194,10 @@ const spreadOverlappingMarkers = (officers, officerLocations) => {
     // Group nearby officers together
     const groups = [];
     const used = new Set();
-
     positions.forEach((pos) => {
         if (used.has(pos.id)) return;
         const group = [pos];
         used.add(pos.id);
-
         positions.forEach((other) => {
             if (used.has(other.id)) return;
             if (
@@ -210,23 +211,20 @@ const spreadOverlappingMarkers = (officers, officerLocations) => {
         groups.push(group);
     });
 
-    // For groups with 2+ officers, spread them in a circle
-    const offsets = new Map(); // officerId -> { lat, lng }
+    // For groups with 2+ officers, spread icons horizontally in screen space
+    const offsets = new Map(); // officerId -> { pixelX, pixelY }
     groups.forEach((group) => {
-        if (group.length <= 1) return; // single officer, no offset needed
-        const centerLat = group.reduce((s, p) => s + p.lat, 0) / group.length;
-        const centerLng = group.reduce((s, p) => s + p.lng, 0) / group.length;
-
+        if (group.length <= 1) return;
+        const totalWidth = (group.length - 1) * PIXEL_STEP;
         group.forEach((pos, idx) => {
-            const angle = (2 * Math.PI * idx) / group.length;
             offsets.set(pos.id, {
-                lat: centerLat + SPREAD_RADIUS * Math.cos(angle),
-                lng: centerLng + SPREAD_RADIUS * Math.sin(angle),
+                pixelX: idx * PIXEL_STEP - totalWidth / 2,
+                pixelY: 0,
             });
         });
     });
 
-    return offsets; // Map<officerId, {lat, lng}>
+    return offsets; // Map<officerId, {pixelX, pixelY}>
 };
 
 /**
@@ -517,12 +515,12 @@ const OfficerLocationTracker = ({ officers = [], deployments = [], onOfficerClic
             const odId = Number(data.officerId);
             setOfficerLocations(prev => {
                 const newMap = new Map(prev);
-                const existing = newMap.get(odId);
-                if (existing) {
-                    newMap.set(odId, { ...existing, isOnline: false });
-                }
+                const existing = newMap.get(odId) || {};
+                // Always set the entry so the UI reflects offline regardless of prior state
+                newMap.set(odId, { ...existing, officerId: odId, isOnline: false, receivedAt: new Date() });
                 return newMap;
             });
+            setLastUpdate(new Date());
         });
 
         // Listen for officer duty status changes
@@ -1056,17 +1054,18 @@ const OfficerLocationTracker = ({ officers = [], deployments = [], onOfficerClic
                                 const location = officerLocations.get(officer.id) || officerLocations.get(String(officer.id));
                                 const rawLat = location?.latitude || officer.current_latitude;
                                 const rawLng = location?.longitude || officer.current_longitude;
-                                
+
                                 if (!rawLat || !rawLng) return null;
 
-                                // Use spread offset if officers overlap, otherwise use raw position
-                                const offset = markerOffsets.get(officer.id);
-                                const lat = offset ? offset.lat : parseFloat(rawLat);
-                                const lng = offset ? offset.lng : parseFloat(rawLng);
+                                // Always use exact GPS position — visual separation is handled by icon pixel offset
+                                const lat = parseFloat(rawLat);
+                                const lng = parseFloat(rawLng);
 
                                 const isOnline = location?.isOnline === true;
                                 const deployment = deployments.find(d => d.officers?.some(o => o.id === officer.id));
-                                const icon = createOfficerIcon(isOnline, !!deployment);
+                                // Pass pixel offset so overlapping icons stagger visually without moving the GPS pin
+                                const pixelOffset = markerOffsets.get(officer.id) || null;
+                                const icon = createOfficerIcon(isOnline, !!deployment, pixelOffset);
                                 const distance = getOfficerDistance(officer);
                                 const formattedDist = formatDistance(distance);
 

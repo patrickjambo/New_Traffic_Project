@@ -231,7 +231,7 @@ const Settings = () => {
   const getAvailableRoleFilters = () => {
     if (user?.role === 'admin') {
       // Super admin can see all except public
-      return ['all', 'co_admin', 'district_admin', 'police'];
+      return ['all', 'co_admin', 'district_admin', 'police', 'hospital_admin'];
     } else {
       // District admin can see police and co_admins
       return ['all', 'co_admin', 'police'];
@@ -241,8 +241,8 @@ const Settings = () => {
   // Get role options for changing a user's role
   const getRoleOptions = () => {
     if (user?.role === 'admin') {
-      // Super admin can assign co_admin, district_admin or police
-      return ['police', 'co_admin', 'district_admin'];
+      // Super admin can assign co_admin, district_admin, police, or hospital_admin
+      return ['police', 'co_admin', 'district_admin', 'hospital_admin'];
     } else {
       // District admin can assign police or co_admin
       return ['police', 'co_admin'];
@@ -255,6 +255,7 @@ const Settings = () => {
     co_admin: users.filter(u => u.role === 'co_admin').length,
     district_admin: users.filter(u => u.role === 'district_admin').length,
     police: users.filter(u => u.role === 'police').length,
+    hospital_admin: users.filter(u => u.role === 'hospital_admin').length,
   };
 
   return (
@@ -380,7 +381,7 @@ const Settings = () => {
                     roleFilter === role ? 'bg-cyan-600 text-white' : 'bg-slate-700/50 text-gray-400 hover:bg-slate-700 hover:text-white'
                   }`}
                 >
-                  {role === 'district_admin' ? 'District Admin' : role === 'co_admin' ? 'Co-Admin' : role} {role !== 'all' && `(${userStats[role] || 0})`}
+                  {role === 'district_admin' ? 'District Admin' : role === 'co_admin' ? 'Co-Admin' : role === 'hospital_admin' ? 'Hospital Admin' : role} {role !== 'all' && `(${userStats[role] || 0})`}
                 </button>
               ))}
             </div>
@@ -420,6 +421,7 @@ const Settings = () => {
                               u.role === 'co_admin' ? 'bg-gradient-to-br from-emerald-500 to-emerald-700' :
                               u.role === 'district_admin' ? 'bg-gradient-to-br from-cyan-500 to-cyan-700' :
                               u.role === 'police' ? 'bg-gradient-to-br from-cyan-400 to-cyan-600' :
+                              u.role === 'hospital_admin' ? 'bg-gradient-to-br from-red-500 to-red-700' :
                               'bg-gradient-to-br from-gray-500 to-gray-600'
                             }`}>
                               {u.full_name?.charAt(0)?.toUpperCase() || 'U'}
@@ -446,13 +448,14 @@ const Settings = () => {
                                 u.role === 'co_admin' ? 'border-emerald-500/50 text-emerald-400' :
                                 u.role === 'district_admin' ? 'border-cyan-600/50 text-cyan-400' :
                                 u.role === 'police' ? 'border-cyan-500/50 text-cyan-400' :
+                                u.role === 'hospital_admin' ? 'border-red-500/50 text-red-400' :
                                 'border-gray-500/50 text-gray-400'
                               }`}
                               style={{ backgroundColor: '#1e293b' }}
                             >
                               {getRoleOptions().map(opt => (
                                 <option key={opt} value={opt} className="bg-slate-800">
-                                  {opt === 'co_admin' ? 'CO-ADMIN' : opt === 'district_admin' ? 'DISTRICT ADMIN' : opt.toUpperCase()}
+                                  {opt === 'co_admin' ? 'CO-ADMIN' : opt === 'district_admin' ? 'DISTRICT ADMIN' : opt === 'hospital_admin' ? 'HOSPITAL ADMIN' : opt.toUpperCase()}
                                 </option>
                               ))}
                             </select>

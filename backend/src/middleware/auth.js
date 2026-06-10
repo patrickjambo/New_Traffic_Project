@@ -67,8 +67,8 @@ const authorize = (...roles) => {
             });
         }
 
-        // district_admin and co_admin have same backend access as admin
-        const effectiveRole = (req.user.role === 'district_admin' || req.user.role === 'co_admin') ? 'admin' : req.user.role;
+        // district_admin, co_admin, and hospital_admin have same backend access as admin
+        const effectiveRole = (req.user.role === 'district_admin' || req.user.role === 'co_admin' || req.user.role === 'hospital_admin') ? 'admin' : req.user.role;
         
         if (!allowedRoles.includes(req.user.role) && !allowedRoles.includes(effectiveRole)) {
             return res.status(403).json({

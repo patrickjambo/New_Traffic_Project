@@ -973,7 +973,7 @@ const DeploymentsPage = () => {
                                                 <div className={`flex items-center gap-2 text-[11px] font-bold ${formData.linkedEvent?.id === event.id && formData.linkedEvent?.eventType === event.eventType ? 'text-cyan-100' : 'text-gray-500'
                                                     }`}>
                                                     <MapPin className={`w-3.5 h-3.5 ${formData.linkedEvent?.id === event.id ? 'text-white' : 'text-cyan-500'}`} />
-                                                    <span className="truncate">{event.location || `Current Location (${event.latitude?.toFixed(4) || '-1.5043'}, ${event.longitude?.toFixed(4) || '29.6380'})`}</span>
+                                                    <span className="truncate">{event.location || `Current Location (${event.latitude ? parseFloat(event.latitude).toFixed(4) : '-1.5043'}, ${event.longitude ? parseFloat(event.longitude).toFixed(4) : '29.6380'})`}</span>
                                                 </div>
                                             </div>
                                         ))

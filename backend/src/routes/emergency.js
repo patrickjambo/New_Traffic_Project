@@ -103,7 +103,7 @@ router.get('/my-emergencies', authenticate, getUserEmergencies);
  * @desc    Get emergency statistics
  * @access  Private (Police/Admin)
  */
-router.get('/stats', authenticate, authorize('police', 'admin'), getEmergencyStats);
+router.get('/stats', authenticate, authorize('police', 'admin', 'hospital_admin'), getEmergencyStats);
 
 /**
  * @route   GET /api/emergency/:id

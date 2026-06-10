@@ -385,17 +385,17 @@ function generateIncidentDescription(aiResults) {
     // 🔥 Special description for FIRE
     if (incidentType === 'fire') {
         const firePercent = aiResults.fire_percentage?.toFixed(1) || 'N/A';
-        return `🔥 AI DETECTED FIRE/BURNING VEHICLE — Detected: ${detectedAtHuman}. ${aiResults.fire_frames || 0} frames with fire (${firePercent}% coverage). ${vehicles} vehicles nearby. Confidence: ${confidence}%. IMMEDIATE RESPONSE REQUIRED.`;
+        return `🔥 AI DETECTED FIRE — Detected: ${detectedAtHuman}. ${aiResults.fire_frames || 0} frames with fire (${firePercent}% coverage). ${vehicles} vehicles nearby. Confidence: ${confidence}%. IMMEDIATE RESPONSE REQUIRED. Services needed: Police, Ambulance, Fire Brigade.`;
     }
-    
+
     // 🚨 Accident description
     if (incidentType === 'accident') {
         return `🚨 AI DETECTED ACCIDENT — Detected: ${detectedAtHuman}. ${vehicles} vehicles involved, multiple stopped vehicles detected. Confidence: ${confidence}%. Emergency response needed.`;
     }
-    
+
     // 🚗 Traffic jam description
     if (incidentType === 'traffic_jam' || incidentType === 'congestion') {
-        return `🚗 AI DETECTED TRAFFIC JAM — Detected: ${detectedAtHuman}. ${vehicles} vehicles, moving slowly or stopped. Confidence: ${confidence}%. Traffic management required.`;
+        return `🚗 AI DETECTED TRAFFIC JAM — Detected: ${detectedAtHuman}. ${vehicles} vehicles, moving slowly or stopped. Confidence: ${confidence}%. Traffic management required. Services needed: Police.`;
     }
     
     // Default description
@@ -481,8 +481,8 @@ async function createAutomaticEmergency(incident, aiResults, latitude, longitude
         // 🔥 FIRE - Highest priority emergency
         if (incident.type === 'fire') {
             emergencyType = 'fire';
-            servicesNeeded = ['fire_department', 'ambulance', 'police'];
-            description = `🔥 AI DETECTED FIRE/BURNING VEHICLE at ${emergencyTime} in Kigali. Fire coverage: ${aiResults.fire_percentage?.toFixed(1) || 'N/A'}%. ${aiResults.vehicles_detected || 0} vehicles nearby. Confidence: ${Math.round((aiResults.confidence || 0) * 100)}%. IMMEDIATE fire response required.`;
+            servicesNeeded = ['police', 'ambulance', 'fire_brigade'];
+            description = `🔥 AI DETECTED FIRE at ${emergencyTime} in Kigali. Fire coverage: ${aiResults.fire_percentage?.toFixed(1) || 'N/A'}%. ${aiResults.vehicles_detected || 0} vehicles nearby. Confidence: ${Math.round((aiResults.confidence || 0) * 100)}%. IMMEDIATE fire response required. Services needed: Police, Ambulance, Fire Brigade.`;
         } else if (incident.type === 'accident') {
             emergencyType = 'accident';
             servicesNeeded = ['police', 'ambulance'];
@@ -493,8 +493,8 @@ async function createAutomaticEmergency(incident, aiResults, latitude, longitude
             description = `🚧 AI DETECTED ROAD BLOCKAGE at ${emergencyTime} in Kigali. ${aiResults.vehicles_detected || 0} vehicles affected. Traffic control needed.`;
         } else if (incident.type === 'traffic_jam' || incident.type === 'congestion') {
             emergencyType = 'traffic';
-            servicesNeeded = ['traffic_police'];
-            description = `� AI DETECTED TRAFFIC JAM at ${emergencyTime} in Kigali. ${aiResults.vehicles_detected || 0} vehicles in frame. Confidence: ${Math.round((aiResults.confidence || 0) * 100)}%. Traffic management required.`;
+            servicesNeeded = ['police'];
+            description = `🚗 AI DETECTED TRAFFIC JAM at ${emergencyTime} in Kigali. ${aiResults.vehicles_detected || 0} vehicles in frame. Confidence: ${Math.round((aiResults.confidence || 0) * 100)}%. Traffic management required. Services needed: Police.`;
         }
 
         const emergencyLat = latitude || incident.latitude || -1.9536;

@@ -398,7 +398,35 @@ const Emergency = () => {
                     </div>
 
                     <h3 className="text-xl font-bold text-white mb-2">{emergency.emergency_type}</h3>
-                    <p className="text-gray-300 mb-4">{emergency.description}</p>
+                    <p className="text-gray-300 mb-3">{emergency.description}</p>
+
+                    {/* Services Needed Badges */}
+                    {(() => {
+                      let services = [];
+                      try {
+                        services = Array.isArray(emergency.services_needed)
+                          ? emergency.services_needed
+                          : JSON.parse(emergency.services_needed || '[]');
+                      } catch {}
+                      const serviceColors = {
+                        police: 'bg-blue-500/20 text-blue-300 border-blue-500/30',
+                        ambulance: 'bg-red-500/20 text-red-300 border-red-500/30',
+                        fire_brigade: 'bg-orange-500/20 text-orange-300 border-orange-500/30',
+                        fire_department: 'bg-orange-500/20 text-orange-300 border-orange-500/30',
+                        traffic_police: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30',
+                      };
+                      if (services.length === 0) return null;
+                      return (
+                        <div className="flex flex-wrap gap-2 mb-3">
+                          <span className="text-xs text-gray-500 uppercase tracking-wider self-center">Services:</span>
+                          {services.map((s, i) => (
+                            <span key={i} className={`text-xs px-2.5 py-1 rounded-full border font-bold capitalize ${serviceColors[s] || 'bg-slate-500/20 text-slate-300 border-slate-500/30'}`}>
+                              {s.replace(/_/g, ' ')}
+                            </span>
+                          ))}
+                        </div>
+                      );
+                    })()}
 
                     <div className="flex flex-wrap gap-4 text-sm text-gray-400">
                       <div className="flex items-center gap-2 bg-slate-900/50 px-3 py-1.5 rounded-lg">

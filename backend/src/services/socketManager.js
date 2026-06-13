@@ -521,34 +521,21 @@ class SocketManager {
                     }
                 }
 
-                // 1. Collect connected police officers AND check which ones are actively sending location
-                const now = Date.now();
-                const STALE_MS = 45 * 1000; // 45 seconds without a location update = logged out
+                // 1. Collect ALL connected police officers.
+                //    A live WebSocket connection means the officer is logged in and
+                //    therefore ONLINE. They stay online until they explicitly log out
+                //    (officer:logout) or the socket actually disconnects (the 'disconnect'
+                //    event + the zombie-cleanup above both call forceOfficerOffline).
+                //    We deliberately do NOT force officers offline for not sending GPS
+                //    recently — a backgrounded or idle app still has a live connection
+                //    and must keep appearing online and receiving alerts.
+                const activeOfficerIds = new Set();   // every connected police officer
 
-                const activeOfficerIds = new Set();   // connected AND sending fresh locations
-                const staleSocketIds = [];             // connected sockets whose location is stale
-
-                this.connectedClients.forEach((clientData, socketId) => {
+                this.connectedClients.forEach((clientData) => {
                     if (clientData.role === 'police' && clientData.userId) {
-                        const lastLocTime = clientData.lastLocation?.timestamp
-                            ? new Date(clientData.lastLocation.timestamp).getTime()
-                            : (clientData.connectedAt?.getTime() || now);
-                        const isStale = (now - lastLocTime) > STALE_MS;
-
-                        if (isStale) {
-                            // Socket is lingering but officer stopped sending location = logged out
-                            staleSocketIds.push({ socketId, userId: clientData.userId });
-                        } else {
-                            activeOfficerIds.add(clientData.userId);
-                        }
+                        activeOfficerIds.add(clientData.userId);
                     }
                 });
-
-                // Force-offline officers whose WebSocket is lingering but location is stale
-                for (const { userId } of staleSocketIds) {
-                    console.log(`📴 Healing loop: stale connected officer ${userId} → forcing offline`);
-                    await this.forceOfficerOffline(userId);
-                }
 
                 const connectedArray = Array.from(activeOfficerIds);
 
@@ -562,13 +549,17 @@ class SocketManager {
                     `, [connectedArray]);
                 }
 
-                // 3. Mark all officers with stale location as offline (both connected and disconnected)
+                // 3. Reconcile DB with reality: mark offline ONLY officers flagged
+                //    online in the DB who have NO live socket connection. This is
+                //    purely connection-based — a connected officer is NEVER timed out
+                //    for stale GPS, so they cannot "fade" offline while logged in.
+                //    Genuine disconnects/logouts are handled instantly elsewhere; this
+                //    is just a backstop that clears officers whose socket is truly gone.
                 if (connectedArray.length > 0) {
                     await dbQuery(`
                         UPDATE officer_profiles
                         SET is_online = false
                         WHERE is_online = true
-                          AND location_updated_at < NOW() - INTERVAL '45 seconds'
                           AND user_id != ALL($1)
                     `, [connectedArray]);
                 } else {
@@ -576,7 +567,6 @@ class SocketManager {
                         UPDATE officer_profiles
                         SET is_online = false
                         WHERE is_online = true
-                          AND location_updated_at < NOW() - INTERVAL '45 seconds'
                     `);
                 }
 

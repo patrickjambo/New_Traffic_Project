@@ -970,7 +970,9 @@ const getOfficersWithDistance = async (req, res) => {
                 op.current_longitude,
                 op.location_updated_at,
                 op.is_on_duty,
-                CASE WHEN op.location_updated_at > NOW() - INTERVAL '2 minutes' THEN true ELSE false END as is_online,
+                -- Online status follows the live socket connection (is_online column),
+                -- NOT GPS freshness — a logged-in officer stays online even if idle.
+                COALESCE(op.is_online, false) as is_online,
                 -- Haversine formula to calculate distance in kilometers
                 (6371 * acos(cos(radians($1)) * cos(radians(op.current_latitude)) * 
                 cos(radians(op.current_longitude) - radians($2)) + 

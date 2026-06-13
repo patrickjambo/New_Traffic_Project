@@ -260,8 +260,8 @@ class GeoFencingService {
                             ))
                         )) as distance_km
                     FROM officer_profiles op
-                    WHERE 
-                        op.notification_enabled = TRUE
+                    WHERE
+                        (op.notification_enabled IS NOT FALSE)
                         AND ($4 OR op.is_on_duty = TRUE)
                         AND op.current_latitude IS NOT NULL
                         AND op.current_longitude IS NOT NULL
@@ -286,8 +286,8 @@ class GeoFencingService {
                     op.is_on_duty,
                     op.assigned_district_id
                 FROM officer_profiles op
-                WHERE 
-                    op.notification_enabled = TRUE
+                WHERE
+                    (op.notification_enabled IS NOT FALSE)
                     AND ($1 OR op.is_on_duty = TRUE)
                 ORDER BY op.location_updated_at DESC
                 LIMIT 50

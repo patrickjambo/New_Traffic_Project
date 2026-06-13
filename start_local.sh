@@ -195,6 +195,7 @@ NODE_ENV=development
 JWT_SECRET=trafficguard_jwt_secret_2024
 AI_SERVICE_URL=http://localhost:$AI_SERVICE_PORT
 FRONTEND_URL=http://localhost:$FRONTEND_PORT
+FIREBASE_SERVICE_ACCOUNT_PATH=$PROJECT_DIR/backend/config/firebase-service-account.json
 EOF
 
 kill_port $BACKEND_PORT

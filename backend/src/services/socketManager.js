@@ -532,7 +532,7 @@ class SocketManager {
                     if (clientData.role === 'police' && clientData.userId) {
                         const lastLocTime = clientData.lastLocation?.timestamp
                             ? new Date(clientData.lastLocation.timestamp).getTime()
-                            : 0;
+                            : (clientData.connectedAt?.getTime() || now);
                         const isStale = (now - lastLocTime) > STALE_MS;
 
                         if (isStale) {
@@ -820,22 +820,7 @@ class SocketManager {
         this.emitNotificationToRole('admin', emergencyNotification);
 
         console.log(`🚨 Emitted emergency:new + emergency:alarm - ID: ${emergency.id}`);
-
-        // PARALLEL: Send FCM push for background/closed apps
-        this._sendEmergencyFCMPush({
-            alertId: emergency.id,
-            emergencyId: emergency.id,
-            type: emergency.emergency_type,
-            title: `🚨 ${emergency.emergency_type?.toUpperCase() || 'EMERGENCY'}`,
-            message: emergency.description || 'Immediate response required!',
-            latitude: parseFloat(emergency.latitude),
-            longitude: parseFloat(emergency.longitude),
-            location_name: emergency.location_name,
-            severity: emergency.severity,
-            isEmergency: true
-        }).catch(err => {
-            console.log('⚠️ FCM push failed:', err.message);
-        });
+        // FCM push is handled by emergencyController after calling this method — no duplicate send here
     }
 
     /**

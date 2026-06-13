@@ -130,7 +130,7 @@ const createEmergency = async (req, res) => {
                 LEFT JOIN officer_profiles op ON u.id = op.user_id
                 WHERE u.role IN ('police', 'admin')
                 AND op.fcm_token IS NOT NULL
-                AND op.emergency_alert_enabled = true
+                AND (op.emergency_alert_enabled IS NOT FALSE)
             `);
             
             const officers = officersResult.rows;

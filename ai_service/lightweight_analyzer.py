@@ -752,6 +752,53 @@ class LightweightTrafficAnalyzer:
         }
 
     # =====================================================================
+    #  Person/Hand Distress Signal Detection
+    # =====================================================================
+    def _detect_person_distress(self, frame: np.ndarray) -> Dict[str, Any]:
+        """
+        Detect a hand or person prominently filling the frame.
+        When someone holds their hand up to the camera to signal an accident
+        or injury, large skin-tone regions dominate consistently.
+        """
+        h, w = frame.shape[:2]
+        if h == 0 or w == 0:
+            return {'detected': False, 'skin_pct': 0.0, 'largest_blob_pct': 0.0}
+
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+
+        # Skin color range in HSV — covers most human skin tones
+        skin_mask1 = cv2.inRange(hsv, np.array([0, 25, 70]),   np.array([20, 160, 255]))
+        skin_mask2 = cv2.inRange(hsv, np.array([160, 25, 70]), np.array([180, 160, 255]))
+        skin_mask = skin_mask1 | skin_mask2
+
+        # Close gaps between skin regions, then remove small noise
+        kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+        kernel_open  = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        skin_mask = cv2.morphologyEx(skin_mask, cv2.MORPH_CLOSE, kernel_close)
+        skin_mask = cv2.morphologyEx(skin_mask, cv2.MORPH_OPEN,  kernel_open)
+
+        total_pixels = h * w
+        skin_pixels  = cv2.countNonZero(skin_mask)
+        skin_pct     = skin_pixels / total_pixels * 100
+
+        # Find largest contiguous skin blob
+        contours, _ = cv2.findContours(skin_mask, cv2.RETR_EXTERNAL,
+                                        cv2.CHAIN_APPROX_SIMPLE)
+        largest_blob_pct = 0.0
+        if contours:
+            largest_area = max(cv2.contourArea(c) for c in contours)
+            largest_blob_pct = largest_area / total_pixels * 100
+
+        # Hand/person signal: skin covers ≥15% of frame AND largest blob ≥10%
+        detected = skin_pct >= 15.0 and largest_blob_pct >= 10.0
+
+        return {
+            'detected': detected,
+            'skin_pct': float(skin_pct),
+            'largest_blob_pct': float(largest_blob_pct),
+        }
+
+    # =====================================================================
     #  NEW: Edge-based Static Vehicle Detection (no background subtraction)
     # =====================================================================
     def _detect_vehicles_static(self, frame: np.ndarray) -> Dict[str, Any]:
@@ -1329,6 +1376,7 @@ class LightweightTrafficAnalyzer:
             tier1_pixel_history = []   # NEW: track strict fire pixel % per frame
             screen_fire_frames = 0     # Track screen-fire detections
             screen_tier2_history = []  # Track CLAHE+WB tier2 % per frame
+            person_distress_frames = 0  # Hand/person close to camera
             
             # NEW: Per-frame motion deltas for deceleration curve
             motion_history = []
@@ -1404,7 +1452,12 @@ class LightweightTrafficAnalyzer:
                     
                     # 🔥 Fire detection
                     fire_analysis = self._detect_fire(frame)
-                    
+
+                    # 🤚 Person/hand distress detection
+                    distress = self._detect_person_distress(frame)
+                    if distress['detected']:
+                        person_distress_frames += 1
+
                     # Track frame brightness (for dark-frame gating)
                     avg_brightness = np.mean(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY))
                     brightness_history.append(avg_brightness)
@@ -1530,6 +1583,53 @@ class LightweightTrafficAnalyzer:
                 ((coverage_signal or texture_signal) and slow_flow_signal) or
                 (max_dense >= 4 and (coverage_signal or texture_signal))
             ) and scene_score >= 0.18
+
+            # ── PERSON / HAND DISTRESS SIGNAL ──────────────────────────────
+            # If a hand or person consistently fills the frame across ≥35% of
+            # analyzed frames, classify as accident (person signaling distress
+            # or showing an injury). Runs BEFORE the scene-rejection gate so
+            # hand-close-to-camera videos are never silently dropped.
+            # NOTE: fire (orange/red) overlaps the skin-tone HSV range, so fire
+            # videos can trip the distress detector. Fire ALWAYS wins — only
+            # treat a hand/person signal as an accident when there is no fire.
+            person_distress_ratio = person_distress_frames / max(frames_analyzed, 1)
+            if (person_distress_ratio >= 0.35 and frames_analyzed >= 2
+                    and not has_fire_evidence):
+                now = datetime.now()
+                confidence = round(min(0.82, 0.55 + person_distress_ratio * 0.4), 2)
+                detected_at = now.strftime("%Y-%m-%d %H:%M:%S")
+                return {
+                    "success": True,
+                    "incident_detected": True,
+                    "incident_type": "accident",
+                    "severity": "critical",
+                    "confidence": confidence,
+                    "vehicles_detected": 0,
+                    "avg_vehicles": 0.0,
+                    "duration_seconds": float(duration),
+                    "frames_analyzed": int(frames_analyzed),
+                    "description": (
+                        f"[{detected_at}] \U0001f91a PERSON IN DISTRESS — hand/person "
+                        f"signal detected in {person_distress_frames}/{frames_analyzed} frames. "
+                        f"Possible accident victim or injured person signaling for help."
+                    ),
+                    "fire_frames": 0,
+                    "fire_percentage": 0.0,
+                    "stopped_frames": 0,
+                    "collision_indicators": 0,
+                    "high_density_frames": 0,
+                    "analysis_timestamp": now.isoformat(),
+                    "detected_at": detected_at,
+                    "detected_at_human": now.strftime("%B %d, %Y at %I:%M:%S %p"),
+                    "dense_vehicle_estimate": 0,
+                    "road_coverage_pct": 0.0,
+                    "avg_flow_speed": 0.0,
+                    "density_score": 0.0,
+                    "texture_density": 0.0,
+                    "scene_score": float(scene_score),
+                    "confirmed_vehicles_max": int(max_confirmed),
+                    "confirmed_vehicles_avg": float(avg_confirmed),
+                }
 
             if (not is_real_traffic_scene and max_confirmed < 2 and
                     not has_fire_evidence and not alternative_traffic_signals):
@@ -2256,6 +2356,8 @@ class LightweightTrafficAnalyzer:
         
         # Embed timestamp into description for reports
         if incident_detected and incident_type not in ('none', 'normal', 'error'):
+            # Policy: every AI-detected incident is escalated to critical.
+            severity = "critical"
             description = f"[{detected_at}] {description}"
         
         return {
@@ -2850,7 +2952,7 @@ class LightweightTrafficAnalyzer:
                     "success": True,
                     "incident_detected": True,
                     "incident_type": "fire",
-                    "severity": "critical" if fire_analysis['fire_percentage'] > 5.0 else "high",
+                    "severity": "critical",
                     "confidence": 0.80,
                     "vehicles_detected": 0,
                     "description": desc
@@ -2880,7 +2982,7 @@ class LightweightTrafficAnalyzer:
                     "success": True,
                     "incident_detected": True,
                     "incident_type": "congestion",
-                    "severity": "high",
+                    "severity": "critical",
                     "confidence": 0.7,
                     "vehicles_detected": vehicle_count,
                     "description": f"Heavy traffic congestion - {vehicle_count} vehicles detected"
@@ -2891,7 +2993,7 @@ class LightweightTrafficAnalyzer:
                     "success": True,
                     "incident_detected": True,
                     "incident_type": "congestion",
-                    "severity": "medium",
+                    "severity": "critical",
                     "confidence": 0.65,
                     "vehicles_detected": vehicle_count,
                     "description": f"Moderate traffic congestion - {vehicle_count} vehicles detected"

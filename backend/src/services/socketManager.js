@@ -65,9 +65,27 @@ class SocketManager {
             });
 
             // Join role-based room (police, admin, district_admin, co_admin, public)
-            socket.on('join:role', (data) => {
+            socket.on('join:role', async (data) => {
                 if (!data || typeof data !== 'object') return;
-                const { role, userId, districtId } = data;
+                let { role, userId, districtId } = data;
+
+                // CREDENTIAL-BASED ROLE: when a userId is present, the authoritative
+                // role is the one stored on that account (assigned by the admin when the
+                // account was created) — NOT whatever the client claims. This guarantees
+                // a police account ALWAYS joins role:police on login, even if the app
+                // connected without a role or sent 'public'. (Rooms are live-socket
+                // associations, so the join still happens at connect time — but which
+                // room is now decided by the account's role, automatically.)
+                if (userId) {
+                    try {
+                        const { query } = require('../config/database');
+                        const r = await query('SELECT role FROM users WHERE id = $1', [userId]);
+                        if (r.rows[0] && r.rows[0].role) role = r.rows[0].role;
+                    } catch (e) {
+                        console.error('join:role DB role lookup failed:', e.message);
+                    }
+                }
+
                 if (!role || !['police', 'admin', 'district_admin', 'co_admin', 'public'].includes(role)) return;
 
                 const roomName = `role:${role}`;
@@ -187,6 +205,17 @@ class SocketManager {
                     // If we have a userId sending location, they're a police officer
                     if (!clientData.role) clientData.role = 'police';
                 }
+
+                // Ensure this officer's socket is in the alert rooms. An officer can
+                // come "online" via location updates without ever emitting join:role
+                // (or after a socket reconnect), which would leave them connected but
+                // OUTSIDE role:police / user:<id> — showing online yet never receiving
+                // emergency alerts (only one phone gets alerted). socket.join is
+                // idempotent, so running it on every update guarantees that every
+                // online officer is in the rooms the alerts are broadcast to.
+                socket.join('role:police');
+                socket.join(`user:${userId}`);
+                this.updateClientRoom(socket.id, 'role:police');
 
                 const { latitude, longitude, accuracy, speed, heading, address, timestamp } = data;
                 
@@ -1145,8 +1174,21 @@ class SocketManager {
      */
     emitToUser(userId, event, data) {
         if (!this.io) return;
-        this.io.to(`user:${userId}`).emit(event, data);
-        console.log(`📤 Emitted ${event} to user:${userId}`);
+        // Robust delivery: target the user:<id> room AND every live socket we have
+        // tracked for this user. This way an officer who is connected but somehow
+        // not in their user room (race/reconnect) still receives the alert — so all
+        // nearby officers get alerted, not just the ones whose room join "stuck".
+        // socket.io de-duplicates recipients, so a socket in both is notified once.
+        let target = this.io.to(`user:${userId}`);
+        let directSockets = 0;
+        for (const [socketId, client] of this.connectedClients.entries()) {
+            if (client.userId != null && String(client.userId) === String(userId)) {
+                target = target.to(socketId);
+                directSockets++;
+            }
+        }
+        target.emit(event, data);
+        console.log(`📤 Emitted ${event} to user:${userId} (+${directSockets} live socket(s))`);
     }
 
     /**

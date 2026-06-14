@@ -482,7 +482,7 @@ async function createAutomaticEmergency(incident, aiResults, latitude, longitude
         if (incident.type === 'fire') {
             emergencyType = 'fire';
             servicesNeeded = ['police', 'ambulance', 'fire_brigade'];
-            description = `🔥 AI DETECTED FIRE at ${emergencyTime} in Kigali. Fire coverage: ${aiResults.fire_percentage?.toFixed(1) || 'N/A'}%. ${aiResults.vehicles_detected || 0} vehicles nearby. Confidence: ${Math.round((aiResults.confidence || 0) * 100)}%. IMMEDIATE fire response required. Services needed: Police, Ambulance, Fire Brigade.`;
+            description = `🔥 AI DETECTED FIRE at ${emergencyTime} in Kigali. Fire coverage: ${aiResults.fire_percentage?.toFixed(1) || 'N/A'}%. Confidence: ${Math.round((aiResults.confidence || 0) * 100)}%. IMMEDIATE fire response required. Services needed: Police, Ambulance, Fire Brigade.`;
         } else if (incident.type === 'accident') {
             emergencyType = 'accident';
             servicesNeeded = ['police', 'ambulance'];
